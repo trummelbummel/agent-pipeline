@@ -187,6 +187,12 @@ def test_process_claim_skips_predicted_answer_without_pipeline_decision(tmp_path
 
     output_root = tmp_path / "preprocessed_out"
     results_root = tmp_path / "results_out"
+    stale = results_root / "claim 8"
+    stale.mkdir(parents=True)
+    (stale / "predicted_answer.json").write_text(
+        '{"decision":"DENY","explanation":"fraud (benford chi_squared=1.0)"}',
+        encoding="utf-8",
+    )
     config = _config(tmp_path, results_dir=results_root)
     claim_out = PreprocessingPipeline(
         config,
@@ -460,7 +466,9 @@ def test_main_runs_workflow_with_injected_config_path(
 
     captured: dict[str, Any] = {}
 
-    def _fake_run(self: PreprocessingPipeline) -> list[Path]:
+    def _fake_run(
+        self: PreprocessingPipeline, source: Path | None = None
+    ) -> list[Path]:
         captured["data_dir"] = self._config.preprocessing.data_dir
         captured["preprocessed_dir"] = self._config.preprocessing.preprocessed_dir
         return []
@@ -475,3 +483,166 @@ def test_main_runs_workflow_with_injected_config_path(
 def test_main_returns_2_when_config_missing(tmp_path: Path) -> None:
     missing = tmp_path / "no-such-config.yaml"
     assert main(["--config", str(missing)]) == 2
+
+
+def test_run_with_claim_folder_processes_one(tmp_path: Path) -> None:
+    """R020: run(claim_folder) processes that folder only — siblings untouched."""
+    data_dir = tmp_path / "data"
+    output_root = tmp_path / "preprocessed_out"
+    claim1 = data_dir / "claim 1"
+    claim2 = data_dir / "claim 2"
+    _seed_minimal_claim(claim1)
+    _seed_minimal_claim(claim2, decision="DENY")
+    config = _config(data_dir, preprocessed_dir=output_root)
+    expected = _expected_artifacts(config)
+
+    written = PreprocessingPipeline(
+        config,
+        description_reader=_mock_description_reader(),
+        document_reader=_mock_document_reader(),
+    ).run(claim1)
+
+    assert [p.name for p in written] == ["claim 1"]
+    assert (output_root / "claim 1").is_dir()
+    assert sorted(p.name for p in (output_root / "claim 1").iterdir() if p.is_file()) == sorted(
+        expected
+    )
+    assert not (output_root / "claim 2").exists()
+
+
+def test_run_with_directory_batches(tmp_path: Path) -> None:
+    """R020: run(parent_dir) soft-fail batches under the caller-supplied path."""
+    # Parent is NOT config data_dir — proves discovery uses the Path argument.
+    parent = tmp_path / "external_batch"
+    config_data = tmp_path / "unused_config_data"
+    config_data.mkdir()
+    output_root = tmp_path / "preprocessed_out"
+    _seed_minimal_claim(parent / "claim 1")
+    _seed_minimal_claim(parent / "claim 2", decision="DENY")
+    config = _config(config_data, preprocessed_dir=output_root)
+
+    written = PreprocessingPipeline(
+        config,
+        description_reader=_mock_description_reader(),
+        document_reader=_mock_document_reader(),
+    ).run(parent)
+
+    assert sorted(p.name for p in written) == ["claim 1", "claim 2"]
+    assert (output_root / "claim 1").is_dir()
+    assert (output_root / "claim 2").is_dir()
+
+
+def test_run_none_uses_config_roots(tmp_path: Path) -> None:
+    """R020: run(None) discovers under config data_dir (Phase 03 regression)."""
+    data_dir = tmp_path / "data"
+    output_root = tmp_path / "preprocessed_out"
+    _seed_minimal_claim(data_dir / "claim 1")
+    config = _config(data_dir, preprocessed_dir=output_root)
+
+    written = PreprocessingPipeline(
+        config,
+        description_reader=_mock_description_reader(),
+        document_reader=_mock_document_reader(),
+    ).run(None)
+
+    assert [p.name for p in written] == ["claim 1"]
+    assert (output_root / "claim 1").is_dir()
+
+
+def test_cli_or_api_passes_path_from_outside(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R020: CLI --claim-id resolves under data_dir and calls process_then_analyze."""
+    from main import CliArgs, main
+
+    assert "claim_id" in CliArgs.model_fields
+
+    from compliance.workflows.claim_pipeline import ClaimPipeline
+    from compliance.workflows.pipeline import PreprocessingPipeline as PP
+
+    cfg_path = tmp_path / "config.yaml"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "claim 1").mkdir()
+    output_root = tmp_path / "preprocessed_out"
+    results = tmp_path / "results_out"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "preprocessing:",
+                f"  data_dir: {data_dir}",
+                "  document_formats: [webp, jpg, jpeg, png, pdf]",
+                "  confidence_threshold: 0.7",
+                f"  preprocessed_dir: {output_root}",
+                f"  results_dir: {results}",
+                "  artifacts:",
+                "    description: description.txt",
+                "    answer: answer.json",
+                "    supporting_document: supporting_document.md",
+                "    supporting_documents: supporting_documents.md",
+                "    document_metadata: document_metadata.json",
+                "extraction:",
+                "  model: test-model",
+                "  prompt: extract",
+                "classification:",
+                "  labels: [\"1\"]",
+                "  other_label: Other",
+                "  model: test-model",
+                "  prompt: classify",
+                "checking:",
+                "  model: test-model",
+                "  containment_prompt: check containment",
+                "  contradicts_prompt: check contradicts",
+                "analysis:",
+                "  coverage:",
+                "    labels: [\"1\"]",
+                "    other_label: None",
+                "    model: test-model",
+                "    prompt: classify",
+                "  cancellation_reason:",
+                "    labels: [\"1\"]",
+                "    other_label: None",
+                "    model: test-model",
+                "    prompt: classify",
+                "  cancellation_document:",
+                "    labels: [\"1\"]",
+                "    other_label: None",
+                "    model: test-model",
+                "    prompt: classify",
+                "  personal_effects_document:",
+                "    labels: [\"1\"]",
+                "    other_label: None",
+                "    model: test-model",
+                "    prompt: classify",
+                "  missed_departure_document:",
+                "    labels: [\"1\"]",
+                "    other_label: None",
+                "    model: test-model",
+                "    prompt: classify",
+                "ocr_retry:",
+                "  enabled: false",
+                "  model: test-vision",
+                "  prompt: ocr",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_pta(
+        claim_dir: Path,
+        preprocessing: PP,
+        claims: ClaimPipeline,
+    ) -> Path:
+        captured["claim_dir"] = claim_dir
+        captured["data_dir"] = preprocessing._config.preprocessing.data_dir
+        return results / "claim 1" / "analysis_result.json"
+
+    monkeypatch.setattr("main.process_then_analyze", _fake_pta)
+
+    assert main(["--config", str(cfg_path), "--claim-id", "claim 1"]) == 0
+    assert captured["claim_dir"] == data_dir / "claim 1"
+    assert captured["data_dir"] == str(data_dir)

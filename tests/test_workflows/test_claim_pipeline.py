@@ -578,7 +578,7 @@ def test_main_analyze_mode_invokes_claim_pipeline_run(
     cfg_path = _minimal_cli_config_yaml(tmp_path)
     calls: list[object] = []
 
-    def _fake_run(self: ClaimPipeline) -> list[Path]:
+    def _fake_run(self: ClaimPipeline, source: Path | None = None) -> list[Path]:
         calls.append(self)
         return []
 
@@ -599,7 +599,9 @@ def test_main_default_still_preprocess(
     cfg_path = _minimal_cli_config_yaml(tmp_path)
     calls: list[str] = []
 
-    def _fake_preprocess(self: PreprocessingPipeline) -> list[Path]:
+    def _fake_preprocess(
+        self: PreprocessingPipeline, source: Path | None = None
+    ) -> list[Path]:
         calls.append("preprocess")
         return []
 
@@ -607,4 +609,79 @@ def test_main_default_still_preprocess(
 
     assert main(["--config", str(cfg_path)]) == 0
     assert calls == ["preprocess"]
+
+
+def test_run_with_claim_folder_processes_one(tmp_path: Path) -> None:
+    """R020: ClaimPipeline.run(claim_folder) analyzes that folder only."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim1 = _seed_preprocessed_claim(config, claim_name="claim 1")
+    _seed_preprocessed_claim(config, claim_name="claim 2")
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    written = pipeline.run(claim1)
+
+    analysis_name = config.preprocessing.artifacts.analysis_result
+    results_root = Path(config.preprocessing.results_dir)
+    assert written == [results_root / "claim 1" / analysis_name]
+    assert (results_root / "claim 1" / analysis_name).is_file()
+    assert not (results_root / "claim 2" / analysis_name).exists()
+
+
+def test_run_with_directory_batches(tmp_path: Path) -> None:
+    """R020: ClaimPipeline.run(parent_dir) soft-fail batches under that Path."""
+    ClaimPipeline = _claim_pipeline_cls()
+    # Config preprocessed_dir is unused — caller Path drives discovery.
+    unused_root = tmp_path / "unused_preprocessed"
+    unused_root.mkdir()
+    parent = tmp_path / "external_preprocessed"
+    config = _config(
+        tmp_path / "data",
+        preprocessed_dir=unused_root,
+        results_dir=tmp_path / "results",
+    )
+    artifacts = config.preprocessing.artifacts
+    for name in ("claim 1", "claim 2"):
+        claim_dir = parent / name
+        claim_dir.mkdir(parents=True)
+        (claim_dir / artifacts.description).write_text(
+            "I had to cancel my flight to Paris because of a medical emergency.",
+            encoding="utf-8",
+        )
+        (claim_dir / artifacts.supporting_document).write_text(
+            "# Supporting document\n\nMedical certificate.\n",
+            encoding="utf-8",
+        )
+        (claim_dir / artifacts.supporting_documents).write_text(
+            "# Supporting documents\n\n_none_\n",
+            encoding="utf-8",
+        )
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    written = pipeline.run(parent)
+
+    analysis_name = artifacts.analysis_result
+    results_root = Path(config.preprocessing.results_dir)
+    expected = [
+        results_root / "claim 1" / analysis_name,
+        results_root / "claim 2" / analysis_name,
+    ]
+    assert sorted(written) == sorted(expected)
+
+
+def test_run_none_uses_config_roots(tmp_path: Path) -> None:
+    """R020: ClaimPipeline.run(None) discovers under config preprocessed_dir."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    _seed_preprocessed_claim(config, claim_name="claim 1")
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    written = pipeline.run(None)
+
+    analysis_name = config.preprocessing.artifacts.analysis_result
+    results_root = Path(config.preprocessing.results_dir)
+    assert written == [results_root / "claim 1" / analysis_name]
 

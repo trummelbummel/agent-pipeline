@@ -1,0 +1,70 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/theresa/Desktop/projects/compliance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, anyio-4.15.1, Faker-40.39.0
+collecting ... collected 7 items
+
+tests/test_workflows/test_pipeline.py::test_run_with_claim_folder_processes_one FAILED [ 14%]
+tests/test_workflows/test_pipeline.py::test_run_with_directory_batches FAILED [ 28%]
+tests/test_workflows/test_pipeline.py::test_run_none_uses_config_roots FAILED [ 42%]
+tests/test_workflows/test_pipeline.py::test_cli_or_api_passes_path_from_outside FAILED [ 57%]
+tests/test_workflows/test_claim_pipeline.py::test_run_with_claim_folder_processes_one FAILED [ 71%]
+tests/test_workflows/test_claim_pipeline.py::test_run_with_directory_batches FAILED [ 85%]
+tests/test_workflows/test_claim_pipeline.py::test_run_none_uses_config_roots FAILED [100%]
+
+=================================== FAILURES ===================================
+___________________ test_run_with_claim_folder_processes_one ___________________
+tests/test_workflows/test_pipeline.py:503: in test_run_with_claim_folder_processes_one
+    ).run(claim1)
+      ^^^^^^^^^^^
+E   TypeError: PreprocessingPipeline.run() takes 1 positional argument but 2 were given
+_______________________ test_run_with_directory_batches ________________________
+tests/test_workflows/test_pipeline.py:528: in test_run_with_directory_batches
+    ).run(parent)
+      ^^^^^^^^^^^
+E   TypeError: PreprocessingPipeline.run() takes 1 positional argument but 2 were given
+_______________________ test_run_none_uses_config_roots ________________________
+tests/test_workflows/test_pipeline.py:546: in test_run_none_uses_config_roots
+    ).run(None)
+      ^^^^^^^^^
+E   TypeError: PreprocessingPipeline.run() takes 1 positional argument but 2 were given
+___________________ test_cli_or_api_passes_path_from_outside ___________________
+.venv/lib/python3.12/site-packages/_pytest/monkeypatch.py:95: in annotated_getattr
+    obj = getattr(obj, name)
+          ^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'main' has no attribute 'process_then_analyze'
+
+The above exception was the direct cause of the following exception:
+tests/test_workflows/test_pipeline.py:642: in test_cli_or_api_passes_path_from_outside
+    monkeypatch.setattr("main.process_then_analyze", _fake_pta)
+.venv/lib/python3.12/site-packages/_pytest/monkeypatch.py:109: in derive_importpath
+    annotated_getattr(target, attr, ann=module)
+.venv/lib/python3.12/site-packages/_pytest/monkeypatch.py:97: in annotated_getattr
+    raise AttributeError(
+E   AttributeError: 'module' object at main has no attribute 'process_then_analyze'
+___________________ test_run_with_claim_folder_processes_one ___________________
+tests/test_workflows/test_claim_pipeline.py:623: in test_run_with_claim_folder_processes_one
+    written = pipeline.run(claim1)
+              ^^^^^^^^^^^^^^^^^^^^
+E   TypeError: ClaimPipeline.run() takes 1 positional argument but 2 were given
+_______________________ test_run_with_directory_batches ________________________
+tests/test_workflows/test_claim_pipeline.py:663: in test_run_with_directory_batches
+    written = pipeline.run(parent)
+              ^^^^^^^^^^^^^^^^^^^^
+E   TypeError: ClaimPipeline.run() takes 1 positional argument but 2 were given
+_______________________ test_run_none_uses_config_roots ________________________
+tests/test_workflows/test_claim_pipeline.py:682: in test_run_none_uses_config_roots
+    written = pipeline.run(None)
+              ^^^^^^^^^^^^^^^^^^
+E   TypeError: ClaimPipeline.run() takes 1 positional argument but 2 were given
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_pipeline.py::test_run_with_claim_folder_processes_one
+FAILED tests/test_workflows/test_pipeline.py::test_run_with_directory_batches
+FAILED tests/test_workflows/test_pipeline.py::test_run_none_uses_config_roots
+FAILED tests/test_workflows/test_pipeline.py::test_cli_or_api_passes_path_from_outside
+FAILED tests/test_workflows/test_claim_pipeline.py::test_run_with_claim_folder_processes_one
+FAILED tests/test_workflows/test_claim_pipeline.py::test_run_with_directory_batches
+FAILED tests/test_workflows/test_claim_pipeline.py::test_run_none_uses_config_roots
+============================== 7 failed in 2.11s ===============================

@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_pipeline.py::test_run_with_claim_folder_processes_one tests/test_workflows/test_pipeline.py::test_run_with_directory_batches tests/test_workflows/test_pipeline.py::test_run_none_uses_config_roots tests/test_workflows/test_claim_pipeline.py::test_run_with_claim_folder_processes_one -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_run_with_claim_folder_processes_one\nnot ok 2 - test_run_with_directory_batches\nnot ok 3 - test_run_none_uses_config_roots\nnot ok 4 - test_run_with_claim_folder_processes_one\n# tests 4\n# pass 0\n# fail 4\n",
+  "targetTest": "test_run_with_claim_folder_processes_one",
+  "targetFile": "tests/test_workflows/test_pipeline.py",
+  "expected": "PreprocessingPipeline.run(source: Path | None) accepts claim folder Path and processes that one claim only",
+  "actual": "TypeError: PreprocessingPipeline.run() takes 1 positional argument but 2 were given"
+}

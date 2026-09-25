@@ -75,11 +75,37 @@ class BookingData(NanAwareModel):
     cancellation: NanStr = _MISSING
 
 
+class DocumentMetaData(NanAwareModel):
+    """Extraction quality and signature metadata for one Docling document.
+
+    Persisted under the preprocessed claim tree as JSON. ``faulty_extraction``
+    and low ``extraction_probability`` both force ``human_in_the_loop``.
+
+    :param source_file: Basename of the source raster/PDF when known.
+    :param has_signature: True when DocumentFigureClassifier top class is signature.
+    :param extraction_probability: Aggregate Docling confidence in ``[0, 1]``.
+    :param faulty_extraction: True when ExtractionFailure flags unusable OCR text.
+    :param human_in_the_loop: True when review is required (faulty or low confidence).
+    :param failure_reasons: Machine-readable ExtractionFailure reason codes.
+    :param retry_used: True when a vision OCR retry was attempted after faulty Docling.
+    :param retry_model: Vision model name from config when a retry was attempted.
+    """
+
+    source_file: NanStr = _MISSING
+    has_signature: bool = False
+    extraction_probability: NanFloat = _MISSING
+    faulty_extraction: bool = False
+    human_in_the_loop: bool = False
+    failure_reasons: list[str] = Field(default_factory=list)
+    retry_used: bool = False
+    retry_model: NanStr = _MISSING
+
+
 class DocumentData(NanAwareModel):
     """Extensible document extraction target (D008) — not medical-specific.
 
-    Core person/date plus pipeline metadata; other keys go in ``fields``
-    or as top-level extras via ``extra='allow'``.
+    Core person/date plus Docling text; quality/signature live on ``metadata``.
+    Other keys go in ``fields`` or as top-level extras via ``extra='allow'``.
     """
 
     model_config = ConfigDict(ser_json_inf_nan="null", extra="allow")
@@ -87,11 +113,9 @@ class DocumentData(NanAwareModel):
     person: NanStr = _MISSING
     date: NanStr = _MISSING
     raw_text: NanStr = _MISSING
-    confidence: NanFloat = _MISSING
-    human_in_the_loop: bool = False
-    has_signature: bool = False
     timestamps: list[str] = Field(default_factory=list)
     fields: dict[str, Any] = Field(default_factory=dict)
+    metadata: DocumentMetaData = Field(default_factory=DocumentMetaData)
 
 
 class SourceFiles(NanAwareModel):
@@ -104,7 +128,7 @@ class SourceFiles(NanAwareModel):
 
 
 class ClaimBundle(NanAwareModel):
-    """Full structured claim payload written to processed.json.
+    """In-memory structured claim payload from readers/preprocessors.
 
     :param claim_id: Claim folder identifier.
     :param ground_truth: Parsed answer.json decision.

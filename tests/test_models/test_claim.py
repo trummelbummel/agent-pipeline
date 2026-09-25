@@ -6,6 +6,7 @@ from compliance.models import (
     BookingData,
     ClaimBundle,
     DocumentData,
+    DocumentMetaData,
     GroundTruth,
     SourceFiles,
     is_nan_scalar,
@@ -38,9 +39,30 @@ def test_document_data_core_person_date_defaults() -> None:
     assert is_nan_scalar(doc.person)
     assert is_nan_scalar(doc.date)
     assert is_nan_scalar(doc.raw_text)
-    assert is_nan_scalar(doc.confidence)
-    assert doc.human_in_the_loop is False
+    assert is_nan_scalar(doc.metadata.extraction_probability)
+    assert doc.metadata.human_in_the_loop is False
+    assert doc.metadata.faulty_extraction is False
+    assert doc.metadata.has_signature is False
     assert doc.fields == {}
+
+
+def test_document_metadata_model() -> None:
+    meta = DocumentMetaData(
+        source_file="scan.png",
+        has_signature=True,
+        extraction_probability=0.88,
+        faulty_extraction=True,
+        human_in_the_loop=True,
+        failure_reasons=["insufficient_substantive_text"],
+        retry_used=True,
+        retry_model="llava",
+    )
+    assert meta.has_signature is True
+    assert meta.faulty_extraction is True
+    assert meta.human_in_the_loop is True
+    assert meta.failure_reasons == ["insufficient_substantive_text"]
+    assert meta.retry_used is True
+    assert meta.retry_model == "llava"
 
 
 def test_document_data_arbitrary_fields_dict() -> None:

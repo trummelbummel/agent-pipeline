@@ -98,6 +98,19 @@ class BenfordConfig(BaseModel):
     chi_squared_threshold: float = 15.51
 
 
+class OcrRetryConfig(BaseModel):
+    """Vision-model OCR retry after ExtractionFailure flags Docling text as unusable.
+
+    :param enabled: When False, DocumentReader skips the vision retry path.
+    :param model: Ollama vision model name (config only — never hardcode in source).
+    :param prompt: Instruction to transcribe the document image into clean text.
+    """
+
+    enabled: bool = False
+    model: str = ""
+    prompt: str = ""
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration.
 
@@ -106,6 +119,7 @@ class AppConfig(BaseModel):
     :param classification: LLM model, labels, and prompt for case classification.
     :param checking: LLM model and prompts for claim containment/contradiction checks.
     :param benford: DCT-based Benford's Law image forensics parameters.
+    :param ocr_retry: Optional vision OCR retry after faulty Docling extraction.
     """
 
     preprocessing: PreprocessingConfig
@@ -113,6 +127,7 @@ class AppConfig(BaseModel):
     classification: ClassificationConfig
     checking: CheckingConfig
     benford: BenfordConfig = BenfordConfig()
+    ocr_retry: OcrRetryConfig = Field(default_factory=OcrRetryConfig)
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:

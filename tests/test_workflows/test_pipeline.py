@@ -393,6 +393,10 @@ def test_main_runs_workflow_with_injected_config_path(
                 "  model: test-model",
                 "  containment_prompt: check containment",
                 "  contradicts_prompt: check contradicts",
+                "ocr_retry:",
+                "  enabled: false",
+                "  model: test-vision",
+                "  prompt: ocr",
                 "",
             ]
         ),

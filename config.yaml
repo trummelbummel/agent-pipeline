@@ -60,3 +60,13 @@ benford:
   enabled: false
   block_size: 8
   chi_squared_threshold: 15.51
+
+ocr_retry:
+  # After ExtractionFailure flags Docling OCR as unusable, retry once with a
+  # vision model on the resolved PNG (skipped for PDF passthrough).
+  enabled: true
+  model: llama3.2-vision
+  prompt: |
+    Transcribe all readable text from this document image into clean markdown
+    or plain text. Preserve key-value lines and headings. Do not add commentary,
+    translation notes, or explanations — return only the document text.

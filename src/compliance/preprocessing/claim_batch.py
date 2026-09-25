@@ -5,15 +5,16 @@ import re
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
+from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
 from compliance.models.claim import (
+    _MISSING,
     BookingData,
     ClaimBundle,
     DocumentData,
     GroundTruth,
     SourceFiles,
+    is_nan_scalar,
 )
 from compliance.preprocessing.answer import AnswerReader
 from compliance.preprocessing.description import DescriptionReader
@@ -21,11 +22,13 @@ from compliance.preprocessing.document import DocumentReader
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.preprocessing.markdown import MarkdownReader
 from compliance.preprocessing.preprocessing import FormatConverter
+from compliance.tools.benford import BenfordLawChecker
 
 logger = logging.getLogger(__name__)
 
-_MISSING = np.nan
 _CLAIM_NUM = re.compile(r"(\d+)")
+_FRAUD_DENY = "DENY"
+_PREDICTABLE_DECISIONS = frozenset({"DENY", "APPROVE", "UNCERTAIN"})
 
 
 def _discover_claim_folders(data_dir: Path) -> list[Path]:
@@ -70,7 +73,7 @@ def _classify_files(claim_dir: Path, document_formats: list[str]) -> SourceFiles
         if not path.is_file():
             continue
         name = path.name
-        if name in {"answer.json", "description.txt", "processed.json"}:
+        if name in {"answer.json", "description.txt"}:
             continue
         suffix = path.suffix.lower().lstrip(".")
         if suffix == "md":
@@ -95,6 +98,25 @@ def _is_present(path_value: str | float) -> bool:
     return isinstance(path_value, str) and bool(path_value)
 
 
+def _document_decision_fields(document: DocumentData) -> tuple[str, str]:
+    """Extract decision/reason from a DocumentData (extras or fields).
+
+    :param document: Parsed document model.
+    :return: (decision, reason) with EXTRACTED/docling when no early deny.
+    """
+    decision = getattr(document, "decision", None)
+    reason = getattr(document, "reason", None)
+    if isinstance(decision, str) and decision:
+        reason_text = reason if isinstance(reason, str) and reason else "unspecified"
+        return decision, reason_text
+    field_decision = document.fields.get("decision")
+    field_reason = document.fields.get("reason")
+    if isinstance(field_decision, str) and field_decision:
+        reason_text = field_reason if isinstance(field_reason, str) and field_reason else "unspecified"
+        return field_decision, reason_text
+    return "EXTRACTED", "docling"
+
+
 def _read_ground_truth(answer_path: str | float, answer_reader: AnswerReader) -> GroundTruth:
     """Load GroundTruth, or a placeholder when answer.json is missing.
 
@@ -103,9 +125,24 @@ def _read_ground_truth(answer_path: str | float, answer_reader: AnswerReader) ->
     :return: GroundTruth model.
     """
     if not _is_present(answer_path):
-        logger.warning("Missing answer.json — using UNKNOWN decision")
+        log_branch_decision(
+            logger,
+            branch="ground_truth",
+            outcome="UNKNOWN",
+            reason="missing_answer_json",
+            level=logging.WARNING,
+        )
         return GroundTruth(decision="UNKNOWN")
-    return answer_reader.read(Path(str(answer_path)))  # type: ignore[return-value]
+    assert isinstance(answer_path, str)
+    ground_truth = answer_reader.read(Path(answer_path))
+    assert isinstance(ground_truth, GroundTruth)
+    log_branch_decision(
+        logger,
+        branch="ground_truth",
+        outcome=ground_truth.decision,
+        reason="answer_json",
+    )
+    return ground_truth
 
 
 def _read_markdowns(
@@ -129,13 +166,35 @@ def _read_markdowns(
         try:
             parsed = markdown_reader.read(path)
         except Exception as exc:
-            logger.warning("Markdown read failed for %s: %s", path.name, exc)
+            log_branch_decision(
+                logger,
+                branch="markdown",
+                outcome="SKIP",
+                reason="read_failed",
+                level=logging.WARNING,
+                file=path.name,
+                error=type(exc).__name__,
+            )
             continue
         assert isinstance(parsed, BookingData)
         if path.name.lower().startswith("supporting"):
             booking_data = parsed
+            log_branch_decision(
+                logger,
+                branch="markdown",
+                outcome="BOOKING",
+                reason="supporting_prefix",
+                file=path.name,
+            )
         else:
             internal_data.append(parsed)
+            log_branch_decision(
+                logger,
+                branch="markdown",
+                outcome="INTERNAL",
+                reason="non_supporting_md",
+                file=path.name,
+            )
 
     return booking_data, internal_data
 
@@ -154,15 +213,37 @@ def _read_description(
     :return: (description_booking, description_text).
     """
     if not _is_present(description_path):
+        log_branch_decision(
+            logger,
+            branch="description",
+            outcome="SKIP",
+            reason="missing_description",
+        )
         return BookingData(), _MISSING
 
-    path = Path(str(description_path))
+    assert isinstance(description_path, str)
+    path = Path(description_path)
     try:
         booking = description_reader.read(path)
         assert isinstance(booking, BookingData)
+        log_branch_decision(
+            logger,
+            branch="description",
+            outcome="EXTRACTED",
+            reason="llm_ok",
+            file=path.name,
+        )
         return booking, description_reader.last_raw_text
     except Exception as exc:
-        logger.warning("Description extraction failed for %s: %s", path, exc)
+        log_branch_decision(
+            logger,
+            branch="description",
+            outcome="RAW_FALLBACK",
+            reason="llm_failed",
+            level=logging.WARNING,
+            file=path.name,
+            error=type(exc).__name__,
+        )
         try:
             return BookingData(), path.read_text(encoding="utf-8")
         except OSError:
@@ -185,13 +266,91 @@ def _read_documents(
         try:
             parsed = document_reader.read(path)
         except Exception as exc:
-            logger.warning("Document extraction failed for %s: %s", path.name, exc)
+            log_branch_decision(
+                logger,
+                branch="document",
+                outcome="SKIP",
+                reason="read_failed",
+                level=logging.WARNING,
+                file=path.name,
+                error=type(exc).__name__,
+            )
             continue
         assert isinstance(parsed, DocumentData)
         documents.append(parsed)
-        logger.info("Extracted document %s (hitl=%s)", path.name, parsed.human_in_the_loop)
+        decision, reason = _document_decision_fields(parsed)
+        level = logging.WARNING if decision == _FRAUD_DENY else logging.INFO
+        confidence = parsed.metadata.extraction_probability
+        confidence_text = (
+            f"{float(confidence):.3f}"
+            if isinstance(confidence, (int, float)) and not is_nan_scalar(confidence)
+            else "nan"
+        )
+        log_branch_decision(
+            logger,
+            branch="document_result",
+            outcome=decision,
+            reason=reason,
+            level=level,
+            file=path.name,
+            hitl=parsed.metadata.human_in_the_loop,
+            faulty=parsed.metadata.faulty_extraction,
+            confidence=confidence_text,
+        )
     return documents
 
+
+def _claim_document_summary(bundle: ClaimBundle) -> dict[str, int]:
+    """Count document outcomes for claim-level decision logging.
+
+    :param bundle: Populated claim bundle.
+    :return: Counts keyed by outcome label.
+    """
+    fraud_denies = 0
+    hitl = 0
+    extracted = 0
+    for document in bundle.documents:
+        decision, _reason = _document_decision_fields(document)
+        if decision == _FRAUD_DENY:
+            fraud_denies += 1
+        elif document.metadata.human_in_the_loop:
+            hitl += 1
+        else:
+            extracted += 1
+    return {
+        "documents": len(bundle.documents),
+        "fraud_deny": fraud_denies,
+        "hitl": hitl,
+        "extracted": extracted,
+    }
+
+
+def _predicted_answer_from_bundle(bundle: ClaimBundle) -> GroundTruth | None:
+    """Derive a pipeline prediction from document-level decisions.
+
+    Prefers any ``DENY`` (e.g. Benford fraud) over other predicted labels.
+    Returns None when documents carry no predicted decision.
+
+    :param bundle: Populated claim bundle.
+    :return: Predicted GroundTruth, or None when nothing was decided yet.
+    """
+    predictions: list[GroundTruth] = []
+    for document in bundle.documents:
+        decision, reason = _document_decision_fields(document)
+        if decision not in _PREDICTABLE_DECISIONS:
+            continue
+        explanation: str | float = reason
+        chi_squared = document.fields.get("benford_chi_squared")
+        if reason == "fraud" and chi_squared is not None:
+            explanation = f"fraud (benford chi_squared={chi_squared})"
+        predictions.append(GroundTruth(decision=decision, explanation=explanation))
+
+    if not predictions:
+        return None
+    for prediction in predictions:
+        if prediction.decision == _FRAUD_DENY:
+            return prediction
+    return predictions[0]
 
 def _process_single_claim(
     claim_dir: Path,
@@ -228,10 +387,15 @@ def _process_single_claim(
 
     if document_reader is None:
         format_converter = FormatConverter(source_formats=prep.document_formats)
+        benford_checker = (
+            BenfordLawChecker(config.benford) if config.benford.enabled else None
+        )
         document_reader = DocumentReader(
             document_formats=prep.document_formats,
             confidence_threshold=prep.confidence_threshold,
             format_converter=format_converter,
+            benford_checker=benford_checker,
+            ocr_retry=config.ocr_retry,
         )
 
     ground_truth = _read_ground_truth(sources.answer_path, answer_reader)
@@ -242,7 +406,7 @@ def _process_single_claim(
     )
     documents = _read_documents(sources.document_paths, document_reader)
 
-    return ClaimBundle(
+    bundle = ClaimBundle(
         claim_id=claim_dir.name,
         ground_truth=ground_truth,
         booking_data=booking_data,
@@ -252,25 +416,27 @@ def _process_single_claim(
         description_text=description_text,
         source_files=sources,
     )
-
-
-def _write_processed(claim_dir: Path, bundle: ClaimBundle, output_filename: str) -> Path:
-    """Write ClaimBundle JSON to the claim folder.
-
-    :param claim_dir: Claim folder path.
-    :param bundle: Bundle to serialize.
-    :param output_filename: Output filename from config.
-    :return: Path written.
-    """
-    out_path = claim_dir / output_filename
-    out_path.write_text(bundle.model_dump_json(indent=2), encoding="utf-8")
-    return out_path
+    summary = _claim_document_summary(bundle)
+    log_branch_decision(
+        logger,
+        branch="claim_summary",
+        outcome=ground_truth.decision,
+        reason="bundle_complete",
+        claim=claim_dir.name,
+        documents=summary["documents"],
+        fraud_deny=summary["fraud_deny"],
+        hitl=summary["hitl"],
+        extracted=summary["extracted"],
+        markdown=len(sources.markdown_paths),
+    )
+    return bundle
 
 
 def run_pipeline(config: AppConfig, **reader_overrides: Any) -> list[ClaimBundle]:
-    """Discover claims, process each, and write processed.json per folder.
+    """Discover claims and process each into a ClaimBundle (no on-disk JSON dump).
 
     Extraction/Docling failures are logged; the run continues for remaining claims.
+    Durable preprocessed artifacts are written by ``PreprocessingPipeline``, not here.
 
     :param config: Loaded AppConfig.
     :param reader_overrides: Optional reader injections forwarded to ``_process_single_claim``.
@@ -285,19 +451,28 @@ def run_pipeline(config: AppConfig, **reader_overrides: Any) -> list[ClaimBundle
         logger.info("Processing %s", claim_dir.name)
         try:
             bundle = _process_single_claim(claim_dir, config, **reader_overrides)
-            out_path = _write_processed(
-                claim_dir,
-                bundle,
-                config.preprocessing.output_filename,
-            )
-            logger.info(
-                "Wrote %s (%d documents, %d internal md)",
-                out_path,
-                len(bundle.documents),
-                len(bundle.internal_data),
+            summary = _claim_document_summary(bundle)
+            log_branch_decision(
+                logger,
+                branch="pipeline_write",
+                outcome="PROCESSED",
+                reason="claim_bundle",
+                claim=claim_dir.name,
+                documents=summary["documents"],
+                fraud_deny=summary["fraud_deny"],
+                hitl=summary["hitl"],
             )
             bundles.append(bundle)
         except Exception as exc:
+            log_branch_decision(
+                logger,
+                branch="pipeline_write",
+                outcome="SKIP",
+                reason="claim_failed",
+                level=logging.ERROR,
+                claim=claim_dir.name,
+                error=type(exc).__name__,
+            )
             logger.exception("Failed to process %s: %s", claim_dir.name, exc)
 
     return bundles

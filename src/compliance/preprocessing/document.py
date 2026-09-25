@@ -6,11 +6,20 @@ import re
 from pathlib import Path
 from typing import Any
 
-from docling.document_converter import DocumentConverter
+import ollama
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import (
+    PictureClassificationLabel,
+    PdfPipelineOptions,
+)
+from docling.document_converter import DocumentConverter, ImageFormatOption, PdfFormatOption
 from pydantic import BaseModel
 
 from compliance.branch_log import log_branch_decision
-from compliance.models.claim import _MISSING, DocumentData
+from compliance.config.settings import OcrRetryConfig
+from compliance.llm.chat import ChatFn, response_content
+from compliance.models.claim import _MISSING, DocumentData, DocumentMetaData
+from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter, Preprocessor
 from compliance.preprocessing.reader import Reader
 from compliance.tools.benford import BenfordLawChecker, BenfordResult
@@ -21,13 +30,8 @@ _FRAUD_DENY = "DENY"
 _FRAUD_REASON = "fraud"
 _WHITESPACE = re.compile(r"\s+")
 _KV_LINE = re.compile(r"^([^:\n]+):\s*(.+)$")
-
-_SIGNATURE_PATTERNS = re.compile(
-    r"(?:firma|signature|sello|stamp|signé|signatur|suscrit[oa]|soussigné|"
-    r"je\s+soussigné|firmado|signed\s+by|dr\.\s*\w+|docteur\s+\w+|"
-    r"médico\s+tratante|praticien)",
-    re.IGNORECASE,
-)
+_SIGNATURE_CLASS = PictureClassificationLabel.SIGNATURE.value
+_IMAGE_RETRY_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 _TIMESTAMP_PATTERN = re.compile(
     r"\b("
@@ -48,13 +52,55 @@ _PERSON_KEYS = frozenset({"person", "name", "patient", "patient name", "claimant
 _DATE_KEYS = frozenset({"date", "fecha", "admission date", "visit date", "document date"})
 
 
+def _document_converter_with_picture_classification() -> DocumentConverter:
+    """Build a DocumentConverter with DocumentFigureClassifier enabled.
+
+    Picture classification runs via Docling's ``DocumentPictureClassifier`` enrichment
+    (``do_picture_classification``) so signatures are detected as figure classes, not
+    inferred from OCR text.
+
+    :return: Converter configured for IMAGE and PDF inputs.
+    """
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.generate_picture_images = True
+    pipeline_options.images_scale = 2
+    pipeline_options.do_picture_classification = True
+    return DocumentConverter(
+        format_options={
+            InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options),
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+        }
+    )
+
+
+def _has_signature_from_pictures(document: Any) -> bool:
+    """Return True when DocumentFigureClassifier labels any picture as signature.
+
+    Uses the top prediction on each ``PictureItem`` (``meta.classification``).
+
+    :param document: Docling ``DoclingDocument`` from a conversion result.
+    :return: Whether any picture's top class is ``signature``.
+    """
+    for picture in getattr(document, "pictures", None) or []:
+        meta = getattr(picture, "meta", None)
+        classification = getattr(meta, "classification", None) if meta is not None else None
+        predictions = getattr(classification, "predictions", None) if classification is not None else None
+        if not predictions:
+            continue
+        top = predictions[0]
+        if getattr(top, "class_name", None) == _SIGNATURE_CLASS:
+            return True
+    return False
+
+
 class DocumentPreprocessor(Preprocessor):
     """Clean Docling text and structure optional field candidates."""
 
     def preprocess(self, raw: Any) -> dict[str, Any]:
         """Normalize Docling output into DocumentData construction inputs.
 
-        :param raw: Dict with ``text`` and ``confidence`` from DocumentReader._load.
+        :param raw: Dict with ``text``, ``confidence``, and ``has_signature`` from
+            DocumentReader (signature comes from DocumentFigureClassifier).
         :return: Dict with cleaned text, confidence, person, date, has_signature, timestamps, fields.
         :raises TypeError: If raw is not a mapping.
         """
@@ -65,7 +111,6 @@ class DocumentPreprocessor(Preprocessor):
         text = str(raw.get("text", "") or "")
         cleaned = self._clean_text(text)
         person, date, fields = self._extract_candidates(cleaned)
-        has_signature = self._detect_signature(cleaned)
         timestamps = self._extract_timestamps(cleaned)
         confidence = raw.get("confidence", _MISSING)
         return {
@@ -73,7 +118,7 @@ class DocumentPreprocessor(Preprocessor):
             "confidence": confidence,
             "person": person,
             "date": date,
-            "has_signature": has_signature,
+            "has_signature": bool(raw.get("has_signature", False)),
             "timestamps": timestamps,
             "fields": fields,
         }
@@ -117,15 +162,6 @@ class DocumentPreprocessor(Preprocessor):
         return person, date, fields
 
     @staticmethod
-    def _detect_signature(text: str) -> bool:
-        """Check whether text contains signature-related indicators.
-
-        :param text: Cleaned document text.
-        :return: True when a signature pattern is found.
-        """
-        return bool(_SIGNATURE_PATTERNS.search(text))
-
-    @staticmethod
     def _extract_timestamps(text: str) -> list[str]:
         """Extract all date/timestamp occurrences from text.
 
@@ -153,6 +189,9 @@ class DocumentReader(Reader):
         preprocessor: Preprocessor | None = None,
         document_converter: DocumentConverter | None = None,
         benford_checker: BenfordLawChecker | None = None,
+        extraction_failure: ExtractionFailure | None = None,
+        ocr_retry: OcrRetryConfig | None = None,
+        retry_chat_fn: ChatFn | None = None,
     ) -> None:
         """Create a Docling-backed document reader.
 
@@ -161,15 +200,24 @@ class DocumentReader(Reader):
         :param format_converter: Converts raster formats to PNG before Docling.
         :param preprocessor: Optional override; defaults to DocumentPreprocessor.
         :param document_converter: Optional Docling converter (injectable for tests).
+            Defaults to a converter with DocumentFigureClassifier picture classification.
         :param benford_checker: Optional forensics check run on PNG before Docling;
             when conformity fails, Docling is skipped and DENY/fraud is returned.
+        :param extraction_failure: Detector for unusable OCR; defaults to ExtractionFailure().
+        :param ocr_retry: Optional vision-model retry config after faulty Docling OCR.
+        :param retry_chat_fn: Optional chat callable for vision retry; defaults to ollama.chat.
         """
         super().__init__(preprocessor or DocumentPreprocessor())
         self.document_formats = [fmt.lower().lstrip(".") for fmt in document_formats]
         self.confidence_threshold = confidence_threshold
         self.format_converter = format_converter
-        self.document_converter = document_converter or DocumentConverter()
+        self.document_converter = (
+            document_converter or _document_converter_with_picture_classification()
+        )
         self.benford_checker = benford_checker
+        self.extraction_failure = extraction_failure or ExtractionFailure()
+        self.ocr_retry = ocr_retry
+        self._retry_chat: ChatFn = retry_chat_fn or ollama.chat
 
     def read(self, path: Path) -> BaseModel:
         """Convert to PNG, optionally Benford-check, then Docling — or early DENY.
@@ -177,9 +225,11 @@ class DocumentReader(Reader):
         Raster images are converted to PNG first. When a Benford checker is wired,
         non-conforming images return ``DocumentData`` with decision DENY / reason
         fraud and never call Docling. PDFs skip Benford (no Pillow conversion).
+        When Docling OCR is faulty and ``ocr_retry`` is enabled, retries once via
+        a config-driven vision model on the resolved PNG.
 
         :param path: Filesystem path to the source document.
-        :return: DocumentData from Docling, or an early fraud DENY payload.
+        :return: DocumentData from Docling (or vision retry), or an early fraud DENY.
         :raises ValueError: If the file suffix is not in ``document_formats``.
         """
         suffix = path.suffix.lower().lstrip(".")
@@ -192,8 +242,161 @@ class DocumentReader(Reader):
         if fraud_deny is not None:
             return fraud_deny
 
-        processed = self.preprocessor.preprocess(self._docling_payload(resolved))
-        return self._to_model(processed)
+        docling_payload = self._docling_payload(resolved)
+        processed = self.preprocessor.preprocess(docling_payload)
+        document = self._to_model(processed, source_file=path.name)
+        return self._maybe_retry_ocr(
+            document,
+            resolved=resolved,
+            prior_payload=docling_payload,
+            source_file=path.name,
+        )
+
+    def _maybe_retry_ocr(
+        self,
+        document: BaseModel,
+        *,
+        resolved: Path,
+        prior_payload: dict[str, Any],
+        source_file: str,
+    ) -> BaseModel:
+        """Retry once with a vision model when Docling OCR is faulty.
+
+        :param document: DocumentData from the first Docling pass.
+        :param resolved: Path Docling consumed (PNG or PDF).
+        :param prior_payload: Docling payload used for confidence/signature reuse.
+        :param source_file: Basename of the original source path.
+        :return: Original or retry DocumentData (never recurses).
+        """
+        if not isinstance(document, DocumentData):
+            return document
+        if not document.metadata.faulty_extraction:
+            return document
+
+        if self.ocr_retry is None or not self.ocr_retry.enabled:
+            log_branch_decision(
+                logger,
+                branch="ocr_retry",
+                outcome="SKIP",
+                reason="disabled_or_unset",
+                file=source_file,
+            )
+            return document
+
+        if resolved.suffix.lower() == ".pdf":
+            log_branch_decision(
+                logger,
+                branch="ocr_retry",
+                outcome="SKIP",
+                reason="pdf",
+                file=source_file,
+            )
+            return document
+
+        if resolved.suffix.lower() not in _IMAGE_RETRY_SUFFIXES:
+            log_branch_decision(
+                logger,
+                branch="ocr_retry",
+                outcome="SKIP",
+                reason="unsupported_suffix",
+                file=source_file,
+            )
+            return document
+
+        log_branch_decision(
+            logger,
+            branch="ocr_retry",
+            outcome="START",
+            reason="faulty_extraction",
+            file=source_file,
+            model=self.ocr_retry.model,
+        )
+
+        try:
+            retry_text = self._vision_ocr_text(
+                resolved,
+                model=self.ocr_retry.model,
+                prompt=self.ocr_retry.prompt,
+            )
+        except Exception as exc:
+            log_branch_decision(
+                logger,
+                branch="ocr_retry",
+                outcome="ERROR",
+                reason=type(exc).__name__,
+                level=logging.WARNING,
+                file=source_file,
+                model=self.ocr_retry.model,
+            )
+            return document.model_copy(
+                update={
+                    "metadata": document.metadata.model_copy(
+                        update={
+                            "retry_used": True,
+                            "retry_model": self.ocr_retry.model,
+                        }
+                    )
+                }
+            )
+
+        retry_payload = {
+            "text": retry_text,
+            "confidence": prior_payload.get("confidence", _MISSING),
+            "has_signature": prior_payload.get("has_signature", False),
+        }
+        retry_processed = self.preprocessor.preprocess(retry_payload)
+        retry_document = self._to_model(retry_processed, source_file=source_file)
+        if not isinstance(retry_document, DocumentData):
+            return document
+
+        retry_meta = retry_document.metadata.model_copy(
+            update={
+                "retry_used": True,
+                "retry_model": self.ocr_retry.model,
+            }
+        )
+        retry_document = retry_document.model_copy(update={"metadata": retry_meta})
+
+        if retry_document.metadata.faulty_extraction:
+            log_branch_decision(
+                logger,
+                branch="ocr_retry",
+                outcome="STILL_FAULTY",
+                reason=",".join(retry_document.metadata.failure_reasons) or "faulty_extraction",
+                level=logging.WARNING,
+                file=source_file,
+                model=self.ocr_retry.model,
+            )
+        else:
+            log_branch_decision(
+                logger,
+                branch="ocr_retry",
+                outcome="SUCCESS",
+                reason="extraction_cleared",
+                file=source_file,
+                model=self.ocr_retry.model,
+            )
+        return retry_document
+
+    def _vision_ocr_text(self, image_path: Path, *, model: str, prompt: str) -> str:
+        """Call the configured vision model to transcribe a document image.
+
+        :param image_path: Resolved PNG (or other image) path for multimodal input.
+        :param model: Vision model name from ``ocr_retry`` config.
+        :param prompt: Transcription instruction from ``ocr_retry`` config.
+        :return: Model message content (markdown/plain text).
+        """
+        response = self._retry_chat(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                    "images": [str(image_path)],
+                }
+            ],
+        )
+        return response_content(response)
 
     def _load(self, path: Path) -> dict[str, Any]:
         """Convert to PNG when needed, then run Docling extraction.
@@ -276,22 +479,29 @@ class DocumentReader(Reader):
                 "decision": _FRAUD_DENY,
                 "reason": _FRAUD_REASON,
                 "raw_text": _MISSING,
-                "confidence": _MISSING,
-                "human_in_the_loop": False,
                 "fields": {
                     "decision": _FRAUD_DENY,
                     "reason": _FRAUD_REASON,
                     "benford_chi_squared": benford.chi_squared,
                     "benford_conformity": False,
                 },
+                "metadata": DocumentMetaData(
+                    source_file=Path(benford.image_path).name if benford.image_path else _MISSING,
+                    extraction_probability=_MISSING,
+                    faulty_extraction=False,
+                    human_in_the_loop=False,
+                ),
             }
         )
 
     def _docling_payload(self, docling_path: Path) -> dict[str, Any]:
         """Run Docling on an already-resolved path and return text + confidence.
 
+        Signature presence is taken from DocumentFigureClassifier picture labels
+        (``do_picture_classification``), not from OCR text heuristics.
+
         :param docling_path: PNG or PDF path ready for DocumentConverter.
-        :return: Dict with extracted ``text`` and aggregate ``confidence``.
+        :return: Dict with ``text``, aggregate ``confidence``, and ``has_signature``.
         """
         log_branch_decision(
             logger,
@@ -303,7 +513,16 @@ class DocumentReader(Reader):
         result = self.document_converter.convert(docling_path)
         text = result.document.export_to_markdown()
         confidence = self._aggregate_confidence(result.confidence)
-        return {"text": text, "confidence": confidence}
+        has_signature = _has_signature_from_pictures(result.document)
+        log_branch_decision(
+            logger,
+            branch="signature",
+            outcome="DETECTED" if has_signature else "ABSENT",
+            reason="document_figure_classifier",
+            file=docling_path.name,
+            pictures=len(getattr(result.document, "pictures", None) or []),
+        )
+        return {"text": text, "confidence": confidence, "has_signature": has_signature}
 
     def _path_for_docling(self, path: Path, suffix: str) -> Path:
         """Resolve the path Docling should read (PNG-first for rasters).
@@ -362,17 +581,22 @@ class DocumentReader(Reader):
             return float(_MISSING)
         return min(scores)
 
-    def _to_model(self, processed: Any) -> BaseModel:
-        """Build DocumentData with human_in_the_loop from confidence threshold.
+    def _to_model(self, processed: Any, *, source_file: str) -> BaseModel:
+        """Build DocumentData with DocumentMetaData (signature, probability, HITL).
+
+        ``ExtractionFailure`` marks unusable OCR as ``faulty_extraction`` and forces
+        ``human_in_the_loop``. Low ``extraction_probability`` also forces HITL.
 
         :param processed: Output of DocumentPreprocessor.preprocess.
-        :return: DocumentData instance.
+        :param source_file: Basename of the source document path.
+        :return: DocumentData instance including populated metadata.
         """
         confidence = processed.get("confidence", _MISSING)
-        hitl = False
+        failure = self.extraction_failure.evaluate(processed.get("raw_text", _MISSING))
+        low_confidence = False
         if isinstance(confidence, (int, float)) and not math.isnan(float(confidence)):
-            hitl = float(confidence) < self.confidence_threshold
-            if hitl:
+            low_confidence = float(confidence) < self.confidence_threshold
+            if low_confidence:
                 log_branch_decision(
                     logger,
                     branch="ocr_confidence",
@@ -399,15 +623,32 @@ class DocumentReader(Reader):
                 reason="confidence_unavailable",
             )
 
+        hitl = failure.faulty or low_confidence
+        if failure.faulty:
+            log_branch_decision(
+                logger,
+                branch="extraction_failure",
+                outcome="HITL",
+                reason=",".join(failure.reasons) or "faulty_extraction",
+                level=logging.WARNING,
+                file=source_file,
+            )
+
+        metadata = DocumentMetaData(
+            source_file=source_file,
+            has_signature=bool(processed.get("has_signature", False)),
+            extraction_probability=confidence,
+            faulty_extraction=failure.faulty,
+            human_in_the_loop=hitl,
+            failure_reasons=list(failure.reasons),
+        )
         return DocumentData.model_validate(
             {
                 "person": processed.get("person", _MISSING),
                 "date": processed.get("date", _MISSING),
                 "raw_text": processed.get("raw_text", _MISSING),
-                "confidence": confidence,
-                "human_in_the_loop": hitl,
-                "has_signature": processed.get("has_signature", False),
                 "timestamps": processed.get("timestamps", []),
                 "fields": processed.get("fields", {}),
+                "metadata": metadata,
             }
         )

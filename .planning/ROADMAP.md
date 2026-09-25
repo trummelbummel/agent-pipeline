@@ -57,7 +57,7 @@
   - Pipelines provided as FastAPI lifespan/resource fixtures (dependency injection)
   - mypy + pytest pass
 
-- [ ] **Phase 06: Prediction Evaluation** `profiles: []`
+- [x] **Phase 06: Prediction Evaluation** `profiles: []` (completed 2026-09-25)
   Plans: 06-01, 06-02
   Goal: Add `src/evaluation` with an `Evaluator` that compares pipeline predictions to ground-truth `answer.json`, builds a confusion matrix, and reports accuracy and F1
   Success criteria:
@@ -76,7 +76,7 @@
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
 | 05 | 0/4 | Not started |  |
-| 06 | 1/2 | In Progress|  |
+| 06 | 1/2 | Complete    | 2026-09-25 |
 
 ### Phase 2: Case Classifier Models
 
@@ -170,7 +170,7 @@ Plans:
 **Goal:** Add `src/evaluation` with an `Evaluator` that loads pipeline prediction results and ground-truth `answer.json`, compares decisions, builds a confusion matrix, and calculates accuracy and F1 score.
 **Requirements**: TBD
 **Depends on:** Phase 4 (predicted results + ground-truth answers)
-**Plans:** 2/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 
@@ -181,3 +181,14 @@ Plans:
 **Wave 2** *(blocked on Wave 1)*
 
 - [x] 06-02-PLAN.md — Batch soft-skip evaluate + `python -m evaluation` metrics artifact + phase gate
+
+### Phase 7: Denial-rule checkers in analysis pipeline
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 7 to break down)

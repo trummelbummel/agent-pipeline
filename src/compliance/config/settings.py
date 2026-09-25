@@ -61,29 +61,69 @@ class ExtractionConfig(BaseModel):
 class ClassificationConfig(BaseModel):
     """LLM case-classification settings for CaseClassifier.
 
-    :param labels: Coverage class names the classifier may return.
+    :param labels: Numeric (or other) class codes the classifier may return.
     :param other_label: Fallback label when no coverage class fits.
     :param model: LLM model name used for classification.
     :param prompt: System/instruction prompt for classification.
+    :param label_names: Map from code → semantic display name for analysis artifacts.
     """
 
     labels: list[str]
     other_label: str
     model: str
     prompt: str
+    label_names: dict[str, str] = Field(default_factory=dict)
+
+    def resolve_label_names(self, codes: list[str]) -> list[str]:
+        """Map classifier codes to semantic names; unknown codes pass through.
+
+        :param codes: Raw label codes from the classifier (may include other_label).
+        :return: Semantic names in the same order as ``codes``.
+        """
+        names = dict(self.label_names)
+        names.setdefault(self.other_label, self.other_label)
+        return [names.get(code, code) for code in codes]
 
 
 class CheckingConfig(BaseModel):
-    """LLM claim-checking settings for Checker containment and contradiction modes.
+    """LLM claim-checking settings for Checker modes.
 
     :param model: LLM model name used when deterministic containment misses.
     :param containment_prompt: System prompt for containment / entailment checks.
     :param contradicts_prompt: System prompt for contradiction checks.
+    :param identity_prompt: System prompt for claimant-name vs document-name checks.
+    :param healthy_prompt: System prompt for healthy / fit certificate detection.
     """
 
     model: str
     containment_prompt: str
     contradicts_prompt: str
+    identity_prompt: str
+    healthy_prompt: str
+
+
+class RequiredDocumentsConfig(BaseModel):
+    """Acceptable supporting-document codes per coverage / cancellation reason.
+
+    Codes match ``analysis.*.labels`` (numeric strings). Missing documentation
+    means the classified document type is outside the acceptable set for the claim.
+
+    :param cancellation_by_reason: Map cancellation-reason code → acceptable
+        cancellation-document codes (e.g. medical emergency ``"2"`` → ``["1"]``).
+    :param personal_effects: Acceptable personal-effects document codes.
+    :param missed_departure: Acceptable missed-departure document codes.
+    :param signature_required_codes: Document codes that must have
+        ``has_signature: true`` in ``document_metadata.json`` (e.g. medical
+        certificate, hospital admission).
+    :param identity_required_codes: Document codes that trigger booking-vs-OCR
+        identity checks (typically medical certificate / hospital admission).
+    """
+
+    cancellation_by_reason: dict[str, list[str]] = Field(default_factory=dict)
+    personal_effects: list[str] = Field(default_factory=list)
+    missed_departure: list[str] = Field(default_factory=list)
+    signature_required_codes: list[str] = Field(default_factory=list)
+    identity_required_codes: list[str] = Field(default_factory=list)
 
 
 class AnalysisConfig(BaseModel):
@@ -96,6 +136,7 @@ class AnalysisConfig(BaseModel):
     :param cancellation_document: Supporting-document type on the cancellation path.
     :param personal_effects_document: Document type for personal-effects coverage.
     :param missed_departure_document: Document type for missed-departure coverage.
+    :param required_documents: Acceptable document codes per coverage/reason path.
     """
 
     coverage: ClassificationConfig
@@ -103,7 +144,9 @@ class AnalysisConfig(BaseModel):
     cancellation_document: ClassificationConfig
     personal_effects_document: ClassificationConfig
     missed_departure_document: ClassificationConfig
-
+    required_documents: RequiredDocumentsConfig = Field(
+        default_factory=RequiredDocumentsConfig
+    )
 
 class BenfordConfig(BaseModel):
     """Benford's Law analysis settings for image forensic checks.
@@ -146,25 +189,43 @@ class EvaluationConfig(BaseModel):
 
     :param labels: Decision vocabulary for confusion-matrix axes and macro F1.
     :param metrics_artifact: Filename for the batch metrics JSON under results_dir.
+    :param confusion_matrix_artifact: Filename for the labeled matrix JSON under results_dir.
+    :param visualization_artifact: Filename for the confusion-matrix PNG under results_dir.
     """
 
     labels: list[str] = Field(
         default_factory=lambda: ["APPROVE", "DENY", "UNCERTAIN"]
     )
     metrics_artifact: str = "evaluation_metrics.json"
+    confusion_matrix_artifact: str = "confusion_matrix.json"
+    visualization_artifact: str = "evaluation_visualization.png"
 
 
 class OcrRetryConfig(BaseModel):
-    """Vision-model OCR retry after ExtractionFailure flags Docling text as unusable.
+    """Vision-model OCR retry after weak Docling extraction.
 
-    :param enabled: When False, DocumentReader skips the vision retry path.
+    Retry triggers are independent flags. Preprocessing retries when any enabled
+    trigger matches the Docling ``DocumentMetaData``. Analysis may retry once
+    more when identity returns ``unclear`` and preprocess did not already retry.
+
+    :param enabled: When False, DocumentReader and analysis skip vision retry.
     :param model: Ollama vision model name (config only — never hardcode in source).
     :param prompt: Instruction to transcribe the document image into clean text.
+    :param on_faulty_extraction: Retry when ``ExtractionFailure`` flags unusable OCR.
+    :param on_low_confidence: Retry when ``extraction_probability`` is below
+        ``preprocessing.confidence_threshold``.
+    :param on_human_in_the_loop: Retry when ``human_in_the_loop`` is true.
+    :param on_identity_unclear: During analysis, retry when identity returns
+        ``unclear`` and preprocess did not already run a vision retry.
     """
 
     enabled: bool = False
     model: str = ""
     prompt: str = ""
+    on_faulty_extraction: bool = True
+    on_low_confidence: bool = True
+    on_human_in_the_loop: bool = True
+    on_identity_unclear: bool = True
 
 
 class AppConfig(BaseModel):

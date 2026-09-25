@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from compliance.workflows.pipeline import main
+from main import main
 
 raise SystemExit(main())

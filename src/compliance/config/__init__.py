@@ -13,6 +13,7 @@ from compliance.config.settings import (
     OcrRetryConfig,
     PreprocessedArtifactNames,
     PreprocessingConfig,
+    RequiredDocumentsConfig,
     load_config,
 )
 
@@ -29,5 +30,6 @@ __all__ = [
     "OcrRetryConfig",
     "PreprocessedArtifactNames",
     "PreprocessingConfig",
+    "RequiredDocumentsConfig",
     "load_config",
 ]

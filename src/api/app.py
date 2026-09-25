@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from fastapi import FastAPI
 
@@ -32,11 +32,14 @@ def create_app(
     config: AppConfig | None = None,
     *,
     chat_fn: ChatFn | None = None,
+    **reader_overrides: Any,
 ) -> FastAPI:
     """Build a FastAPI app with lifespan-injected pipelines.
 
     :param config: Optional AppConfig; when None, loads ``config.yaml``.
     :param chat_fn: Optional shared chat seam injected into ClaimPipeline (tests).
+    :param reader_overrides: Optional DescriptionReader / DocumentReader injections
+        forwarded to ``PreprocessingPipeline`` (tests; same seam as claim_batch).
     :return: Configured FastAPI application.
     """
 
@@ -45,7 +48,7 @@ def create_app(
         resolved = config if config is not None else load_config("config.yaml")
         state: AppState = {
             "config": resolved,
-            "preprocessing": PreprocessingPipeline(resolved),
+            "preprocessing": PreprocessingPipeline(resolved, **reader_overrides),
             "claims": ClaimPipeline(resolved, chat_fn=chat_fn),
         }
         yield state

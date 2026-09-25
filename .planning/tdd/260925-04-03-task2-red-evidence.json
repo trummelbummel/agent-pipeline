@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_routes_coverage_other_skips_reason_and_docs -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_routes_coverage_other_skips_reason_and_docs\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_routes_coverage_other_skips_reason_and_docs",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "coverage other_label skips reason/doc/checker and still writes analysis_result with coverage fields only",
+  "actual": "FileNotFoundError: other_label still stubs to END — no analysis_result.json written under results_dir"
+}

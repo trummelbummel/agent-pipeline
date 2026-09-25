@@ -366,6 +366,37 @@ def test_routes_missed_departure(tmp_path: Path) -> None:
     assert chat_fn.call_count == 3
 
 
+def _other_coverage_chat_fn() -> MagicMock:
+    """Injected chat_fn: coverage other_label only (no reason/doc/checker)."""
+    coverage = _chat_response(
+        {
+            "labels": [COVERAGE_OTHER],
+            "probabilities": {COVERAGE_OTHER: 0.95},
+        }
+    )
+    return MagicMock(side_effect=[coverage])
+
+
+def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:
+    """A7/R012: coverage other_label skips reason, docs, and Checker; still persists."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim other")
+    chat_fn = _other_coverage_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert COVERAGE_OTHER in payload["coverage_labels"]
+    assert payload["coverage_labels"] == [config.analysis.coverage.other_label]
+    assert not payload.get("reason_labels")
+    assert not payload.get("document_labels")
+    assert "checker_containment" not in payload
+    assert "checker_contradicts" not in payload
+    assert chat_fn.call_count == 1
+
+
 def test_refuses_unsafe_claim_dir_name(tmp_path: Path) -> None:
     """R010/T-04-01: claim_dir.name with path separators or .. raises before I/O."""
     ClaimPipeline = _claim_pipeline_cls()

@@ -18,4 +18,4 @@
 
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
-| 01 | 1/3 | In Progress | — |
+| 01 | 2/3 | In Progress | 01-01, 01-02 |

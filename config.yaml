@@ -18,3 +18,16 @@ extraction:
   prompt: |
     Extract booking/travel fields matching the provided schema from the claim description.
     Return only fields present in the text; omit unknowns.
+
+classification:
+  labels:
+    - Trip cancellation or rescheduling
+    - Personal Effects
+    - Missed Departure or Missed Connection
+  other_label: Other
+  model: llama3.2
+  prompt: |
+    Classify the claim description into one or more of the allowed coverage labels.
+    Return JSON with keys "labels" (array of selected label strings) and
+    "probabilities" (object mapping each allowed label to a float in [0, 1]).
+    Use Other only when no coverage class fits.

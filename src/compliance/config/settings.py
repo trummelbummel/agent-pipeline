@@ -42,10 +42,10 @@ class ClassificationConfig(BaseModel):
     :param prompt: System/instruction prompt for classification.
     """
 
-    labels: list[str] = []
-    other_label: str = ""
-    model: str = ""
-    prompt: str = ""
+    labels: list[str]
+    other_label: str
+    model: str
+    prompt: str
 
 
 class AppConfig(BaseModel):
@@ -58,7 +58,7 @@ class AppConfig(BaseModel):
 
     preprocessing: PreprocessingConfig
     extraction: ExtractionConfig
-    classification: ClassificationConfig = ClassificationConfig()
+    classification: ClassificationConfig
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:

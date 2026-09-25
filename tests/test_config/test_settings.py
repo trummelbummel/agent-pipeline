@@ -20,6 +20,12 @@ extraction:
   model: test-model
   prompt: |
     extract things
+classification:
+  labels: [Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection]
+  other_label: Other
+  model: test-model
+  prompt: |
+    classify things
 """,
         encoding="utf-8",
     )

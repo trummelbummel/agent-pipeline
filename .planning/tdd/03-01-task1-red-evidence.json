@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_pipeline.py::test_process_claim_writes_four_artifacts -q --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_process_claim_writes_four_artifacts\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_process_claim_writes_four_artifacts",
+  "targetFile": "tests/test_workflows/test_pipeline.py",
+  "expected": "claim_out contains description.txt, answer.json, supporting_document.json, supporting_documents.md with correct bodies",
+  "actual": "AssertionError: assert [] == ['answer.json', 'description.txt', 'supporting_document.json', 'supporting_documents.md'] (stub mkdir-only)"
+}

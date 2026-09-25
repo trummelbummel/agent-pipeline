@@ -14,7 +14,7 @@
   - DocumentData (person, date, + arbitrary fields) from Docling path
   - Config externalized; mypy + pytest pass
 
-- [ ] **Phase 02: Case Classifier Models** `profiles: []`
+- [x] **Phase 02: Case Classifier Models** `profiles: []` (completed 2026-09-25)
   Plans: 02-01
   Goal: Add `src/compliance/models/classifier.py` with Classifier ABC and CaseClassifier child that classifies description.txt into config-driven coverage labels with probability estimates
   Success criteria:
@@ -46,7 +46,7 @@
 **Goal:** Add `models/classifier.py` with a Classifier ABC and CaseClassifier that takes description.txt text and returns label(s) with probability estimates. Default labels map to policy coverage types: Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection, plus Other when no class fits. CaseClassifier must accept config-specified labels so classification targets are externalized.
 **Requirements**: R007, R008, R009
 **Depends on:** Phase 1
-**Plans:** 1/1 plans executed
+**Plans:** 1/1 plans complete
 
 Plans:
 

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-from compliance.models.classifier import CaseClassifier, ClassificationResult
+from compliance.llm.classifier import CaseClassifier, ClassificationResult
 
 
 def _chat_returning(payload: dict[str, Any]) -> MagicMock:
@@ -14,9 +14,9 @@ def _chat_returning(payload: dict[str, Any]) -> MagicMock:
     return MagicMock(return_value=response)
 
 
-TRIP_CANCELLATION = "Trip cancellation or rescheduling"
-PERSONAL_EFFECTS = "Personal Effects"
-MISSED_DEPARTURE = "Missed Departure or Missed Connection"
+TRIP_CANCELLATION = "1"
+PERSONAL_EFFECTS = "2"
+MISSED_DEPARTURE = "3"
 OTHER = "Other"
 
 _SAMPLE_LABELS = [TRIP_CANCELLATION, PERSONAL_EFFECTS, MISSED_DEPARTURE]

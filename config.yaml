@@ -31,17 +31,28 @@ extraction:
     Return only fields present in the text; omit unknowns.
 
 classification:
+  # Numeric coverage labels; descriptions live in the prompt mapping below.
   labels:
-    - Trip cancellation or rescheduling
-    - Personal Effects
-    - Missed Departure or Missed Connection
+    - "1"
+    - "2"
+    - "3"
   other_label: Other
   model: llama3.2
   prompt: |
     Classify the claim description into one or more of the allowed coverage labels.
-    Return JSON with keys "labels" (array of selected label strings) and
-    "probabilities" (object mapping each allowed label to a float in [0, 1]).
-    Use {other_label} only when no coverage class fits.
+    Labels are numeric codes. Use this mapping:
+
+    1 = Trip cancellation or rescheduling — If your trip is cancelled or rescheduled
+    for a covered reason, you may be eligible for compensation.
+    2 = Personal Effects — If your personal belongings are lost or damaged during
+    your trip, you may be eligible for compensation.
+    3 = Missed Departure or Missed Connection — If you miss a scheduled departure
+    or connection due to a covered reason (e.g., traffic accident en route).
+
+    Return JSON with keys "labels" (array of selected label codes as strings) and
+    "probabilities" (object mapping each allowed label code to a float in [0, 1]).
+    Use {other_label} only when no coverage class fits. Do not return description text
+    as a label — only the numeric codes (or {other_label}).
 
 checking:
   model: llama3.2
@@ -56,59 +67,105 @@ checking:
 
 analysis:
   coverage:
+    # Numeric coverage labels; descriptions live in the prompt mapping below.
     labels:
-      - Trip cancellation or rescheduling
-      - Personal Effects
-      - Missed Departure or Missed Connection
+      - "1"
+      - "2"
+      - "3"
     other_label: "None"
     model: llama3.2
     prompt: |
       Classify the claim description into one or more of the allowed coverage labels.
-      Return JSON with keys "labels" (array of selected label strings) and
-      "probabilities" (object mapping each allowed label to a float in [0, 1]).
-      Use {other_label} only when no coverage class fits.
+      Labels are numeric codes. Use this mapping:
+
+      1 = Trip cancellation or rescheduling — If your trip is cancelled or rescheduled
+      for a covered reason, you may be eligible for compensation.
+      2 = Personal Effects — If your personal belongings are lost or damaged during
+      your trip, you may be eligible for compensation.
+      3 = Missed Departure or Missed Connection — If you miss a scheduled departure
+      or connection due to a covered reason (e.g., traffic accident en route).
+
+      Return JSON with keys "labels" (array of selected label codes as strings) and
+      "probabilities" (object mapping each allowed label code to a float in [0, 1]).
+      Use {other_label} only when no coverage class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   cancellation_reason:
+    # Numeric reason labels; descriptions live in the prompt mapping below.
     labels:
-      - Jury duty
-      - Medical emergency
-      - Theft or criminal incident
-      - Other specified personal emergencies
+      - "1"
+      - "2"
+      - "3"
+      - "4"
     other_label: "None"
     model: llama3.2
     prompt: |
       Classify the cancellation reason from the claim description into the allowed labels.
-      Return JSON with keys "labels" and "probabilities".
-      Use {other_label} only when no reason class fits.
+      Labels are numeric codes. Use this mapping:
+
+      1 = Jury duty
+      2 = Medical emergency — must be supported by a medical report
+      3 = Theft or criminal incident — must be supported by a police report
+      4 = Other specified personal emergencies
+
+      Return JSON with keys "labels" (array of selected label codes as strings) and
+      "probabilities" (object mapping each allowed label code to a float in [0, 1]).
+      Use {other_label} only when no reason class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   cancellation_document:
+    # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
-      - medical certificate
-      - police report
-      - jury summon letter
+      - "1"
+      - "2"
+      - "3"
     other_label: "None"
     model: llama3.2
     prompt: |
       Classify the supporting document type from the document text into the allowed labels.
-      Return JSON with keys "labels" and "probabilities".
-      Use {other_label} only when no document class fits.
+      Labels are numeric codes. Use this mapping:
+
+      1 = medical certificate
+      2 = police report
+      3 = jury summon letter
+
+      Return JSON with keys "labels" (array of selected label codes as strings) and
+      "probabilities" (object mapping each allowed label code to a float in [0, 1]).
+      Use {other_label} only when no document class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   personal_effects_document:
+    # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
-      - Proof of theft, loss, or damage
+      - "1"
     other_label: "None"
     model: llama3.2
     prompt: |
       Classify the personal-effects supporting document from the document text.
-      Return JSON with keys "labels" and "probabilities".
-      Use {other_label} only when no document class fits.
+      Labels are numeric codes. Use this mapping:
+
+      1 = Proof of theft, loss, or damage — such as a police report or acknowledgement
+      from the airline
+
+      Return JSON with keys "labels" (array of selected label codes as strings) and
+      "probabilities" (object mapping each allowed label code to a float in [0, 1]).
+      Use {other_label} only when no document class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   missed_departure_document:
+    # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
-      - Incident report or documentation explaining the cause of delay
-      - Proof of booking
+      - "1"
+      - "2"
     other_label: "None"
     model: llama3.2
     prompt: |
       Classify the missed-departure supporting document from the document text.
-      Return JSON with keys "labels" and "probabilities".
-      Use {other_label} only when no document class fits.
+      Labels are numeric codes. Use this mapping:
+
+      1 = Incident report or documentation explaining the cause of delay
+      2 = Proof of booking
+
+      Return JSON with keys "labels" (array of selected label codes as strings) and
+      "probabilities" (object mapping each allowed label code to a float in [0, 1]).
+      Use {other_label} only when no document class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
 
 benford:
   # Off for this take-home dataset: all claim images are synthetic/fake, so DCT

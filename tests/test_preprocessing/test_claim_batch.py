@@ -26,7 +26,7 @@ from compliance.preprocessing.extractor import InformationExtractor
 
 def _analysis_config() -> AnalysisConfig:
     stage = ClassificationConfig(
-        labels=["Trip cancellation or rescheduling"],
+        labels=["1"],
         other_label="None",
         model="test-model",
         prompt="classify",
@@ -51,7 +51,7 @@ def _config(data_dir: Path) -> AppConfig:
         ),
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
         classification=ClassificationConfig(
-            labels=["Trip cancellation or rescheduling"],
+            labels=["1"],
             other_label="Other",
             model="test-model",
             prompt="classify",

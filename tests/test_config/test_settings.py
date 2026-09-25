@@ -20,31 +20,31 @@ checking:
 _MINIMAL_ANALYSIS_YAML = """
 analysis:
   coverage:
-    labels: [Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection]
+    labels: ["1", "2", "3"]
     other_label: "None"
     model: test-model
     prompt: |
       classify coverage
   cancellation_reason:
-    labels: [Jury duty, Medical emergency]
+    labels: ["1", "2"]
     other_label: "None"
     model: test-model
     prompt: |
       classify reason
   cancellation_document:
-    labels: [medical certificate]
+    labels: ["1"]
     other_label: "None"
     model: test-model
     prompt: |
       classify cancel doc
   personal_effects_document:
-    labels: [Proof of theft, loss, or damage]
+    labels: ["1"]
     other_label: "None"
     model: test-model
     prompt: |
       classify pe doc
   missed_departure_document:
-    labels: [Proof of booking]
+    labels: ["1"]
     other_label: "None"
     model: test-model
     prompt: |
@@ -67,7 +67,7 @@ extraction:
   prompt: |
     extract things
 classification:
-  labels: [Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection]
+  labels: ["1", "2", "3"]
   other_label: Other
   model: test-model
   prompt: |
@@ -149,7 +149,21 @@ def test_load_config_reads_analysis_section() -> None:
         assert stage.other_label
         assert stage.model
         assert stage.prompt.strip()
-    assert "Trip cancellation or rescheduling" in config.analysis.coverage.labels
+    assert "1" in config.analysis.coverage.labels
+    assert "2" in config.analysis.coverage.labels
+    assert "3" in config.analysis.coverage.labels
+    assert "Trip cancellation or rescheduling" in config.analysis.coverage.prompt
+    assert "Personal Effects" in config.analysis.coverage.prompt
+    assert "Missed Departure or Missed Connection" in config.analysis.coverage.prompt
+    assert "1" in config.analysis.cancellation_reason.labels
+    assert "Jury duty" in config.analysis.cancellation_reason.prompt
+    assert "1" in config.analysis.cancellation_document.labels
+    assert "medical certificate" in config.analysis.cancellation_document.prompt
+    assert "1" in config.analysis.personal_effects_document.labels
+    assert "Proof of theft" in config.analysis.personal_effects_document.prompt
+    assert "1" in config.analysis.missed_departure_document.labels
+    assert "Incident report" in config.analysis.missed_departure_document.prompt
+    assert "Proof of booking" in config.analysis.missed_departure_document.prompt
 
 
 def test_analysis_coverage_other_label_is_none() -> None:
@@ -173,9 +187,12 @@ def test_load_config_reads_ocr_retry_section() -> None:
 def test_load_config_reads_classification_labels_and_other() -> None:
     config = load_config("config.yaml")
     labels = config.classification.labels
-    assert "Trip cancellation or rescheduling" in labels
-    assert "Personal Effects" in labels
-    assert "Missed Departure or Missed Connection" in labels
+    assert "1" in labels
+    assert "2" in labels
+    assert "3" in labels
+    assert "Trip cancellation or rescheduling" in config.classification.prompt
+    assert "Personal Effects" in config.classification.prompt
+    assert "Missed Departure or Missed Connection" in config.classification.prompt
     assert config.classification.other_label.strip()
 
 

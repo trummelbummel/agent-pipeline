@@ -18,17 +18,15 @@ from compliance.config.settings import (
     PreprocessingConfig,
 )
 
-TRIP_CANCELLATION = "Trip cancellation or rescheduling"
-PERSONAL_EFFECTS = "Personal Effects"
-MISSED_DEPARTURE = "Missed Departure or Missed Connection"
+TRIP_CANCELLATION = "1"
+PERSONAL_EFFECTS = "2"
+MISSED_DEPARTURE = "3"
 COVERAGE_OTHER = "None"
-MEDICAL_EMERGENCY = "Medical emergency"
-MEDICAL_CERTIFICATE = "medical certificate"
-PROOF_OF_THEFT = "Proof of theft, loss, or damage"
-INCIDENT_REPORT = (
-    "Incident report or documentation explaining the cause of delay"
-)
-PROOF_OF_BOOKING = "Proof of booking"
+MEDICAL_EMERGENCY = "2"
+MEDICAL_CERTIFICATE = "1"
+PROOF_OF_THEFT = "1"
+INCIDENT_REPORT = "1"
+PROOF_OF_BOOKING = "2"
 
 
 def _claim_pipeline_cls() -> type:
@@ -43,9 +41,9 @@ def _claim_pipeline_cls() -> type:
 def _analysis_config() -> AnalysisConfig:
     coverage = ClassificationConfig(
         labels=[
-            "Trip cancellation or rescheduling",
-            "Personal Effects",
-            "Missed Departure or Missed Connection",
+            "1",
+            "2",
+            "3",
         ],
         other_label="None",
         model="test-model",
@@ -53,31 +51,31 @@ def _analysis_config() -> AnalysisConfig:
     )
     cancellation_reason = ClassificationConfig(
         labels=[
-            "Jury duty",
-            "Medical emergency",
-            "Theft or criminal incident",
-            "Other specified personal emergencies",
+            "1",
+            "2",
+            "3",
+            "4",
         ],
         other_label="None",
         model="test-model",
         prompt="classify reason",
     )
     cancellation_document = ClassificationConfig(
-        labels=["medical certificate", "police report", "jury summon letter"],
+        labels=["1", "2", "3"],
         other_label="None",
         model="test-model",
         prompt="classify cancel doc",
     )
     personal_effects_document = ClassificationConfig(
-        labels=["Proof of theft, loss, or damage"],
+        labels=["1"],
         other_label="None",
         model="test-model",
         prompt="classify pe doc",
     )
     missed_departure_document = ClassificationConfig(
         labels=[
-            "Incident report or documentation explaining the cause of delay",
-            "Proof of booking",
+            "1",
+            "2",
         ],
         other_label="None",
         model="test-model",
@@ -116,9 +114,9 @@ def _config(
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
         classification=ClassificationConfig(
             labels=[
-                "Trip cancellation or rescheduling",
-                "Personal Effects",
-                "Missed Departure or Missed Connection",
+                "1",
+                "2",
+                "3",
             ],
             other_label="Other",
             model="test-model",
@@ -511,7 +509,7 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
     cfg_path = tmp_path / "config.yaml"
     stage = "\n".join(
         [
-            "    labels: [Trip cancellation or rescheduling]",
+            "    labels: [\"1\"]",
             "    other_label: None",
             "    model: test-model",
             "    prompt: classify",
@@ -530,7 +528,7 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
                 "  model: test-model",
                 "  prompt: extract",
                 "classification:",
-                "  labels: [Trip cancellation or rescheduling]",
+                "  labels: [\"1\"]",
                 "  other_label: Other",
                 "  model: test-model",
                 "  prompt: classify",

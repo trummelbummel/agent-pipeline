@@ -132,7 +132,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
     (claim / "description.txt").write_text("refund please", encoding="utf-8")
 
     stage = ClassificationConfig(
-        labels=["Trip cancellation or rescheduling"],
+        labels=["1"],
         other_label="None",
         model="unused",
         prompt="unused",
@@ -147,7 +147,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
         ),
         extraction=ExtractionConfig(model="unused", prompt="unused"),
         classification=ClassificationConfig(
-            labels=["Trip cancellation or rescheduling"],
+            labels=["1"],
             other_label="Other",
             model="unused",
             prompt="unused",

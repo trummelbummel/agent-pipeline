@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_evaluation/test_evaluator.py::test_evaluate_batch_aggregates_two_claims tests/test_evaluation/test_evaluator.py::test_evaluate_batch_skips_missing_prediction tests/test_evaluation/test_evaluator.py::test_evaluate_batch_skips_missing_ground_truth tests/test_evaluation/test_evaluator.py::test_evaluate_batch_empty tests/test_evaluation/test_evaluator.py::test_evaluate_batch_refuses_unsafe_names_in_discovery -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_evaluate_batch_aggregates_two_claims\nnot ok 2 - test_evaluate_batch_skips_missing_prediction\nnot ok 3 - test_evaluate_batch_skips_missing_ground_truth\nnot ok 4 - test_evaluate_batch_empty\nnot ok 5 - test_evaluate_batch_refuses_unsafe_names_in_discovery\n# tests 5\n# pass 0\n# fail 5\n",
+  "targetTest": "test_evaluate_batch_aggregates_two_claims",
+  "targetFile": "tests/test_evaluation/test_evaluator.py",
+  "expected": "Evaluator.evaluate() aggregates two matching claim pairs to n_evaluated=2, accuracy=1.0, matrix sum=2",
+  "actual": "AttributeError: 'Evaluator' object has no attribute 'evaluate'"
+}

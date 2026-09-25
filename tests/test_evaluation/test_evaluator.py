@@ -220,3 +220,110 @@ def test_unknown_pred_label_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="not in"):
         Evaluator(_config(data_dir, results_dir)).evaluate_claim(claim_id)
+
+
+def test_evaluate_batch_aggregates_two_claims(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 2",
+        gt={"decision": "APPROVE"},
+        pred={"decision": "APPROVE"},
+    )
+    result = Evaluator(_config(data_dir, results_dir)).evaluate()
+    assert result.n_evaluated == 2
+    assert result.accuracy == 1.0
+    assert sum(sum(row) for row in result.confusion_matrix) == 2
+    assert set(result.claim_ids) == {"claim 1", "claim 2"}
+
+
+def test_evaluate_batch_skips_missing_prediction(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    missing_pred = data_dir / "claim 2"
+    missing_pred.mkdir(parents=True)
+    (missing_pred / "answer.json").write_text(
+        json.dumps({"decision": "APPROVE"}), encoding="utf-8"
+    )
+    (results_dir / "claim 2").mkdir(parents=True)
+    result = Evaluator(_config(data_dir, results_dir)).evaluate()
+    assert result.n_evaluated == 1
+    assert result.claim_ids == ["claim 1"]
+    assert result.accuracy == 1.0
+
+
+def test_evaluate_batch_skips_missing_ground_truth(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    orphan = results_dir / "claim 3"
+    orphan.mkdir(parents=True)
+    (orphan / "predicted_answer.json").write_text(
+        json.dumps({"decision": "APPROVE"}), encoding="utf-8"
+    )
+    (data_dir / "claim 3").mkdir(parents=True)
+    result = Evaluator(_config(data_dir, results_dir)).evaluate()
+    assert result.n_evaluated == 1
+    assert result.claim_ids == ["claim 1"]
+
+
+def test_evaluate_batch_empty(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    data_dir.mkdir()
+    results_dir.mkdir()
+    result = Evaluator(_config(data_dir, results_dir)).evaluate()
+    assert result.n_evaluated == 0
+    assert result.accuracy == 0.0
+    assert result.f1_macro == 0.0
+    assert result.claim_ids == []
+    assert sum(sum(row) for row in result.confusion_matrix) == 0
+
+
+def test_evaluate_batch_refuses_unsafe_names_in_discovery(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.json"
+    secret.write_text('{"decision":"APPROVE"}', encoding="utf-8")
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    evaluator = Evaluator(_config(data_dir, results_dir))
+
+    def _unsafe_names() -> list[str]:
+        return ["../escape", "claim/nested", "claim 1"]
+
+    evaluator._discover_claim_ids = _unsafe_names  # type: ignore[method-assign]
+    result = evaluator.evaluate()
+    assert result.n_evaluated == 1
+    assert result.claim_ids == ["claim 1"]
+    # Unsafe names must not escape roots to read sibling files
+    assert secret.read_text(encoding="utf-8") == '{"decision":"APPROVE"}'

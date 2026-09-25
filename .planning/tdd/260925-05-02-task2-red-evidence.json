@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_api/test_claims_get.py::test_get_claim_runs_process_then_analyze_returns_decision -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_get_claim_runs_process_then_analyze_returns_decision\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_get_claim_runs_process_then_analyze_returns_decision",
+  "targetFile": "tests/test_api/test_claims_get.py",
+  "expected": "GET /claims/{id} returns 200 with claim_id and analysis_result after process_then_analyze",
+  "actual": "AssertionError: assert 404 == 200 (GET route not implemented)"
+}

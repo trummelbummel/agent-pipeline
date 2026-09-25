@@ -84,7 +84,7 @@
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
-| 05 | 0/4 | In Progress|  |
+| 05 | 2/4 | In Progress|  |
 | 06 | 1/2 | Complete    | 2026-09-25 |
 | 07 | 0/0 | Not started |  |
 

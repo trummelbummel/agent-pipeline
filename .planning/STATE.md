@@ -32,9 +32,9 @@ Phase: 05 — FastAPI Claims API
 Current Plan: 3
 Total Plans in Phase: 4
 Status: Ready to execute
-Last activity: 2026-09-25 — Completed 05-00 Wave 0 FastAPI foundation
+Last activity: 2026-09-25 — Completed 05-01 create_app + POST /claims
 
-Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 1/4)
+Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 2/4)
 
 ## Accumulated Context
 

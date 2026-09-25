@@ -134,7 +134,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R017 — POST /claims multipart intake under config data_dir
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: `POST /claims` accepts multipart description.txt, supporting_documents.md, and an image whose extension is in config `document_formats`; writes under config `data_dir/{claim_id}/`
 - Why it matters: HTTP boundary for new claim intake without hardcoding filesystem roots
 - Source: ROADMAP Phase 05; 05-RESEARCH.md
@@ -166,7 +166,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R021 — Pipelines provided as FastAPI lifespan/DI resources
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: PreprocessingPipeline and ClaimPipeline created once in FastAPI lifespan and injected via Depends/request.state
 - Why it matters: Expensive Docling/LLM resources must not be reconstructed per request; TestClient needs `create_app(config=...)`
 - Source: ROADMAP Phase 05; 05-RESEARCH.md Pattern 1
@@ -266,11 +266,11 @@ This file is the explicit capability and coverage contract for the project.
 | R014 | core-capability | validated | 04-02 | none | Checker wired as graph node(s) |
 | R015 | quality-attribute | validated | 04-01 | none | analysis section externalized in config.yaml |
 | R016 | quality-attribute | validated | 04-01 | 04-02, 04-04 | Injectable chat_fn tests; mypy + pytest pass |
-| R017 | core-capability | active | 05-01 | 05-00 | POST /claims multipart writes under config data_dir/{claim_id}/ |
+| R017 | core-capability | validated | 05-01 | 05-00 | POST /claims multipart writes under config data_dir/{claim_id}/ |
 | R018 | core-capability | active | 05-02 | none | GET /claims/{id} process_then_analyze → decision JSON |
 | R019 | core-capability | active | 05-02 | none | GET /claims lists results_dir answers |
 | R020 | core-capability | active | 05-03 | 05-02 | run(source): one claim folder or claims directory from outside |
-| R021 | core-capability | active | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
+| R021 | core-capability | validated | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
 | R022 | quality-attribute | active | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
 | R023 | core-capability | active | 07 | none | Denial-rule Checker steps in ClaimPipeline + analysis_result fields |
 | R024 | core-capability | active | 07 | none | Missing documentation check (claims 1, 2, 21, 25) |

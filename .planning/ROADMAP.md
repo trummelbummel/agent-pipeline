@@ -155,7 +155,7 @@ Plans:
 **Goal:** Add FastAPI under `src/api` with three endpoints: `POST /claims` (multipart: description.txt, supporting_documents.md, image in config `document_formats`) writes a new folder under config `data_dir/{claim_id}/`; `GET /claims/{claim_id}` runs PreprocessingPipeline + ClaimPipeline for that claim (same orchestration as `main`) and returns the decision; `GET /claims` lists all processed claim answers from `results_dir`. Refactor pipelines so they accept a single claim folder as well as a full directory. Inject pipelines as FastAPI app resources/dependencies (lifespan fixture).
 **Requirements**: R017, R018, R019, R020, R021, R022
 **Depends on:** Phase 4
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 
@@ -169,7 +169,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 05-02-PLAN.md — process_then_analyze + GET /claims/{id} + GET /claims list (R018, R019)
+- [x] 05-02-PLAN.md — process_then_analyze + GET /claims/{id} + GET /claims list (R018, R019)
 
 **Wave 3** *(blocked on Wave 2)*
 

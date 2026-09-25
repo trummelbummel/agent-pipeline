@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 05
 current_phase_name: FastAPI Claims API
-current_plan: 3
+current_plan: 4
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-09-25T16:36:39.500Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-09-25T16:43:33.070Z"
 last_activity: 2026-09-25
 last_activity_desc: Completed 05-00 Wave 0 FastAPI foundation
-state_head: 08f31dd5384ce9815daee27934e4f62e33f8180c
+state_head: 17bd40f5611f409b4d71422cb669d808031910dd
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
 milestone_name: Claim Preprocessing
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 05 — FastAPI Claims API
-Current Plan: 3
+Current Plan: 4
 Total Plans in Phase: 4
 Status: Ready to execute
 Last activity: 2026-09-25 — Completed 05-01 create_app + POST /claims
@@ -92,6 +92,9 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 05]: Probe lifespan tests call deps with Request (Annotated Depends breaks under future annotations in nested test fns)
 - [Phase 05]: 409 conflict test patches _next_claim_id to simulate TOCTOU against max+1 id scheme
 - [Phase 05]: Image path hardened with resolve().is_relative_to(claim_dir) after basename coerce
+- [Phase 05]: List response is a bare list[ClaimListItem] array (not a wrapper model)
+- [Phase 05]: Absent optional artifacts serialize as null on ClaimListItem / ClaimDecision.predicted_answer
+- [Phase 05]: Unsafe claim_id tested via percent-encoded %2E%2E so the segment reaches the handler
 
 ### Blockers/Concerns
 
@@ -106,8 +109,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:36:39.478Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-09-25T16:43:33.048Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -128,3 +131,4 @@ Resume file: None
 | Phase 06 P02 | 2 min | 2 tasks | 6 files |
 | Phase 05 P00 | 1min | 3 tasks | 8 files |
 | Phase 05 P01 | 5min | 3 tasks | 7 files |
+| Phase 05 P02 | 6min | 3 tasks | 7 files |

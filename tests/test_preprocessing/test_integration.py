@@ -133,7 +133,12 @@ def test_spot_checks_key_claims() -> None:
 @pytest.mark.integration
 def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> None:
     """Sanity: pipeline continues when optional files are absent."""
-    from compliance.config.settings import AppConfig, ExtractionConfig, PreprocessingConfig
+    from compliance.config.settings import (
+        AppConfig,
+        ClassificationConfig,
+        ExtractionConfig,
+        PreprocessingConfig,
+    )
 
     claim = tmp_path / "claim 1"
     claim.mkdir()
@@ -148,6 +153,12 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             confidence_threshold=0.7,
         ),
         extraction=ExtractionConfig(model="unused", prompt="unused"),
+        classification=ClassificationConfig(
+            labels=["Trip cancellation or rescheduling"],
+            other_label="Other",
+            model="unused",
+            prompt="unused",
+        ),
     )
     bundles = run_pipeline(config, description_reader=_passthrough_description_reader())
     assert len(bundles) == 1

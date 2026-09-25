@@ -7,7 +7,12 @@ from unittest.mock import MagicMock
 
 import numpy as np
 
-from compliance.config.settings import AppConfig, ExtractionConfig, PreprocessingConfig
+from compliance.config.settings import (
+    AppConfig,
+    ClassificationConfig,
+    ExtractionConfig,
+    PreprocessingConfig,
+)
 from compliance.models.claim import BookingData, ClaimBundle, DocumentData
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
@@ -32,6 +37,12 @@ def _config(data_dir: Path) -> AppConfig:
             confidence_threshold=0.7,
         ),
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
+        classification=ClassificationConfig(
+            labels=["Trip cancellation or rescheduling"],
+            other_label="Other",
+            model="test-model",
+            prompt="classify",
+        ),
     )
 
 

@@ -63,6 +63,9 @@ show_error_codes = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: tests that run against real data/ with Docling (slow)",
+]
 
 [tool.ruff]
 target-version = "py310"

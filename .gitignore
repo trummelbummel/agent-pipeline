@@ -247,3 +247,4 @@ vendor/
 coverage/
 .cache/
 tmp/
+data/**/processed.json

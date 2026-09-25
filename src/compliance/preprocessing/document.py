@@ -33,6 +33,35 @@ _KV_LINE = re.compile(r"^([^:\n]+):\s*(.+)$")
 _SIGNATURE_CLASS = PictureClassificationLabel.SIGNATURE.value
 _IMAGE_RETRY_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
+
+def vision_ocr_text(
+    image_path: Path,
+    *,
+    model: str,
+    prompt: str,
+    chat_fn: ChatFn,
+) -> str:
+    """Transcribe a document image with a vision chat model.
+
+    :param image_path: Image path for multimodal input (PNG preferred).
+    :param model: Vision model name from ``ocr_retry`` config.
+    :param prompt: Transcription instruction from ``ocr_retry`` config.
+    :param chat_fn: Chat callable (ollama.chat or test double).
+    :return: Model message content (markdown/plain text).
+    """
+    response = chat_fn(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+                "images": [str(image_path)],
+            }
+        ],
+    )
+    return response_content(response)
+
+
 _TIMESTAMP_PATTERN = re.compile(
     r"\b("
     r"\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}"      # DD/MM/YYYY or similar
@@ -225,8 +254,9 @@ class DocumentReader(Reader):
         Raster images are converted to PNG first. When a Benford checker is wired,
         non-conforming images return ``DocumentData`` with decision DENY / reason
         fraud and never call Docling. PDFs skip Benford (no Pillow conversion).
-        When Docling OCR is faulty and ``ocr_retry`` is enabled, retries once via
-        a config-driven vision model on the resolved PNG.
+        When Docling OCR is weak (faulty, low confidence, and/or HITL — per
+        ``ocr_retry`` flags) and retry is enabled, retries once via a
+        config-driven vision model on the resolved PNG.
 
         :param path: Filesystem path to the source document.
         :return: DocumentData from Docling (or vision retry), or an early fraud DENY.
@@ -252,6 +282,28 @@ class DocumentReader(Reader):
             source_file=path.name,
         )
 
+    def _retry_trigger_reasons(self, document: DocumentData) -> list[str]:
+        """Return enabled OCR-retry trigger names that match document metadata.
+
+        :param document: Docling ``DocumentData`` before vision retry.
+        :return: Ordered reason codes (empty → do not retry).
+        """
+        if self.ocr_retry is None or not self.ocr_retry.enabled:
+            return []
+        meta = document.metadata
+        reasons: list[str] = []
+        if self.ocr_retry.on_faulty_extraction and meta.faulty_extraction:
+            reasons.append("faulty_extraction")
+        low_confidence = False
+        confidence = meta.extraction_probability
+        if isinstance(confidence, (int, float)) and not math.isnan(float(confidence)):
+            low_confidence = float(confidence) < self.confidence_threshold
+        if self.ocr_retry.on_low_confidence and low_confidence:
+            reasons.append("low_confidence")
+        if self.ocr_retry.on_human_in_the_loop and meta.human_in_the_loop:
+            reasons.append("human_in_the_loop")
+        return reasons
+
     def _maybe_retry_ocr(
         self,
         document: BaseModel,
@@ -260,7 +312,9 @@ class DocumentReader(Reader):
         prior_payload: dict[str, Any],
         source_file: str,
     ) -> BaseModel:
-        """Retry once with a vision model when Docling OCR is faulty.
+        """Retry once with a vision model when Docling OCR matches retry triggers.
+
+        Triggers (config flags): faulty extraction, low confidence, HITL.
 
         :param document: DocumentData from the first Docling pass.
         :param resolved: Path Docling consumed (PNG or PDF).
@@ -270,7 +324,8 @@ class DocumentReader(Reader):
         """
         if not isinstance(document, DocumentData):
             return document
-        if not document.metadata.faulty_extraction:
+        trigger_reasons = self._retry_trigger_reasons(document)
+        if not trigger_reasons:
             return document
 
         if self.ocr_retry is None or not self.ocr_retry.enabled:
@@ -307,16 +362,17 @@ class DocumentReader(Reader):
             logger,
             branch="ocr_retry",
             outcome="START",
-            reason="faulty_extraction",
+            reason=",".join(trigger_reasons),
             file=source_file,
             model=self.ocr_retry.model,
         )
 
         try:
-            retry_text = self._vision_ocr_text(
+            retry_text = vision_ocr_text(
                 resolved,
                 model=self.ocr_retry.model,
                 prompt=self.ocr_retry.prompt,
+                chat_fn=self._retry_chat,
             )
         except Exception as exc:
             log_branch_decision(
@@ -386,17 +442,9 @@ class DocumentReader(Reader):
         :param prompt: Transcription instruction from ``ocr_retry`` config.
         :return: Model message content (markdown/plain text).
         """
-        response = self._retry_chat(
-            model=model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt,
-                    "images": [str(image_path)],
-                }
-            ],
+        return vision_ocr_text(
+            image_path, model=model, prompt=prompt, chat_fn=self._retry_chat
         )
-        return response_content(response)
 
     def _load(self, path: Path) -> dict[str, Any]:
         """Convert to PNG when needed, then run Docling extraction.

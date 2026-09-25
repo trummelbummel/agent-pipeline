@@ -5,6 +5,7 @@ from compliance.preprocessing.description import DescriptionPreprocessor, Descri
 from compliance.preprocessing.document import DocumentPreprocessor, DocumentReader
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.preprocessing.markdown import MarkdownPreprocessor, MarkdownReader
+from compliance.preprocessing.pipeline import run_pipeline
 from compliance.preprocessing.preprocessing import FormatConverter, Preprocessor
 from compliance.preprocessing.reader import Reader
 
@@ -21,4 +22,5 @@ __all__ = [
     "MarkdownReader",
     "Preprocessor",
     "Reader",
+    "run_pipeline",
 ]

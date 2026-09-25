@@ -44,6 +44,11 @@ def test_load_config_reads_extraction_model_and_prompt() -> None:
     assert "omit unknowns" in config.extraction.prompt
 
 
+def test_load_config_reads_preprocessed_dir() -> None:
+    config = load_config("config.yaml")
+    assert config.preprocessing.preprocessed_dir == "preprocessed"
+
+
 def test_load_config_reads_classification_section() -> None:
     config = load_config("config.yaml")
     assert len(config.classification.labels) >= 3

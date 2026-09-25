@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_config/test_settings.py::test_load_config_reads_preprocessed_dir -q --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_load_config_reads_preprocessed_dir\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_load_config_reads_preprocessed_dir",
+  "targetFile": "tests/test_config/test_settings.py",
+  "expected": "load_config('config.yaml').preprocessing.preprocessed_dir == 'preprocessed'",
+  "actual": "AttributeError: 'PreprocessingConfig' object has no attribute 'preprocessed_dir'"
+}

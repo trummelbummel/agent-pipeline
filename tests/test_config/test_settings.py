@@ -15,10 +15,10 @@ def test_load_config_reads_document_formats(tmp_path: Path) -> None:
         """
 preprocessing:
   data_dir: data
-  output_filename: processed.json
   document_formats: [webp, jpg, png]
   confidence_threshold: 0.7
-  preprocessed_dir: preprocessed
+  preprocessed_dir: data/preprocessed
+  results_dir: data/results
 extraction:
   model: test-model
   prompt: |
@@ -47,7 +47,27 @@ def test_load_config_reads_extraction_model_and_prompt() -> None:
 
 def test_load_config_reads_preprocessed_dir() -> None:
     config = load_config("config.yaml")
-    assert config.preprocessing.preprocessed_dir == "preprocessed"
+    assert config.preprocessing.data_dir == "data/raw"
+    assert config.preprocessing.preprocessed_dir == "data/preprocessed"
+    assert config.preprocessing.results_dir == "data/results"
+
+
+def test_load_config_reads_artifact_names() -> None:
+    config = load_config("config.yaml")
+    artifacts = config.preprocessing.artifacts
+    assert artifacts.description == "description.txt"
+    assert artifacts.answer == "answer.json"
+    assert artifacts.predicted_answer == "predicted_answer.json"
+    assert artifacts.document_metadata == "document_metadata.json"
+    assert artifacts.supporting_document == "supporting_document.md"
+    assert artifacts.supporting_documents == "supporting_documents.md"
+
+
+def test_load_config_benford_disabled_by_default() -> None:
+    config = load_config("config.yaml")
+    assert config.benford.enabled is False
+    assert config.benford.block_size == 8
+    assert config.benford.chi_squared_threshold == 15.51
 
 
 def test_load_config_reads_classification_section() -> None:
@@ -56,6 +76,13 @@ def test_load_config_reads_classification_section() -> None:
     assert config.classification.other_label
     assert config.classification.model
     assert config.classification.prompt.strip()
+
+
+def test_load_config_reads_checking_section() -> None:
+    config = load_config("config.yaml")
+    assert config.checking.model
+    assert config.checking.containment_prompt.strip()
+    assert config.checking.contradicts_prompt.strip()
 
 
 def test_load_config_reads_classification_labels_and_other() -> None:
@@ -73,10 +100,10 @@ def test_load_config_missing_classification_section_raises(tmp_path: Path) -> No
         """
 preprocessing:
   data_dir: data
-  output_filename: processed.json
   document_formats: [webp]
   confidence_threshold: 0.7
-  preprocessed_dir: preprocessed
+  preprocessed_dir: data/preprocessed
+  results_dir: data/results
 extraction:
   model: test-model
   prompt: extract

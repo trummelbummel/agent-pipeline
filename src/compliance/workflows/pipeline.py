@@ -22,6 +22,15 @@ _ARTIFACT_NAMES = (
 )
 
 
+def output_root_from_config(config: AppConfig) -> Path:
+    """Resolve the workflows preprocessed output root from config.
+
+    :param config: Loaded application configuration.
+    :return: Path to ``preprocessing.preprocessed_dir``.
+    """
+    return Path(config.preprocessing.preprocessed_dir)
+
+
 def _is_nan_scalar(value: object) -> bool:
     return isinstance(value, float) and np.isnan(value)
 

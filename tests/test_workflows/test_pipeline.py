@@ -18,7 +18,7 @@ from compliance.config.settings import (
 from compliance.models.claim import BookingData, DocumentData
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
-from compliance.workflows import process_claim_to_preprocessed
+from compliance.workflows import output_root_from_config, process_claim_to_preprocessed
 
 
 def _config(data_dir: Path) -> AppConfig:
@@ -73,6 +73,11 @@ _EXPECTED_ARTIFACTS = (
     "supporting_document.json",
     "supporting_documents.md",
 )
+
+
+def test_output_root_from_config_matches_preprocessing_dir(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    assert output_root_from_config(config) == Path(config.preprocessing.preprocessed_dir)
 
 
 def test_process_claim_writes_four_artifacts(tmp_path: Path) -> None:

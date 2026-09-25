@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
 from compliance.models.claim import GroundTruth, is_nan_scalar
 from compliance.preprocessing.answer import AnswerReader
 from compliance.workflows.pipeline import _validate_claim_dir_name
 
 logger = logging.getLogger(__name__)
+
+_CLAIM_NUM = re.compile(r"(\d+)")
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,120 @@ class Evaluator:
         logger.info(
             "evaluated claim_id=%s n=%d accuracy=%.4f f1_macro=%.4f",
             claim_id,
+            result.n_evaluated,
+            result.accuracy,
+            result.f1_macro,
+        )
+        return result
+
+    def evaluate(self) -> EvaluationResult:
+        """Evaluate all discoverable claim pairs under results_dir × data_dir.
+
+        Soft-skips unsafe names and missing/invalid pairs (A11). Empty set
+        yields n_evaluated=0 with accuracy/f1 0.0.
+
+        :return: Aggregate EvaluationResult over successfully scored claims.
+        """
+        labels = list(self._config.evaluation.labels)
+        claim_ids: list[str] = []
+        y_true: list[str] = []
+        y_pred: list[str] = []
+        matches: list[bool] = []
+        for claim_id in self._discover_claim_ids():
+            try:
+                _validate_claim_dir_name(claim_id)
+                single = self.evaluate_claim(claim_id)
+            except Exception as exc:
+                log_branch_decision(
+                    logger,
+                    branch="evaluation_batch",
+                    outcome="SKIP",
+                    reason="claim_failed",
+                    level=logging.WARNING,
+                    claim=claim_id,
+                    error=type(exc).__name__,
+                )
+                continue
+            claim_ids.extend(single.claim_ids)
+            y_true.extend(single.y_true)
+            y_pred.extend(single.y_pred)
+            matches.extend(single.matches)
+        return self._aggregate_scores(claim_ids, y_true, y_pred, matches, labels)
+
+    def _discover_claim_ids(self) -> list[str]:
+        """List claim folder names under results_dir (A11 discovery).
+
+        :return: Claim folder names sorted by numeric id, then name.
+        """
+        results_dir = Path(self._config.preprocessing.results_dir)
+        if not results_dir.is_dir():
+            return []
+        folders = [
+            path
+            for path in results_dir.iterdir()
+            if path.is_dir() and path.name.lower().startswith("claim")
+        ]
+        return [path.name for path in sorted(folders, key=self._claim_sort_key)]
+
+    def _claim_sort_key(self, path: Path) -> tuple[int, str]:
+        """Sort key preferring numeric claim ids.
+
+        :param path: Claim folder path under results_dir.
+        :return: (number, name) for stable ordering.
+        """
+        match = _CLAIM_NUM.search(path.name)
+        number = int(match.group(1)) if match else 0
+        return (number, path.name)
+
+    def _aggregate_scores(
+        self,
+        claim_ids: list[str],
+        y_true: list[str],
+        y_pred: list[str],
+        matches: list[bool],
+        labels: list[str],
+    ) -> EvaluationResult:
+        """Build EvaluationResult from collected per-claim vectors via A4/A5 helpers.
+
+        :param claim_ids: Successfully scored claim folder names.
+        :param y_true: Ground-truth decisions in claim order.
+        :param y_pred: Raw predicted decisions in claim order.
+        :param matches: Per-claim A4 match booleans.
+        :param labels: Config evaluation label vocabulary.
+        :return: Aggregate metrics with shared confusion/F1 math.
+        """
+        n = len(matches)
+        if n == 0:
+            empty_matrix = [[0 for _ in labels] for _ in labels]
+            result = EvaluationResult(
+                claim_ids=[],
+                y_true=[],
+                y_pred=[],
+                matches=[],
+                confusion_matrix=empty_matrix,
+                labels=labels,
+                accuracy=0.0,
+                f1_macro=0.0,
+                n_evaluated=0,
+            )
+        else:
+            effective = [
+                self._effective_pred_label(pred, true, matched)
+                for pred, true, matched in zip(y_pred, y_true, matches, strict=True)
+            ]
+            result = EvaluationResult(
+                claim_ids=claim_ids,
+                y_true=y_true,
+                y_pred=y_pred,
+                matches=matches,
+                confusion_matrix=self._confusion_matrix(y_true, effective, labels),
+                labels=labels,
+                accuracy=sum(matches) / n,
+                f1_macro=self._macro_f1(y_true, effective, labels),
+                n_evaluated=n,
+            )
+        logger.info(
+            "batch evaluated n=%d accuracy=%.4f f1_macro=%.4f",
             result.n_evaluated,
             result.accuracy,
             result.f1_macro,

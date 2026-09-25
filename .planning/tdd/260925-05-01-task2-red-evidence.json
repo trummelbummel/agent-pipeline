@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_api/test_claims_post.py -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_post_claims_writes_raw_folder\nnot ok 2 - test_post_claims_rejects_disallowed_image_extension\nnot ok 3 - test_post_claims_conflict_when_folder_exists\n# tests 4\n# pass 0\n# fail 3\n# xfail 1\n",
+  "targetTest": "test_post_claims_writes_raw_folder",
+  "targetFile": "tests/test_api/test_claims_post.py",
+  "expected": "POST /claims multipart returns 201 with claim_id and writes three files under data_dir/{claim_id}",
+  "actual": "AssertionError: {\"detail\":\"Not Found\"} assert 404 == 201"
+}

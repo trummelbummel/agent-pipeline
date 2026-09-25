@@ -7,7 +7,7 @@ Structured claim preprocessing so agents and rules engines can approve/deny insu
 v1.0 Claim Preprocessing — Reader/Preprocessor pipeline producing processed.json per claim folder.
 
 ## Requirements
-See REQUIREMENTS.md (R001–R006). Decisions D001–D008 in DECISIONS.md.
+See REQUIREMENTS.md (R001–R009). Decisions D001–D009 in DECISIONS.md.
 
 ## Evolution
 

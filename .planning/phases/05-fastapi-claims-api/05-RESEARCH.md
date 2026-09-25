@@ -504,27 +504,23 @@ def _workflow_exit_code(config: AppConfig, *, mode: CliMode) -> int:
 | A5 | No auth for Phase 05 | Deferred | Takehome may later require tokens |
 | A6 | Package legitimacy SUS is metadata gap, not malware | Package Audit | Still requires human-verify checkpoint |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **claim_id generation**
+1. **claim_id generation** — RESOLVED (A1 / D-08)
    - What we know: discovery requires names starting with `claim`; path safety rejects separators/`..`
-   - What's unclear: auto-increment vs client-provided vs UUID under `claim-` prefix
-   - Recommendation: server-generated `claim {max+1}`; return `claim_id` in 201 body
+   - **Decision:** Server-generated next `claim {n}` (numeric max+1 under `data_dir`); must pass `_validate_claim_dir_name` and lowercase-startswith `claim`; return `claim_id` in 201 body. No client-provided ids in Phase 05.
 
-2. **List endpoint payload**
+2. **List endpoint payload** — RESOLVED (A3)
    - What we know: results_dir currently has mostly `predicted_answer.json` only (23 files observed; no `analysis_result.json` on disk at research time)
-   - What's unclear: list predicted only, analysis only, or union
-   - Recommendation: list `{claim_id, predicted_answer?, analysis_result?}` for each subdirectory under `results_dir`
+   - **Decision:** List `{claim_id, predicted_answer?, analysis_result?}` for each subdirectory under `results_dir` (optional objects when files exist). GET-by-id decision body requires `analysis_result` after successful `process_then_analyze`; `predicted_answer` optional if present.
 
-3. **Missing raw claim on GET**
+3. **Missing raw claim on GET** — RESOLVED (Open Q3 / 05-02)
    - What we know: GET runs preprocess + analyze from raw folder
-   - What's unclear: 404 if `data_dir/claim_id` missing vs “analyze preprocessed only”
-   - Recommendation: 404 if raw claim folder missing; do not invent empty claims
+   - **Decision:** HTTP 404 if `data_dir/{claim_id}` is missing; do not invent empty claims or analyze-preprocessed-only fallbacks.
 
-4. **Factory for tests**
+4. **Factory for tests** — RESOLVED (A5 / D-10)
    - What we know: lifespan loads `config.yaml` by default
-   - What's unclear: inject AppConfig with tmp paths
-   - Recommendation: `create_app(config: AppConfig | None = None)` for TestClient + monkeypatch-free tmp roots
+   - **Decision:** `create_app(config: AppConfig | None = None, chat_fn=...)` factory; default loads `config.yaml`; TestClient injects tmp-root AppConfig. Implemented in plan 05-01 (not Wave 0).
 
 ## Environment Availability
 

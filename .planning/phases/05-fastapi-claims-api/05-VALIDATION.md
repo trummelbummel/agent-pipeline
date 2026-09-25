@@ -40,14 +40,15 @@ created: "2026-09-25"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 05-00-01 | 00 | 0 | R022 | — | N/A | infra | `uv add fastapi uvicorn python-multipart && uv add --dev httpx` | ❌ W0 | ⬜ pending |
-| 05-01-01 | 01 | 1 | R017 | T-05-01 | Extension allowlist; basename-only filenames; safe claim_id | unit | `uv run pytest tests/test_api/test_claims_post.py -x` | ❌ W0 | ⬜ pending |
-| 05-01-02 | 01 | 1 | R017 | T-05-02 | Reject path traversal / unsafe claim_id | unit | `uv run pytest tests/test_api/test_claims_post.py -x` | ❌ W0 | ⬜ pending |
-| 05-02-01 | 02 | 2 | R018 | — | GET runs process_claim + analyze_claim | unit | `uv run pytest tests/test_api/test_claims_get.py -x` | ❌ W0 | ⬜ pending |
-| 05-02-02 | 02 | 2 | R019 | — | GET /claims lists results_dir | unit | `uv run pytest tests/test_api/test_claims_list.py -x` | ❌ W0 | ⬜ pending |
-| 05-02-03 | 02 | 2 | R021 | — | Lifespan exposes pipelines via Depends | unit | `uv run pytest tests/test_api/test_deps_lifespan.py -x` | ❌ W0 | ⬜ pending |
-| 05-03-01 | 03 | 3 | R020 | — | Single-claim folder accepted by pipelines/main | unit | `uv run pytest tests/test_workflows/ -k single -x` | ❌ W0 | ⬜ pending |
-| 05-03-02 | 03 | 3 | R022 | — | mypy clean on src/api | static | `uv run mypy` | ✅ | ⬜ pending |
+| 05-00-01 | 00 | 0 | R022 | T-05-SC | Package legitimacy human-verify before uv add | infra | `uv add fastapi uvicorn python-multipart && uv add --dev httpx` | ❌ W0 | ⬜ pending |
+| 05-00-02 | 00 | 0 | R022 | — | Hatch packages includes src/api; test stubs collectable | infra | `uv run pytest tests/test_api -q --tb=short` | ❌ W0 | ⬜ pending |
+| 05-01-01 | 01 | 1 | R021 | — | Lifespan exposes pipelines via Depends; create_app(config=...) | unit | `uv run pytest tests/test_api/test_deps_lifespan.py -x` | ❌ W0 | ⬜ pending |
+| 05-01-02 | 01 | 1 | R017 | T-05-01 / T-05-02 | Extension allowlist; basename-only filenames; safe claim_id; 409 on collide | unit | `uv run pytest tests/test_api/test_claims_post.py -x` | ❌ W0 | ⬜ pending |
+| 05-01-03 | 01 | 1 | R017 | T-05-01 | Reject path traversal / unsafe claim_id | unit | `uv run pytest tests/test_api/test_claims_post.py -x` | ❌ W0 | ⬜ pending |
+| 05-02-01 | 02 | 2 | R018 | T-05-01 | GET runs process_then_analyze; missing → 404 | unit | `uv run pytest tests/test_api/test_claims_get.py -x` | ❌ W0 | ⬜ pending |
+| 05-02-02 | 02 | 2 | R019 | — | GET /claims lists results_dir; empty → []; stable claim_id order | unit | `uv run pytest tests/test_api/test_claims_list.py -x` | ❌ W0 | ⬜ pending |
+| 05-03-01 | 03 | 3 | R020 | — | CLI --claim-id single-claim orchestration | unit | `uv run pytest tests/test_workflows/ -q --tb=short` | ❌ W0 | ⬜ pending |
+| 05-03-02 | 03 | 3 | R022 | — | mypy + pytest gate on api/workflows/config/main | static | `uv run pytest tests/test_api tests/test_workflows tests/test_config/test_settings.py -q && uv run mypy src/api/ src/compliance/workflows/ src/compliance/config/ src/main.py` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -55,10 +56,11 @@ created: "2026-09-25"
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_api/` package + POST/GET/list/lifespan stubs for R017–R021
-- [ ] `create_app(config=...)` factory for tmp-path roots
-- [ ] `uv add fastapi uvicorn python-multipart` + `uv add --dev httpx` after human-verify of package legitimacy
-- [ ] Hatch `packages` includes `src/api`
+- [ ] Human-verify fastapi / uvicorn / python-multipart / httpx on PyPI (SUS seam)
+- [ ] `uv add fastapi uvicorn python-multipart` + `uv add --dev httpx`
+- [ ] Hatch `packages` includes `src/api`; `src/api/__init__.py` present
+- [ ] `tests/test_api/` package + POST/GET/list/lifespan **stubs** (xfail OK) for R017–R021
+- [ ] Do **not** implement `create_app` in Wave 0 — deferred to plan 05-01
 
 ---
 

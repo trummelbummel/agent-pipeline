@@ -1,0 +1,1 @@
+No external API integration: Phase 05 builds our own FastAPI Claims surface under `src/api`; it does not consume or wrap a third-party SaaS/SDK. Detector fired on the phase name "FastAPI Claims API" only.

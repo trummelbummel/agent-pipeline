@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_api/test_deps_lifespan.py -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_lifespan_exposes_pipelines_via_depends\nnot ok 2 - test_create_app_uses_injected_config_roots\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_lifespan_exposes_pipelines_via_depends",
+  "targetFile": "tests/test_api/test_deps_lifespan.py",
+  "expected": "with TestClient(create_app(config=tmp)) Depends returns same PreprocessingPipeline/ClaimPipeline instances across requests",
+  "actual": "Failed: create_app not implemented: No module named 'api.app'"
+}

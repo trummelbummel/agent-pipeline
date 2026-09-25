@@ -1,21 +1,21 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 03
-current_plan: 2
-status: completed
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-09-25T12:20:47.214Z"
+current_phase: 04
+current_phase_name: Claim Analysis Pipeline
+current_plan: null
+status: ready_to_plan
+stopped_at: Phase 04 added to roadmap
+last_updated: "2026-09-25T15:16:47.731Z"
 last_activity: 2026-09-25
-state_head: 7b285e5b8126a2f640fad96e1b5336d49b19e5ed
+last_activity_desc: Phase 04 Claim Analysis Pipeline added
+state_head: ba32d8fbb2a7448e1b487c73228f0bf181a95d50
 progress:
-  total_phases: 3
-  completed_phases: 1
-  total_plans: 6
+  total_phases: 4
+  completed_phases: 3
+  total_plans: 10
   completed_plans: 6
 milestone_name: Claim Preprocessing
-current_phase_name: Preprocessing Pipeline Orchestration
-last_activity_desc: Phase 03 marked complete
 ---
 
 # Project State
@@ -24,17 +24,17 @@ last_activity_desc: Phase 03 marked complete
 
 See: .planning/PROJECT.md
 
-**Current focus:** Phase 03 — Preprocessing Pipeline Orchestration
+**Current focus:** Phase 04 — Claim Analysis Pipeline
 
 ## Current Position
 
-Phase: 03 — COMPLETE
-Current Plan: 2
-Total Plans in Phase: 3
-Status: Phase 03 complete
-Last activity: 2026-09-25 - Completed quick task 260925-mqh: after ExtractionFailure a retry with an expensive model should be done
+Phase: 04 (Claim Analysis Pipeline) — READY TO EXECUTE
+Current Plan: —
+Total Plans in Phase: 4
+Status: Phase added; awaiting plan
+Last activity: 2026-09-25 - Added Phase 04 Claim Analysis Pipeline
 
-Progress: [██████████] 100%
+Progress: [████████░░] 75% (3/4 phases complete)
 
 ## Accumulated Context
 
@@ -42,6 +42,7 @@ Progress: [██████████] 100%
 
 - Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)
 - Phase 3 added: Preprocessing Pipeline Orchestration — workflows/pipeline.py + main entrypoint writing mirrored preprocessed/ (description.txt, answer.json, supporting_document.json, supporting_documents.md)
+- Phase 4 added: Claim Analysis Pipeline — ClaimPipeline LangGraph over preprocessed data; coverage/reason/document classifiers + Checker; local LLM config
 
 ### Decisions
 

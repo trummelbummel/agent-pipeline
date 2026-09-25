@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_run_batch_writes_analysis_for_successful_claims -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_run_batch_writes_analysis_for_successful_claims\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_run_batch_writes_analysis_for_successful_claims",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "ClaimPipeline.run discovers preprocessed claims and returns analysis_result paths under results_dir for successful claims",
+  "actual": "AttributeError: 'ClaimPipeline' object has no attribute 'run'"
+}

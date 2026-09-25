@@ -428,3 +428,76 @@ def test_refuses_unsafe_claim_dir_name(tmp_path: Path) -> None:
     assert set(results_root.iterdir()) == before
     chat_fn.assert_not_called()
 
+
+def _repeating_cancellation_chat_fn() -> MagicMock:
+    """Chat seam that repeats the cancellation path responses for batch runs."""
+    from itertools import cycle
+
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+        }
+    )
+    contradicts = _chat_response({"result": False})
+    return MagicMock(side_effect=cycle([coverage, reason, document, contradicts]))
+
+
+def test_run_batch_writes_analysis_for_successful_claims(tmp_path: Path) -> None:
+    """R010: ClaimPipeline.run analyzes all preprocessed claims and writes results."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    _seed_preprocessed_claim(config, claim_name="claim 1")
+    _seed_preprocessed_claim(config, claim_name="claim 2")
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    written = pipeline.run()
+
+    analysis_name = config.preprocessing.artifacts.analysis_result
+    results_root = Path(config.preprocessing.results_dir)
+    expected = [
+        results_root / "claim 1" / analysis_name,
+        results_root / "claim 2" / analysis_name,
+    ]
+    assert sorted(written) == sorted(expected)
+    for path in expected:
+        assert path.is_file()
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert TRIP_CANCELLATION in payload["coverage_labels"]
+
+
+def test_run_batch_soft_fails_one_claim(tmp_path: Path) -> None:
+    """R010: one failing claim is skipped; siblings still get analysis_result.json."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    _seed_preprocessed_claim(config, claim_name="claim 1")
+    bad_dir = _seed_preprocessed_claim(config, claim_name="claim 2")
+    # Remove description so analyze_claim fails inside load_artifacts.
+    (bad_dir / config.preprocessing.artifacts.description).unlink()
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    written = pipeline.run()
+
+    analysis_name = config.preprocessing.artifacts.analysis_result
+    results_root = Path(config.preprocessing.results_dir)
+    good_path = results_root / "claim 1" / analysis_name
+    bad_path = results_root / "claim 2" / analysis_name
+    assert good_path in written
+    assert bad_path not in written
+    assert good_path.is_file()
+    assert not bad_path.exists()
+

@@ -38,7 +38,7 @@
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 01 | 3/3 | Complete    | 2026-09-25 |
-| 02 | 0/1 | Planned     | — |
+| 02 | 0/1 | In Progress|  |
 | 03 | 0/2 | Planned     | — |
 
 ### Phase 2: Case Classifier Models
@@ -46,11 +46,11 @@
 **Goal:** Add `models/classifier.py` with a Classifier ABC and CaseClassifier that takes description.txt text and returns label(s) with probability estimates. Default labels map to policy coverage types: Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection, plus Other when no class fits. CaseClassifier must accept config-specified labels so classification targets are externalized.
 **Requirements**: R007, R008, R009
 **Depends on:** Phase 1
-**Plans:** 1 plan
+**Plans:** 1/1 plans executed
 
 Plans:
 
-- [ ] 02-01-PLAN.md — Tracer: ClassificationResult + Classifier ABC + CaseClassifier with config-driven labels, Other fallback, injectable chat_fn
+- [x] 02-01-PLAN.md — Tracer: ClassificationResult + Classifier ABC + CaseClassifier with config-driven labels, Other fallback, injectable chat_fn
 
 ### Phase 3: Preprocessing Pipeline Orchestration
 

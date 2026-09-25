@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 2
+current_phase: 02
 current_phase_name: Case Classifier Models
-current_plan: Not started
-status: ready
-stopped_at: Phase 03 added — not planned yet
-last_updated: "2026-09-25T11:49:10.851Z"
+current_plan: 1
+status: verifying
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-09-25T11:59:52.525Z"
 last_activity: 2026-09-25
-last_activity_desc: Phase 03 added (Preprocessing Pipeline Orchestration)
-state_head: 61a3dabad4496075f1422685af0826b6b29c8225
+last_activity_desc: Phase 02 execution started
+state_head: 0de315c32a576e421bc36e3a00e7258aede1b803
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 3
+  total_plans: 6
+  completed_plans: 4
 milestone_name: Claim Preprocessing
 ---
 
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 2 (Case Classifier Models) — READY TO EXECUTE
-Current Plan: Not started
+Phase: 02 (Case Classifier Models) — EXECUTING
+Current Plan: 1
 Total Plans in Phase: 1
-Status: ready
-Last activity: 2026-09-25 — Phase 03 added
+Status: Phase complete — ready for verification
+Last activity: 2026-09-25 — Phase 02 execution started
 
 Progress: [███·······] 33%
 
@@ -55,6 +55,9 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 1]: PDF skips FormatConverter; passed through to Docling
 - [Phase 1]: InformationExtractor uses ollama.chat with config model/prompt; injectable chat_fn for tests
 - [Phase 1]: Integration skips live LLM when Ollama unavailable; Docling runs on real data/
+- [Phase 02]: Mirror InformationExtractor injectable chat_fn for CaseClassifier — Same LLM seam as Phase 1; unit tests without live Ollama
+- [Phase 02]: Other is config other_label in same vocabulary — Not a second identity model; ROADMAP Other fallback
+- [Phase 02]: AppConfig requires classification section — R009 externalization; missing section raises ValidationError
 
 ### Blockers/Concerns
 
@@ -62,8 +65,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T11:25:00.000Z
-Stopped at: Phase 02 added — not planned yet
+Last session: 2026-09-25T11:59:52.511Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -73,3 +76,4 @@ Resume file: None
 | Phase 01 P01-01 | 6min | 3 tasks | 12 files |
 | Phase 01 P02 | 3min | 4 tasks | 11 files |
 | Phase 01 P03 | 10min | 5 tasks | 13 files |
+| Phase 02 P01 | 4 min | 3 tasks | 9 files |

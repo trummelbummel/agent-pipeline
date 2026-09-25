@@ -152,22 +152,24 @@ def test_post_claims_rejects_disallowed_image_extension(tmp_path: Path) -> None:
 
 def test_post_claims_conflict_when_folder_exists(tmp_path: Path) -> None:
     """POST returns 409 when the next claim folder already exists."""
+    from unittest.mock import patch
+
     create_app = _create_app()
     data_dir = tmp_path / "raw"
     data_dir.mkdir()
-    # Empty data_dir → next id is claim 1; pre-seed so mkdir collides.
+    # Simulate TOCTOU: generated id already present when mkdir runs.
     (data_dir / "claim 1").mkdir()
     ((data_dir / "claim 1") / "keep.txt").write_text("original", encoding="utf-8")
     config = _config(data_dir)
     app = create_app(config=config)
 
-    with TestClient(app) as client:
-        response = client.post("/claims", files=_multipart_files())
+    with patch("api.routes_claims._next_claim_id", return_value="claim 1"):
+        with TestClient(app) as client:
+            response = client.post("/claims", files=_multipart_files())
 
     assert response.status_code == 409, response.text
     assert ((data_dir / "claim 1") / "keep.txt").read_text(encoding="utf-8") == "original"
     assert not ((data_dir / "claim 1") / "scan.png").exists()
-
 
 @_XFAIL_LATER
 def test_post_rejects_path_traversal_image_filename() -> None:

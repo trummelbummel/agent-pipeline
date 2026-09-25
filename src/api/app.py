@@ -8,6 +8,7 @@ from typing import TypedDict
 
 from fastapi import FastAPI
 
+from api.routes_claims import router as claims_router
 from compliance.config.settings import AppConfig, load_config
 from compliance.llm.chat import ChatFn
 from compliance.workflows.claim_pipeline import ClaimPipeline
@@ -49,4 +50,6 @@ def create_app(
         }
         yield state
 
-    return FastAPI(lifespan=lifespan)
+    app = FastAPI(lifespan=lifespan)
+    app.include_router(claims_router)
+    return app

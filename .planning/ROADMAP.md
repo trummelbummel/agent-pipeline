@@ -97,7 +97,7 @@ Classification graph:
 Reuse/extend Phase 02 `Classifier`/`CaseClassifier` and existing `Checker`; wire them as graph nodes over Phase 03 preprocessed artifacts.
 **Requirements**: R010, R011, R012, R013, R014, R015, R016
 **Depends on:** Phase 2 (classifiers), Phase 3 (preprocessed data)
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 
@@ -111,7 +111,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 04-03-PLAN.md — Expand PE / missed-departure document branches + other_label skip (R012, R013)
+- [x] 04-03-PLAN.md — Expand PE / missed-departure document branches + other_label skip (R012, R013)
 
 **Wave 3** *(blocked on Wave 2)*
 

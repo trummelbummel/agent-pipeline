@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 04
 current_phase_name: Claim Analysis Pipeline
-current_plan: 03 (Wave 0)
+current_plan: 04 (Wave 0)
 status: ready_to_execute
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-09-25T15:28:37.636Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-09-25T15:32:14.194Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 04 plans verified — ready to execute
-state_head: 12223c33008989638998615ffd87841db71f661c
+state_head: 1760335cc2895790aa46c668fac77b4bb959406b
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
 milestone_name: Claim Preprocessing
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 04 (Claim Analysis Pipeline) — READY TO EXECUTE
-Current Plan: 03 (Wave 0)
+Current Plan: 04 (Wave 0)
 Total Plans in Phase: 4
 Status: Ready to execute
 Last activity: 2026-09-25 - Phase 04 planned and verified (4 plans)
@@ -76,6 +76,9 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 04]: PE/missed coverage routes stub to END until 04-03; cancellation path fully wired
 - [Phase 04]: Cancellation coverage label taken from config.analysis.coverage.labels[0]
 - [Phase 04]: Path safety validated in analyze_claim (Task 1) with dedicated Task 2 Nyquist test
+- [Phase 04]: PE/missed document classifiers use supporting_document_text + stage configs
+- [Phase 04]: other_label routes to persist; checker keys omitted when Checker skipped
+- [Phase 04]: Unknown coverage after allow-list treated as other_label → persist (T-04-03)
 
 ### Blockers/Concerns
 
@@ -90,8 +93,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T15:28:37.620Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-09-25T15:32:14.178Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -106,3 +109,4 @@ Resume file: None
 | Phase 03 P02 | 3min | 2 tasks | 6 files |
 | Phase 04 P01 | 3min | 3 tasks | 14 files |
 | Phase 04 P02 | 4min | 2 tasks | 4 files |
+| Phase 04 P03 | 3min | 2 tasks | 5 files |

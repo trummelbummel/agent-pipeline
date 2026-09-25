@@ -36,6 +36,14 @@ def test_load_config_reads_extraction_model_and_prompt() -> None:
     assert "omit unknowns" in config.extraction.prompt
 
 
+def test_load_config_reads_classification_section() -> None:
+    config = load_config("config.yaml")
+    assert len(config.classification.labels) >= 3
+    assert config.classification.other_label
+    assert config.classification.model
+    assert config.classification.prompt.strip()
+
+
 def test_load_config_missing_file_raises(tmp_path: Path) -> None:
     missing = tmp_path / "does-not-exist.yaml"
     with pytest.raises(FileNotFoundError, match="Config file not found"):

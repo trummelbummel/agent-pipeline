@@ -33,22 +33,39 @@ class ExtractionConfig(BaseModel):
     prompt: str
 
 
+class ClassificationConfig(BaseModel):
+    """LLM case-classification settings for CaseClassifier.
+
+    :param labels: Coverage class names the classifier may return.
+    :param other_label: Fallback label when no coverage class fits.
+    :param model: LLM model name used for classification.
+    :param prompt: System/instruction prompt for classification.
+    """
+
+    labels: list[str] = []
+    other_label: str = ""
+    model: str = ""
+    prompt: str = ""
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration.
 
     :param preprocessing: Document discovery and Docling-related settings.
     :param extraction: LLM model and prompt for description extraction.
+    :param classification: LLM model, labels, and prompt for case classification.
     """
 
     preprocessing: PreprocessingConfig
     extraction: ExtractionConfig
+    classification: ClassificationConfig = ClassificationConfig()
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     """Load and validate application config from a YAML file.
 
     :param path: Path to the YAML config file.
-    :return: Typed AppConfig covering preprocessing and extraction sections.
+    :return: Typed AppConfig covering preprocessing, extraction, and classification.
     :raises FileNotFoundError: If the config file does not exist.
     :raises ValueError: If required sections or fields are missing/invalid.
     """

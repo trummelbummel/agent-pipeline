@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_models/test_classifier.py::test_case_classifier_happy_path_trip_cancellation -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_case_classifier_happy_path_trip_cancellation\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_case_classifier_happy_path_trip_cancellation",
+  "targetFile": "tests/test_models/test_classifier.py",
+  "expected": "ClassificationResult.labels includes 'Trip cancellation or rescheduling' with float probabilities for configured labels",
+  "actual": "AssertionError: assert 'Trip cancellation or rescheduling' in [] (stub returned empty labels)"
+}

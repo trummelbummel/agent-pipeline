@@ -7,10 +7,18 @@ from compliance.models.claim import (
     GroundTruth,
     SourceFiles,
 )
+from compliance.models.classifier import (
+    CaseClassifier,
+    ClassificationResult,
+    Classifier,
+)
 
 __all__ = [
     "BookingData",
+    "CaseClassifier",
     "ClaimBundle",
+    "ClassificationResult",
+    "Classifier",
     "DocumentData",
     "GroundTruth",
     "SourceFiles",

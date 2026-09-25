@@ -159,9 +159,9 @@ This file is the explicit capability and coverage contract for the project.
 ### R020 — Pipelines accept single claim folder and full directory
 - Class: core-capability
 - Status: active
-- Description: PreprocessingPipeline / ClaimPipeline / main accept a single claim folder as well as full-directory batch; shared orchestrator preferred
-- Why it matters: API GET and CLI single-claim must reuse the same process_claim → analyze_claim path
-- Source: ROADMAP Phase 05 locked decisions
+- Description: PreprocessingPipeline / ClaimPipeline / main accept a caller-supplied `Path` that is either one claim folder or a directory of claims (batch). Scope is configured from outside the pipeline (API/CLI/caller); `None` uses config roots (`data_dir` / `preprocessed_dir`). Shared orchestrator for end-to-end single-claim.
+- Why it matters: API GET and CLI must reuse the same process_claim → analyze_claim path without hardcoded roots or internal scope invention
+- Source: ROADMAP Phase 05 locked decisions; user refinement 2026-09-25
 - Validation: `--claim-id` CLI path + batch default regression tests
 
 ### R021 — Pipelines provided as FastAPI lifespan/DI resources
@@ -213,7 +213,7 @@ This file is the explicit capability and coverage contract for the project.
 | R017 | core-capability | active | 05-01 | 05-00 | POST /claims multipart writes under config data_dir/{claim_id}/ |
 | R018 | core-capability | active | 05-02 | none | GET /claims/{id} process_then_analyze → decision JSON |
 | R019 | core-capability | active | 05-02 | none | GET /claims lists results_dir answers |
-| R020 | core-capability | active | 05-03 | 05-02 | Single-claim + batch via CLI/orchestrator |
+| R020 | core-capability | active | 05-03 | 05-02 | run(source): one claim folder or claims directory from outside |
 | R021 | core-capability | active | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
 | R022 | quality-attribute | active | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
 

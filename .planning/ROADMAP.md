@@ -97,7 +97,7 @@ Classification graph:
 Reuse/extend Phase 02 `Classifier`/`CaseClassifier` and existing `Checker`; wire them as graph nodes over Phase 03 preprocessed artifacts.
 **Requirements**: R010, R011, R012, R013, R014, R015, R016
 **Depends on:** Phase 2 (classifiers), Phase 3 (preprocessed data)
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 
 Plans:
 
@@ -107,7 +107,7 @@ Plans:
 
 **Wave 1** *(blocked on Wave 0)*
 
-- [ ] 04-02-PLAN.md — Tracer: cancellation path load → coverage → reason → cancel-doc → Checker → analysis_result.json (R010–R014, R016)
+- [x] 04-02-PLAN.md — Tracer: cancellation path load → coverage → reason → cancel-doc → Checker → analysis_result.json (R010–R014, R016)
 
 **Wave 2** *(blocked on Wave 1)*
 

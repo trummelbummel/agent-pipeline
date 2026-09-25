@@ -21,13 +21,13 @@
     {
       "number": "04",
       "name": "Claim Analysis Pipeline",
-      "status": "planned"
+      "status": "in_progress"
     }
   ],
   "next": {
-    "command": "/gsd:execute-phase 4",
-    "label": "Execute Phase 04",
-    "reason": "4 plans verified — Wave 0 starts with langgraph human-verify checkpoint"
+    "command": "/gsd:progress",
+    "label": "Show progress",
+    "reason": "Unsure of state — showing progress"
   },
-  "updated_at": "2026-09-25T15:17:00.000Z"
+  "updated_at": "2026-09-25T15:28:36.788Z"
 }

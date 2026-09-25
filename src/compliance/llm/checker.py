@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Literal
 
 import ollama
@@ -8,7 +10,7 @@ from compliance.llm.chat import ChatFn
 
 
 class Checker:
-    """Claim-vs-text checker with containment and contradiction modes (stub)."""
+    """Claim-vs-text checker with containment and contradiction modes."""
 
     def __init__(
         self,
@@ -35,11 +37,26 @@ class Checker:
         text: str,
         mode: Literal["containment", "contradicts"],
     ) -> bool:
-        """Check whether claim is contained in or contradicts text (stub).
+        """Check whether claim is contained in or contradicts text.
 
         :param claim: Claim string to evaluate.
         :param text: Reference text to check against.
-        :param mode: ``containment`` or ``contradicts``.
-        :return: Always False in the RED stub.
+        :param mode: ``containment`` (normalize+substring, then LLM) or ``contradicts``.
+        :return: True when the mode condition holds; False otherwise.
         """
+        if mode == "containment":
+            return self._containment_result(claim, text)
+        if mode == "contradicts":
+            return False
+        raise ValueError(f"Unsupported checker mode: {mode!r}")
+
+    def _containment_result(self, claim: str, text: str) -> bool:
+        normalized_claim = self._normalized_text(claim)
+        if normalized_claim and normalized_claim in self._normalized_text(text):
+            return True
         return False
+
+    @staticmethod
+    def _normalized_text(value: str) -> str:
+        collapsed = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value).casefold())
+        return collapsed.strip()

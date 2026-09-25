@@ -2,9 +2,11 @@
 # Externalize all tunable values here — model names, thresholds, URLs, retry params.
 
 preprocessing:
-  data_dir: data
-  output_filename: processed.json
-  preprocessed_dir: preprocessed
+  data_dir: data/raw
+  # Mirrored claim artifacts (description, answer, supporting docs)
+  preprocessed_dir: data/preprocessed
+  # Pipeline decisions (predicted_answer.json), separate from preprocessed inputs
+  results_dir: data/results
   document_formats:
     - webp
     - jpg
@@ -13,6 +15,13 @@ preprocessing:
     - pdf
   confidence_threshold: 0.7
   # FormatConverter converts document_formats → PNG before Docling (png passthrough)
+  artifacts:
+    description: description.txt
+    answer: answer.json
+    predicted_answer: predicted_answer.json
+    supporting_document: supporting_document.md
+    supporting_documents: supporting_documents.md
+    document_metadata: document_metadata.json
 
 extraction:
   model: llama3.2
@@ -33,6 +42,21 @@ classification:
     "probabilities" (object mapping each allowed label to a float in [0, 1]).
     Use {other_label} only when no coverage class fits.
 
+checking:
+  model: llama3.2
+  containment_prompt: |
+    Decide whether the claim is present in or entailed by the reference text.
+    Return JSON only: {"result": true} if the claim is contained/entailed,
+    {"result": false} otherwise.
+  contradicts_prompt: |
+    Decide whether the claim contradicts the reference text.
+    Return JSON only: {"result": true} if the claim contradicts the text,
+    {"result": false} if the claim is supported by or consistent with the text.
+
 benford:
+  # Off for this take-home dataset: all claim images are synthetic/fake, so DCT
+  # Benford checks fire as "fraud" on nearly every file (too sensitive). Keep the
+  # checker available for real scanned documents by setting enabled: true.
+  enabled: false
   block_size: 8
   chi_squared_threshold: 15.51

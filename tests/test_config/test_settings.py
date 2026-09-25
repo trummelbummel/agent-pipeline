@@ -5,8 +5,17 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from compliance.config import ClassificationConfig, load_config
+from compliance.config import CheckingConfig, ClassificationConfig, load_config
 from compliance.models import CaseClassifier, ClassificationResult, Classifier
+
+_MINIMAL_CHECKING_YAML = """
+checking:
+  model: test-model
+  containment_prompt: |
+    check containment
+  contradicts_prompt: |
+    check contradicts
+"""
 
 
 def test_load_config_reads_document_formats(tmp_path: Path) -> None:
@@ -29,6 +38,12 @@ classification:
   model: test-model
   prompt: |
     classify things
+checking:
+  model: test-model
+  containment_prompt: |
+    check containment
+  contradicts_prompt: |
+    check contradicts
 """,
         encoding="utf-8",
     )
@@ -85,6 +100,13 @@ def test_load_config_reads_checking_section() -> None:
     assert config.checking.contradicts_prompt.strip()
 
 
+def test_load_config_reads_ocr_retry_section() -> None:
+    config = load_config("config.yaml")
+    assert config.ocr_retry.enabled is True
+    assert config.ocr_retry.model
+    assert config.ocr_retry.prompt.strip()
+
+
 def test_load_config_reads_classification_labels_and_other() -> None:
     config = load_config("config.yaml")
     labels = config.classification.labels
@@ -107,7 +129,8 @@ preprocessing:
 extraction:
   model: test-model
   prompt: extract
-""",
+"""
+        + _MINIMAL_CHECKING_YAML,
         encoding="utf-8",
     )
     with pytest.raises(ValidationError):
@@ -119,6 +142,7 @@ def test_public_exports_include_classifier_and_classification_config() -> None:
     assert issubclass(CaseClassifier, Classifier)
     assert ClassificationResult is not None
     assert ClassificationConfig is not None
+    assert CheckingConfig is not None
 
 
 def test_load_config_missing_file_raises(tmp_path: Path) -> None:

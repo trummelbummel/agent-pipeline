@@ -3,8 +3,10 @@ from __future__ import annotations
 from compliance.config.settings import (
     AppConfig,
     BenfordConfig,
+    CheckingConfig,
     ClassificationConfig,
     ExtractionConfig,
+    PreprocessedArtifactNames,
     PreprocessingConfig,
     load_config,
 )
@@ -12,8 +14,10 @@ from compliance.config.settings import (
 __all__ = [
     "AppConfig",
     "BenfordConfig",
+    "CheckingConfig",
     "ClassificationConfig",
     "ExtractionConfig",
+    "PreprocessedArtifactNames",
     "PreprocessingConfig",
     "load_config",
 ]

@@ -4,24 +4,45 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class PreprocessedArtifactNames(BaseModel):
+    """Filenames written under each mirrored claim output directory.
+
+    :param description: Claim letter text artifact.
+    :param answer: Ground-truth answer JSON artifact.
+    :param predicted_answer: Pipeline-predicted decision JSON (when available).
+    :param supporting_document: Docling-extracted document content as markdown.
+    :param supporting_documents: Booking/internal markdown artifact.
+    :param document_metadata: Per-document DocumentMetaData JSON artifact.
+    """
+
+    description: str = "description.txt"
+    answer: str = "answer.json"
+    predicted_answer: str = "predicted_answer.json"
+    supporting_document: str = "supporting_document.md"
+    supporting_documents: str = "supporting_documents.md"
+    document_metadata: str = "document_metadata.json"
 
 
 class PreprocessingConfig(BaseModel):
     """Preprocessing pipeline settings loaded from config.yaml.
 
     :param data_dir: Root directory containing claim folders.
-    :param output_filename: Filename written per claim after processing.
     :param document_formats: File extensions routed through FormatConverter/Docling.
     :param confidence_threshold: Below this OCR confidence, flag human_in_the_loop.
-    :param preprocessed_dir: Workflows output root for the mirrored claim tree.
+    :param preprocessed_dir: Output root for the mirrored preprocessed claim tree.
+    :param results_dir: Output root for pipeline predictions (predicted_answer).
+    :param artifacts: Filenames for mirrored preprocessed outputs and predictions.
     """
 
     data_dir: str
-    output_filename: str
     document_formats: list[str]
     confidence_threshold: float
     preprocessed_dir: str
+    results_dir: str
+    artifacts: PreprocessedArtifactNames = Field(default_factory=PreprocessedArtifactNames)
 
 
 class ExtractionConfig(BaseModel):
@@ -50,13 +71,29 @@ class ClassificationConfig(BaseModel):
     prompt: str
 
 
+class CheckingConfig(BaseModel):
+    """LLM claim-checking settings for Checker containment and contradiction modes.
+
+    :param model: LLM model name used when deterministic containment misses.
+    :param containment_prompt: System prompt for containment / entailment checks.
+    :param contradicts_prompt: System prompt for contradiction checks.
+    """
+
+    model: str
+    containment_prompt: str
+    contradicts_prompt: str
+
+
 class BenfordConfig(BaseModel):
     """Benford's Law analysis settings for image forensic checks.
 
+    :param enabled: When False, DocumentReader skips Benford entirely (default for
+        this project's synthetic claim images). Set True for real-world scans.
     :param block_size: Side length of the square DCT block (pixels).
     :param chi_squared_threshold: Maximum chi-squared statistic for conformity (8 dof).
     """
 
+    enabled: bool = False
     block_size: int = 8
     chi_squared_threshold: float = 15.51
 
@@ -67,12 +104,14 @@ class AppConfig(BaseModel):
     :param preprocessing: Document discovery and Docling-related settings.
     :param extraction: LLM model and prompt for description extraction.
     :param classification: LLM model, labels, and prompt for case classification.
+    :param checking: LLM model and prompts for claim containment/contradiction checks.
     :param benford: DCT-based Benford's Law image forensics parameters.
     """
 
     preprocessing: PreprocessingConfig
     extraction: ExtractionConfig
     classification: ClassificationConfig
+    checking: CheckingConfig
     benford: BenfordConfig = BenfordConfig()
 
 
@@ -80,7 +119,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     """Load and validate application config from a YAML file.
 
     :param path: Path to the YAML config file.
-    :return: Typed AppConfig covering preprocessing, extraction, and classification.
+    :return: Typed AppConfig covering preprocessing, extraction, classification, and checking.
     :raises FileNotFoundError: If the config file does not exist.
     :raises ValueError: If required sections or fields are missing/invalid.
     """

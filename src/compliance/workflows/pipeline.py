@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from compliance.config.settings import AppConfig
+from compliance.config.settings import AppConfig, load_config
 from compliance.models.claim import BookingData, ClaimBundle, DocumentData
 from compliance.preprocessing.pipeline import _discover_claim_folders, _process_single_claim
 
@@ -234,9 +235,29 @@ def run_preprocessing_workflow(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint for the preprocessing workflow (stub for RED).
+    """Load config and run the full preprocessing workflow.
 
     :param argv: Optional CLI arguments; defaults to ``sys.argv[1:]``.
-    :return: Process exit code.
+    :return: ``0`` on success; ``2`` when the config file is missing.
     """
-    return 1
+    parser = argparse.ArgumentParser(prog="compliance.workflows")
+    parser.add_argument(
+        "--config",
+        default="config.yaml",
+        help="Path to application YAML config (default: config.yaml)",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        config = load_config(args.config)
+    except FileNotFoundError:
+        logger.error("Config file not found: %s", args.config)
+        return 2
+
+    written = run_preprocessing_workflow(config)
+    logger.info("Preprocessing workflow complete (%d claims written)", len(written))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

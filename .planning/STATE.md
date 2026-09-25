@@ -4,17 +4,17 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: Preprocessing Pipeline Orchestration
 current_plan: 2
-status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-09-25T12:09:26.035Z"
+status: verifying
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-09-25T12:14:32.408Z"
 last_activity: 2026-09-25
 last_activity_desc: Completed 03-01 one-claim preprocessed tracer
-state_head: dc082790a1dc22522ddb26cbd0e2d149d05a685b
+state_head: 5024263d8680bf9b76b432d5ab5efcbaa709e429
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
 milestone_name: Claim Preprocessing
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md
 Phase: 03 — Preprocessing Pipeline Orchestration
 Current Plan: 2
 Total Plans in Phase: 2
-Status: Executing
+Status: Phase complete — ready for verification
 Last activity: 2026-09-25 — Completed 03-01 one-claim preprocessed tracer
 
 Progress: [█████·····] 50%
@@ -60,6 +60,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 02]: AppConfig requires classification section — R009 externalization; missing section raises ValidationError
 - [Phase 03]: Extend PreprocessingConfig.preprocessed_dir instead of a separate workflows AppConfig section
 - [Phase 03]: Refuse claim_dir.name with path separators or .. before any mkdir/write (T-03-03)
+- [Phase 03]: Soft-fail test raises via answer_reader (Phase 1 soft-catches document_reader)
+- [Phase 03]: main tested via monkeypatch of run_preprocessing_workflow; no console_scripts added
 
 ### Blockers/Concerns
 
@@ -67,8 +69,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T12:09:26.021Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-09-25T12:14:32.394Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -80,3 +82,4 @@ Resume file: None
 | Phase 01 P03 | 10min | 5 tasks | 13 files |
 | Phase 02 P01 | 4 min | 3 tasks | 9 files |
 | Phase 03 P01 | 4min | 3 tasks | 9 files |
+| Phase 03 P02 | 3min | 2 tasks | 6 files |

@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any
 
 import ollama
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
+from compliance.llm.chat import ChatFn, response_content
 
-ChatFn = Callable[..., Any]
+logger = logging.getLogger(__name__)
 
 
 class ClassificationResult(BaseModel):
@@ -83,7 +83,7 @@ class CaseClassifier(Classifier):
             ],
             format="json",
         )
-        content = self._response_content(response)
+        content = response_content(response)
         payload = self._parse_classification_payload(content)
         return self._normalized_classification(
             raw_labels=payload["labels"],
@@ -133,22 +133,6 @@ class CaseClassifier(Classifier):
         :return: Value restricted to the unit interval.
         """
         return max(0.0, min(1.0, float(value)))
-
-    @staticmethod
-    def _response_content(response: Any) -> str:
-        """Pull message content from an ollama-style chat response.
-
-        :param response: Chat response object or mapping.
-        :return: Message content string.
-        """
-        if hasattr(response, "message"):
-            message = response.message
-            return str(getattr(message, "content", "") or "")
-        if isinstance(response, dict):
-            message = response.get("message", {})
-            if isinstance(message, dict):
-                return str(message.get("content", "") or "")
-        return str(response or "")
 
     @staticmethod
     def _parse_classification_payload(content: str) -> dict[str, Any]:

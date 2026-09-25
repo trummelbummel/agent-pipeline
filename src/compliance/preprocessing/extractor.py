@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import ollama
 from pydantic import BaseModel
 
+from compliance.llm.chat import ChatFn, response_content
+
 logger = logging.getLogger(__name__)
 
 _MISSING = np.nan
-
-ChatFn = Callable[..., Any]
 
 
 class InformationExtractor:
@@ -61,26 +61,10 @@ class InformationExtractor:
             ],
             format="json",
         )
-        content = self._response_content(response)
+        content = response_content(response)
         raw = self._parse_json(content)
         filled = self._fill_missing(raw)
         return self.target_model.model_validate(filled)
-
-    @staticmethod
-    def _response_content(response: Any) -> str:
-        """Pull message content from an ollama-style chat response.
-
-        :param response: Chat response object or mapping.
-        :return: Message content string.
-        """
-        if hasattr(response, "message"):
-            message = response.message
-            return str(getattr(message, "content", "") or "")
-        if isinstance(response, dict):
-            message = response.get("message", {})
-            if isinstance(message, dict):
-                return str(message.get("content", "") or "")
-        return str(response or "")
 
     @staticmethod
     def _parse_json(content: str) -> dict[str, Any]:

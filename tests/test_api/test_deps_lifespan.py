@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import pytest
-from fastapi import Depends
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from compliance.config.settings import (
@@ -97,9 +97,6 @@ def _deps() -> tuple[Any, Any, Any]:
 
 def test_lifespan_exposes_pipelines_via_depends(tmp_path: Path) -> None:
     """Lifespan yields PreprocessingPipeline and ClaimPipeline accessible via Depends."""
-    from compliance.workflows.claim_pipeline import ClaimPipeline
-    from compliance.workflows.pipeline import PreprocessingPipeline
-
     create_app = _create_app()
     _get_config, get_preprocessing, get_claims = _deps()
 
@@ -109,17 +106,17 @@ def test_lifespan_exposes_pipelines_via_depends(tmp_path: Path) -> None:
     app = create_app(config=config)
 
     @app.get("/_probe")
-    def _probe(
-        preprocessing: Annotated[PreprocessingPipeline, Depends(get_preprocessing)],
-        claims: Annotated[ClaimPipeline, Depends(get_claims)],
-    ) -> dict[str, int]:
-        return {"prep_id": id(preprocessing), "claims_id": id(claims)}
+    def _probe(request: Request) -> dict[str, int]:
+        return {
+            "prep_id": id(get_preprocessing(request)),
+            "claims_id": id(get_claims(request)),
+        }
 
     with TestClient(app) as client:
         first = client.get("/_probe")
         second = client.get("/_probe")
 
-    assert first.status_code == 200
+    assert first.status_code == 200, first.text
     assert second.status_code == 200
     assert first.json()["prep_id"] == second.json()["prep_id"]
     assert first.json()["claims_id"] == second.json()["claims_id"]
@@ -144,9 +141,8 @@ def test_create_app_uses_injected_config_roots(tmp_path: Path) -> None:
     app = create_app(config=config)
 
     @app.get("/_config_probe")
-    def _config_probe(
-        cfg: Annotated[AppConfig, Depends(get_config)],
-    ) -> dict[str, str]:
+    def _config_probe(request: Request) -> dict[str, str]:
+        cfg = get_config(request)
         return {
             "data_dir": cfg.preprocessing.data_dir,
             "preprocessed_dir": cfg.preprocessing.preprocessed_dir,

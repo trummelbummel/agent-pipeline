@@ -19,6 +19,7 @@ from compliance.models.claim import BookingData, DocumentData, GroundTruth
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.workflows import (
+    main,
     output_root_from_config,
     process_claim_to_preprocessed,
     run_preprocessing_workflow,
@@ -227,3 +228,56 @@ def test_run_preprocessing_workflow_soft_fails_one_claim(tmp_path: Path) -> None
     if claim2_out.exists():
         present = {p.name for p in claim2_out.iterdir() if p.is_file()}
         assert present != set(_EXPECTED_ARTIFACTS)
+
+
+def test_main_runs_workflow_with_injected_config_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    output_root = tmp_path / "preprocessed_out"
+    data_dir.mkdir()
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "preprocessing:",
+                f"  data_dir: {data_dir}",
+                "  output_filename: processed.json",
+                "  document_formats: [webp, jpg, jpeg, png, pdf]",
+                "  confidence_threshold: 0.7",
+                f"  preprocessed_dir: {output_root}",
+                "extraction:",
+                "  model: test-model",
+                "  prompt: extract",
+                "classification:",
+                "  labels: [Trip cancellation or rescheduling]",
+                "  other_label: Other",
+                "  model: test-model",
+                "  prompt: classify",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, Any] = {}
+
+    def _fake_run(config: AppConfig, **_overrides: Any) -> list[Path]:
+        captured["data_dir"] = config.preprocessing.data_dir
+        captured["preprocessed_dir"] = config.preprocessing.preprocessed_dir
+        return []
+
+    monkeypatch.setattr(
+        "compliance.workflows.pipeline.run_preprocessing_workflow",
+        _fake_run,
+    )
+
+    assert main(["--config", str(cfg_path)]) == 0
+    assert captured["data_dir"] == str(data_dir)
+    assert captured["preprocessed_dir"] == str(output_root)
+
+
+def test_main_returns_2_when_config_missing(tmp_path: Path) -> None:
+    missing = tmp_path / "no-such-config.yaml"
+    assert main(["--config", str(missing)]) == 2

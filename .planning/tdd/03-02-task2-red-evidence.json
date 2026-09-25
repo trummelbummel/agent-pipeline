@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_pipeline.py::test_main_runs_workflow_with_injected_config_path tests/test_workflows/test_pipeline.py::test_main_returns_2_when_config_missing -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_main_runs_workflow_with_injected_config_path\nnot ok 2 - test_main_returns_2_when_config_missing\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_main_runs_workflow_with_injected_config_path",
+  "targetFile": "tests/test_workflows/test_pipeline.py",
+  "expected": "main(--config PATH) returns 0 after loading config and calling run_preprocessing_workflow",
+  "actual": "AssertionError: assert 1 == 0 (stub main returns 1)"
+}

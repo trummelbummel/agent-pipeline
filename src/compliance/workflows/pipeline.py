@@ -231,3 +231,12 @@ def run_preprocessing_workflow(
 
     logger.info("Wrote preprocessed artifacts for %d of %d claims", len(written), len(folders))
     return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for the preprocessing workflow (stub for RED).
+
+    :param argv: Optional CLI arguments; defaults to ``sys.argv[1:]``.
+    :return: Process exit code.
+    """
+    return 1

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import NamedTuple
 
 import ollama
 from pydantic import BaseModel
@@ -11,6 +11,14 @@ from pydantic import BaseModel
 from compliance.llm.chat import ChatFn, response_content
 
 logger = logging.getLogger(__name__)
+
+
+class _ClassificationPayload(NamedTuple):
+    labels: list[str]
+    probabilities: dict[str, float]
+
+
+_EMPTY_PAYLOAD = _ClassificationPayload(labels=[], probabilities={})
 
 
 class ClassificationResult(BaseModel):
@@ -73,35 +81,35 @@ class CaseClassifier(Classifier):
         :param text: Free-text claim description.
         :return: ClassificationResult with selected labels and probabilities.
         """
-        label_list = ", ".join([*self.labels, self.other_label])
-        prompt = self.prompt.replace("{other_label}", self.other_label)
-        system_prompt = f"{prompt}\n\nAllowed labels: {label_list}"
         response = self._chat(
             model=self.model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text},
-            ],
+            messages=self._classification_messages(text),
             format="json",
         )
         content = response_content(response)
         payload = self._parse_classification_payload(content)
         return self._normalized_classification(
-            raw_labels=payload["labels"],
-            raw_probabilities=payload["probabilities"],
+            raw_labels=payload.labels,
+            raw_probabilities=payload.probabilities,
         )
+
+    def _classification_messages(self, text: str) -> list[dict[str, str]]:
+        label_list = ", ".join(self._label_vocabulary())
+        prompt = self.prompt.replace("{other_label}", self.other_label)
+        system_prompt = f"{prompt}\n\nAllowed labels: {label_list}"
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ]
+
+    def _label_vocabulary(self) -> list[str]:
+        return [*self.labels, self.other_label]
 
     def _normalized_classification(
         self,
         raw_labels: list[str],
         raw_probabilities: dict[str, float],
     ) -> ClassificationResult:
-        """Filter labels to the configured set and fill probability coverage.
-
-        :param raw_labels: Labels parsed from the LLM JSON payload.
-        :param raw_probabilities: Probability map parsed from the LLM JSON payload.
-        :return: ClassificationResult with Other fallback and full key coverage.
-        """
         allowed = set(self.labels) | {self.other_label}
         selected: list[str] = []
         seen: set[str] = set()
@@ -114,13 +122,10 @@ class CaseClassifier(Classifier):
             selected = [self.other_label]
             used_other_fallback = True
 
-        probabilities: dict[str, float] = {}
-        for label in [*self.labels, self.other_label]:
-            if label in probabilities:
-                continue
-            raw_value = raw_probabilities.get(label, 0.0)
-            probabilities[label] = self._clamped_probability(raw_value)
-
+        probabilities: dict[str, float] = {
+            label: self._clamped_probability(raw_probabilities.get(label, 0.0))
+            for label in self._label_vocabulary()
+        }
         if used_other_fallback:
             probabilities[self.other_label] = 1.0
 
@@ -128,43 +133,33 @@ class CaseClassifier(Classifier):
 
     @staticmethod
     def _clamped_probability(value: float) -> float:
-        """Clamp a probability estimate into [0, 1].
-
-        :param value: Raw numeric probability from the model.
-        :return: Value restricted to the unit interval.
-        """
         return max(0.0, min(1.0, float(value)))
 
     @staticmethod
-    def _parse_classification_payload(content: str) -> dict[str, Any]:
-        """Parse LLM JSON into a ClassificationResult-shaped dict.
-
-        :param content: Raw model output expected to be JSON.
-        :return: Dict with labels and probabilities for normalization.
-        """
+    def _parse_classification_payload(content: str) -> _ClassificationPayload:
         content = content.strip()
         if not content:
             logger.warning("Empty LLM classification response")
-            return {"labels": [], "probabilities": {}}
+            return _EMPTY_PAYLOAD
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError:
             logger.warning("Failed to parse LLM classification JSON")
-            return {"labels": [], "probabilities": {}}
+            return _EMPTY_PAYLOAD
         if not isinstance(parsed, dict):
             logger.warning("LLM classification JSON was not an object")
-            return {"labels": [], "probabilities": {}}
+            return _EMPTY_PAYLOAD
         labels = parsed.get("labels", [])
         probabilities = parsed.get("probabilities", {})
         if not isinstance(labels, list):
             labels = []
         if not isinstance(probabilities, dict):
             probabilities = {}
-        return {
-            "labels": [str(item) for item in labels],
-            "probabilities": {
+        return _ClassificationPayload(
+            labels=[str(item) for item in labels],
+            probabilities={
                 str(key): float(value)
                 for key, value in probabilities.items()
                 if isinstance(value, (int, float))
             },
-        }
+        )

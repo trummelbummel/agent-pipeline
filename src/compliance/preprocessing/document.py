@@ -6,18 +6,19 @@ import re
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from docling.document_converter import DocumentConverter
 from pydantic import BaseModel
 
-from compliance.models.claim import DocumentData
+from compliance.branch_log import log_branch_decision
+from compliance.models.claim import _MISSING, DocumentData
 from compliance.preprocessing.preprocessing import FormatConverter, Preprocessor
 from compliance.preprocessing.reader import Reader
+from compliance.tools.benford import BenfordLawChecker, BenfordResult
 
 logger = logging.getLogger(__name__)
 
-_MISSING = np.nan
-_RASTER_SUFFIXES = frozenset({"webp", "jpg", "jpeg", "png"})
+_FRAUD_DENY = "DENY"
+_FRAUD_REASON = "fraud"
 _WHITESPACE = re.compile(r"\s+")
 _KV_LINE = re.compile(r"^([^:\n]+):\s*(.+)$")
 
@@ -151,20 +152,48 @@ class DocumentReader(Reader):
         format_converter: FormatConverter,
         preprocessor: Preprocessor | None = None,
         document_converter: DocumentConverter | None = None,
+        benford_checker: BenfordLawChecker | None = None,
     ) -> None:
         """Create a Docling-backed document reader.
 
         :param document_formats: Allowed file extensions (no dots) from config.
-        :param confidence_threshold: Below this score, set human_in_the_loop.
+        :param confidence_threshold: Below this OCR confidence, set human_in_the_loop.
         :param format_converter: Converts raster formats to PNG before Docling.
         :param preprocessor: Optional override; defaults to DocumentPreprocessor.
         :param document_converter: Optional Docling converter (injectable for tests).
+        :param benford_checker: Optional forensics check run on PNG before Docling;
+            when conformity fails, Docling is skipped and DENY/fraud is returned.
         """
         super().__init__(preprocessor or DocumentPreprocessor())
         self.document_formats = [fmt.lower().lstrip(".") for fmt in document_formats]
         self.confidence_threshold = confidence_threshold
         self.format_converter = format_converter
         self.document_converter = document_converter or DocumentConverter()
+        self.benford_checker = benford_checker
+
+    def read(self, path: Path) -> BaseModel:
+        """Convert to PNG, optionally Benford-check, then Docling — or early DENY.
+
+        Raster images are converted to PNG first. When a Benford checker is wired,
+        non-conforming images return ``DocumentData`` with decision DENY / reason
+        fraud and never call Docling. PDFs skip Benford (no Pillow conversion).
+
+        :param path: Filesystem path to the source document.
+        :return: DocumentData from Docling, or an early fraud DENY payload.
+        :raises ValueError: If the file suffix is not in ``document_formats``.
+        """
+        suffix = path.suffix.lower().lstrip(".")
+        if suffix not in self.document_formats:
+            msg = f"Unsupported document format: .{suffix}"
+            raise ValueError(msg)
+
+        resolved = self._path_for_docling(path, suffix)
+        fraud_deny = self._fraud_deny_from_benford(resolved, suffix)
+        if fraud_deny is not None:
+            return fraud_deny
+
+        processed = self.preprocessor.preprocess(self._docling_payload(resolved))
+        return self._to_model(processed)
 
     def _load(self, path: Path) -> dict[str, Any]:
         """Convert to PNG when needed, then run Docling extraction.
@@ -181,23 +210,99 @@ class DocumentReader(Reader):
             msg = f"Unsupported document format: .{suffix}"
             raise ValueError(msg)
 
-        docling_path = self._path_for_docling(path, suffix)
+        return self._docling_payload(self._path_for_docling(path, suffix))
+
+    def _fraud_deny_from_benford(self, image_path: Path, suffix: str) -> DocumentData | None:
+        """Return DENY/fraud DocumentData when Benford conformity fails.
+
+        :param image_path: PNG path (or PDF — PDFs skip this check).
+        :param suffix: Lowercase extension without dot.
+        :return: Early-deny DocumentData, or None to continue to Docling.
+        """
+        if self.benford_checker is None:
+            log_branch_decision(
+                logger,
+                branch="benford",
+                outcome="SKIP",
+                reason="disabled_or_unset",
+                file=image_path.name,
+            )
+            return None
+
+        if suffix == "pdf":
+            log_branch_decision(
+                logger,
+                branch="benford",
+                outcome="SKIP",
+                reason="pdf_passthrough",
+                file=image_path.name,
+            )
+            return None
+
+        benford = self.benford_checker.check(image_path)
+        if benford.conformity:
+            log_branch_decision(
+                logger,
+                branch="benford",
+                outcome="PASS",
+                reason="conformity",
+                file=image_path.name,
+                chi_squared=f"{benford.chi_squared:.4f}",
+                coefficients=benford.total_coefficients,
+            )
+            return None
+
+        log_branch_decision(
+            logger,
+            branch="benford",
+            outcome=_FRAUD_DENY,
+            reason=_FRAUD_REASON,
+            level=logging.WARNING,
+            file=image_path.name,
+            chi_squared=f"{benford.chi_squared:.4f}",
+            next_step="skip_docling",
+        )
+        return self._fraud_deny_document(benford)
+
+    @staticmethod
+    def _fraud_deny_document(benford: BenfordResult) -> DocumentData:
+        """Build the early-return DocumentData for a Benford violation.
+
+        :param benford: Non-conforming BenfordResult.
+        :return: DocumentData with decision DENY and reason fraud.
+        """
+        return DocumentData.model_validate(
+            {
+                "decision": _FRAUD_DENY,
+                "reason": _FRAUD_REASON,
+                "raw_text": _MISSING,
+                "confidence": _MISSING,
+                "human_in_the_loop": False,
+                "fields": {
+                    "decision": _FRAUD_DENY,
+                    "reason": _FRAUD_REASON,
+                    "benford_chi_squared": benford.chi_squared,
+                    "benford_conformity": False,
+                },
+            }
+        )
+
+    def _docling_payload(self, docling_path: Path) -> dict[str, Any]:
+        """Run Docling on an already-resolved path and return text + confidence.
+
+        :param docling_path: PNG or PDF path ready for DocumentConverter.
+        :return: Dict with extracted ``text`` and aggregate ``confidence``.
+        """
+        log_branch_decision(
+            logger,
+            branch="docling",
+            outcome="RUN",
+            reason="benford_cleared_or_skipped",
+            file=docling_path.name,
+        )
         result = self.document_converter.convert(docling_path)
         text = result.document.export_to_markdown()
         confidence = self._aggregate_confidence(result.confidence)
-
-        if (
-            isinstance(confidence, float)
-            and not math.isnan(confidence)
-            and confidence < self.confidence_threshold
-        ):
-            logger.warning(
-                "Low Docling confidence %.3f (threshold %.3f) for %s",
-                confidence,
-                self.confidence_threshold,
-                path.name,
-            )
-
         return {"text": text, "confidence": confidence}
 
     def _path_for_docling(self, path: Path, suffix: str) -> Path:
@@ -208,14 +313,35 @@ class DocumentReader(Reader):
         :return: Path passed to DocumentConverter.
         """
         if suffix == "pdf":
-            logger.info("Passing PDF through to Docling without FormatConverter: %s", path.name)
+            log_branch_decision(
+                logger,
+                branch="format_convert",
+                outcome="PASSTHROUGH",
+                reason="pdf",
+                file=path.name,
+            )
             return path
 
-        if suffix in _RASTER_SUFFIXES or suffix in self.format_converter.source_formats:
+        if suffix == "png":
+            log_branch_decision(
+                logger,
+                branch="format_convert",
+                outcome="PASSTHROUGH",
+                reason="already_png",
+                file=path.name,
+            )
             return self.format_converter.to_png(path)
 
-        # Non-raster, non-PDF format listed in config — attempt conversion
-        return self.format_converter.to_png(path)
+        converted = self.format_converter.to_png(path)
+        log_branch_decision(
+            logger,
+            branch="format_convert",
+            outcome="CONVERT_PNG",
+            reason=f"source_{suffix}",
+            file=path.name,
+            png=converted.name,
+        )
+        return converted
 
     @staticmethod
     def _aggregate_confidence(report: Any) -> float:
@@ -246,6 +372,32 @@ class DocumentReader(Reader):
         hitl = False
         if isinstance(confidence, (int, float)) and not math.isnan(float(confidence)):
             hitl = float(confidence) < self.confidence_threshold
+            if hitl:
+                log_branch_decision(
+                    logger,
+                    branch="ocr_confidence",
+                    outcome="HITL",
+                    reason="below_threshold",
+                    level=logging.WARNING,
+                    confidence=f"{float(confidence):.3f}",
+                    threshold=f"{self.confidence_threshold:.3f}",
+                )
+            else:
+                log_branch_decision(
+                    logger,
+                    branch="ocr_confidence",
+                    outcome="ACCEPT",
+                    reason="above_threshold",
+                    confidence=f"{float(confidence):.3f}",
+                    threshold=f"{self.confidence_threshold:.3f}",
+                )
+        else:
+            log_branch_decision(
+                logger,
+                branch="ocr_confidence",
+                outcome="ACCEPT",
+                reason="confidence_unavailable",
+            )
 
         return DocumentData.model_validate(
             {

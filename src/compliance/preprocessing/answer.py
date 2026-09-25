@@ -4,14 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from pydantic import BaseModel
 
-from compliance.models.claim import GroundTruth
+from compliance.models.claim import _MISSING, GroundTruth
 from compliance.preprocessing.preprocessing import Preprocessor
 from compliance.preprocessing.reader import Reader
-
-_MISSING = np.nan
 
 
 class AnswerPreprocessor(Preprocessor):

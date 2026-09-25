@@ -4,15 +4,13 @@ import json
 import logging
 from typing import Any
 
-import numpy as np
 import ollama
 from pydantic import BaseModel
 
 from compliance.llm.chat import ChatFn, response_content
+from compliance.models.claim import _MISSING
 
 logger = logging.getLogger(__name__)
-
-_MISSING = np.nan
 
 
 class InformationExtractor:

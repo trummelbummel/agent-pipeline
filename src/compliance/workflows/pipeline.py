@@ -1,39 +1,23 @@
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-from compliance.config.settings import AppConfig, load_config
-from compliance.models.claim import BookingData, ClaimBundle, DocumentData
-from compliance.preprocessing.pipeline import _discover_claim_folders, _process_single_claim
-
-logger = logging.getLogger(__name__)
-
-_ARTIFACT_NAMES = (
-    "description.txt",
-    "answer.json",
-    "supporting_document.json",
-    "supporting_documents.md",
+from compliance.branch_log import log_branch_decision
+from compliance.config.settings import AppConfig, PreprocessedArtifactNames
+from compliance.models.claim import BookingData, ClaimBundle, DocumentData, is_nan_scalar
+from compliance.preprocessing.claim_batch import (
+    _claim_document_summary,
+    _discover_claim_folders,
+    _document_decision_fields,
+    _predicted_answer_from_bundle,
+    _process_single_claim,
 )
 
-
-def output_root_from_config(config: AppConfig) -> Path:
-    """Resolve the workflows preprocessed output root from config.
-
-    :param config: Loaded application configuration.
-    :return: Path to ``preprocessing.preprocessed_dir``.
-    """
-    return Path(config.preprocessing.preprocessed_dir)
-
-
-def _is_nan_scalar(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
+logger = logging.getLogger(__name__)
 
 
 def _validate_claim_dir_name(name: str) -> None:
@@ -43,38 +27,46 @@ def _validate_claim_dir_name(name: str) -> None:
     :raises ValueError: When the name is not a single safe path segment.
     """
     if os.sep in name or (os.altsep is not None and os.altsep in name):
+        log_branch_decision(
+            logger,
+            branch="path_safety",
+            outcome="DENY",
+            reason="path_separator",
+            level=logging.WARNING,
+            claim=name,
+        )
         raise ValueError(f"Unsafe claim directory name: {name!r}")
-    if name in {".", ".."} or ".." in name.split(os.sep):
+    if name in {".", ".."}:
+        log_branch_decision(
+            logger,
+            branch="path_safety",
+            outcome="DENY",
+            reason="dot_segment",
+            level=logging.WARNING,
+            claim=name,
+        )
         raise ValueError(f"Unsafe claim directory name: {name!r}")
-
+    log_branch_decision(
+        logger,
+        branch="path_safety",
+        outcome="PASS",
+        reason="single_segment",
+        level=logging.DEBUG,
+        claim=name,
+    )
 
 def _description_txt_bytes(bundle: ClaimBundle) -> bytes:
-    """UTF-8 bytes for description.txt from the claim letter.
-
-    :param bundle: Populated ClaimBundle.
-    :return: Letter text encoded as UTF-8, or empty bytes when missing/nan.
-    """
     text = bundle.description_text
-    if not isinstance(text, str) or _is_nan_scalar(text):
+    if not isinstance(text, str):
         return b""
     return text.encode("utf-8")
 
 
 def _answer_json_text(bundle: ClaimBundle) -> str:
-    """JSON text for answer.json from ground truth.
-
-    :param bundle: Populated ClaimBundle.
-    :return: Indented JSON string (np.nan → null).
-    """
     return bundle.ground_truth.model_dump_json(indent=2)
 
 
 def _supporting_document_json_text(bundle: ClaimBundle) -> str:
-    """JSON text for supporting_document.json wrapping DocumentData entries.
-
-    :param bundle: Populated ClaimBundle.
-    :return: Indented JSON object with a documents list.
-    """
     documents = [doc.model_dump(mode="json") for doc in bundle.documents]
     return json.dumps({"documents": documents}, indent=2)
 
@@ -88,7 +80,7 @@ def _booking_md_lines(heading: str, booking: BookingData) -> list[str]:
     """
     field_lines: list[str] = []
     for key, value in booking.model_dump().items():
-        if _is_nan_scalar(value):
+        if is_nan_scalar(value):
             continue
         field_lines.append(f"**{key}**: {value}")
     if not field_lines:
@@ -97,14 +89,8 @@ def _booking_md_lines(heading: str, booking: BookingData) -> list[str]:
 
 
 def _document_md_lines(index: int, document: DocumentData) -> list[str]:
-    """Render one document's raw_text as a markdown section.
-
-    :param index: 1-based document ordinal.
-    :param document: Extracted DocumentData.
-    :return: Markdown lines for the document section.
-    """
     raw = document.raw_text
-    body = "" if not isinstance(raw, str) or _is_nan_scalar(raw) else raw
+    body = raw if isinstance(raw, str) else ""
     return [f"## Document: {index}", body]
 
 
@@ -114,150 +100,206 @@ def _supporting_documents_md_text(bundle: ClaimBundle) -> str:
     :param bundle: Populated ClaimBundle.
     :return: Full markdown document text.
     """
-    sections: list[str] = []
-    sections.extend(_booking_md_lines("Booking", bundle.booking_data))
+    sections: list[list[str]] = []
+
+    booking_lines = _booking_md_lines("Booking", bundle.booking_data)
+    if booking_lines:
+        sections.append(booking_lines)
     for i, internal in enumerate(bundle.internal_data, start=1):
-        sections.extend(_booking_md_lines(f"Internal: {i}", internal))
+        internal_lines = _booking_md_lines(f"Internal: {i}", internal)
+        if internal_lines:
+            sections.append(internal_lines)
     for i, document in enumerate(bundle.documents, start=1):
-        sections.extend(_document_md_lines(i, document))
+        sections.append(_document_md_lines(i, document))
 
     if not sections:
         return "# Supporting documents\n\n_none_\n"
 
-    body = "\n\n".join(
-        "\n".join(chunk) if isinstance(chunk, list) else chunk
-        for chunk in _chunk_sections(sections)
-    )
+    body = "\n\n".join("\n".join(chunk) for chunk in sections)
     return f"# Supporting documents\n\n{body}\n"
 
 
-def _chunk_sections(flat_lines: list[str]) -> list[list[str]]:
-    """Group flat heading+field lines into section chunks.
+class PreprocessingPipeline:
+    """Mirror claim folders into a preprocessed artifact tree.
 
-    :param flat_lines: Alternating ``##`` headings and field/body lines.
-    :return: List of per-section line lists.
-    """
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    for line in flat_lines:
-        if line.startswith("## ") and current:
-            chunks.append(current)
-            current = [line]
-        else:
-            current.append(line)
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def _write_claim_artifacts(claim_out: Path, bundle: ClaimBundle) -> None:
-    """Write the four preprocessed artifacts into ``claim_out``.
-
-    :param claim_out: Destination claim directory (already created).
-    :param bundle: Source ClaimBundle fields to project.
-    """
-    (claim_out / "description.txt").write_bytes(_description_txt_bytes(bundle))
-    (claim_out / "answer.json").write_text(_answer_json_text(bundle) + "\n", encoding="utf-8")
-    (claim_out / "supporting_document.json").write_text(
-        _supporting_document_json_text(bundle) + "\n",
-        encoding="utf-8",
-    )
-    (claim_out / "supporting_documents.md").write_text(
-        _supporting_documents_md_text(bundle),
-        encoding="utf-8",
-    )
-
-
-def process_claim_to_preprocessed(
-    claim_dir: Path,
-    output_root: Path,
-    config: AppConfig,
-    **reader_overrides: Any,
-) -> Path:
-    """Project one claim folder into a mirrored preprocessed artifact tree.
-
-    Composes Phase 1 ``_process_single_claim``; does not rewrite the Phase 1 bundle output path.
-
-    :param claim_dir: Source claim folder path.
-    :param output_root: Root directory for mirrored claim outputs.
-    :param config: Application config (readers use preprocessing settings).
-    :param reader_overrides: Optional injected readers for tests.
-    :return: Path to the written claim output directory.
-    :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
-    """
-    _validate_claim_dir_name(claim_dir.name)
-
-    bundle = _process_single_claim(claim_dir, config, **reader_overrides)
-
-    claim_out = output_root / claim_dir.name
-    claim_out.mkdir(parents=True, exist_ok=True)
-    logger.info("Writing preprocessed artifacts for %s under %s", claim_dir.name, claim_out)
-    _write_claim_artifacts(claim_out, bundle)
-    logger.info("Wrote %s for %s", ", ".join(_ARTIFACT_NAMES), claim_dir.name)
-    return claim_out
-
-
-def run_preprocessing_workflow(
-    config: AppConfig,
-    **reader_overrides: Any,
-) -> list[Path]:
-    """Discover all claims and write mirrored preprocessed artifacts (batch).
-
-    Per-claim failures are logged and skipped so the full run continues.
+    Composes Phase 1 ``_process_single_claim``; projects each ClaimBundle into
+    config-named artifacts under ``preprocessing.preprocessed_dir``. Pipeline
+    predictions (predicted_answer) are written under ``preprocessing.results_dir``.
 
     :param config: Loaded application configuration.
     :param reader_overrides: Optional injected readers for tests.
-    :return: Paths to successfully written claim output directories.
     """
-    data_dir = Path(config.preprocessing.data_dir)
-    folders = _discover_claim_folders(data_dir)
-    logger.info("Discovered %d claim folders under %s", len(folders), data_dir)
 
-    output_root = output_root_from_config(config)
-    output_root.mkdir(parents=True, exist_ok=True)
+    def __init__(self, config: AppConfig, **reader_overrides: Any) -> None:
+        self._config = config
+        self._reader_overrides = reader_overrides
 
-    written: list[Path] = []
-    for claim_dir in folders:
-        logger.info("Processing %s", claim_dir.name)
-        try:
-            claim_out = process_claim_to_preprocessed(
-                claim_dir,
-                output_root,
-                config,
-                **reader_overrides,
+    @property
+    def output_root(self) -> Path:
+        """Root directory for mirrored preprocessed claim outputs."""
+        return Path(self._config.preprocessing.preprocessed_dir)
+
+    @property
+    def results_root(self) -> Path:
+        """Root directory for pipeline prediction artifacts."""
+        return Path(self._config.preprocessing.results_dir)
+
+    @property
+    def artifacts(self) -> PreprocessedArtifactNames:
+        """Configured preprocessed artifact filenames."""
+        return self._config.preprocessing.artifacts
+
+    def process_claim(self, claim_dir: Path, output_root: Path | None = None) -> Path:
+        """Project one claim folder into a mirrored preprocessed artifact tree.
+
+        :param claim_dir: Source claim folder path.
+        :param output_root: Destination root; defaults to ``self.output_root``.
+        :return: Path to the written claim output directory.
+        :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
+        """
+        _validate_claim_dir_name(claim_dir.name)
+
+        root = self.output_root if output_root is None else output_root
+        bundle = _process_single_claim(claim_dir, self._config, **self._reader_overrides)
+
+        claim_out = root / claim_dir.name
+        claim_out.mkdir(parents=True, exist_ok=True)
+        predicted_path = self._write_claim_artifacts(claim_out, bundle)
+        summary = _claim_document_summary(bundle)
+        for document in bundle.documents:
+            decision, reason = _document_decision_fields(document)
+            log_branch_decision(
+                logger,
+                branch="preprocessed_document",
+                outcome=decision,
+                reason=reason,
+                level=logging.WARNING if decision == "DENY" else logging.INFO,
+                claim=claim_dir.name,
+                hitl=document.human_in_the_loop,
             )
-            written.append(claim_out)
-        except Exception as exc:
-            logger.exception("Failed to process %s: %s", claim_dir.name, exc)
+        names = self.artifacts
+        written_names = [
+            names.description,
+            names.answer,
+            names.supporting_document,
+            names.supporting_documents,
+        ]
+        if predicted_path is not None:
+            written_names.insert(2, names.predicted_answer)
+        log_branch_decision(
+            logger,
+            branch="preprocessed_write",
+            outcome="WROTE",
+            reason="artifact_tree",
+            claim=claim_dir.name,
+            fraud_deny=summary["fraud_deny"],
+            hitl=summary["hitl"],
+            extracted=summary["extracted"],
+            artifacts=",".join(written_names),
+        )
+        return claim_out
 
-    logger.info("Wrote preprocessed artifacts for %d of %d claims", len(written), len(folders))
-    return written
+    def run(self) -> list[Path]:
+        """Discover all claims and write mirrored preprocessed artifacts (batch).
+
+        Per-claim failures are logged and skipped so the full run continues.
+
+        :return: Paths to successfully written claim output directories.
+        """
+        data_dir = Path(self._config.preprocessing.data_dir)
+        folders = _discover_claim_folders(data_dir)
+        logger.info("Discovered %d claim folders under %s", len(folders), data_dir)
+
+        output_root = self.output_root
+        output_root.mkdir(parents=True, exist_ok=True)
+        self.results_root.mkdir(parents=True, exist_ok=True)
+
+        written: list[Path] = []
+        for claim_dir in folders:
+            logger.info("Processing %s", claim_dir.name)
+            try:
+                written.append(self.process_claim(claim_dir, output_root))
+            except Exception as exc:
+                log_branch_decision(
+                    logger,
+                    branch="preprocessed_write",
+                    outcome="SKIP",
+                    reason="claim_failed",
+                    level=logging.ERROR,
+                    claim=claim_dir.name,
+                    error=type(exc).__name__,
+                )
+                logger.exception("Failed to process %s: %s", claim_dir.name, exc)
+
+        log_branch_decision(
+            logger,
+            branch="workflow_batch",
+            outcome="COMPLETE",
+            reason="soft_fail_batch",
+            written=len(written),
+            total=len(folders),
+        )
+        return written
+
+    def _write_claim_artifacts(self, claim_out: Path, bundle: ClaimBundle) -> Path | None:
+        """Write preprocessed artifacts and optional predicted_answer under results_dir.
+
+        :param claim_out: Destination claim output directory (preprocessed tree).
+        :param bundle: Populated ClaimBundle for this claim.
+        :return: Path to predicted_answer when written; otherwise None.
+        """
+        names = self.artifacts
+        (claim_out / names.description).write_bytes(_description_txt_bytes(bundle))
+        (claim_out / names.answer).write_text(_answer_json_text(bundle) + "\n", encoding="utf-8")
+        (claim_out / names.supporting_document).write_text(
+            _supporting_document_json_text(bundle) + "\n",
+            encoding="utf-8",
+        )
+        (claim_out / names.supporting_documents).write_text(
+            _supporting_documents_md_text(bundle),
+            encoding="utf-8",
+        )
+
+        predicted = _predicted_answer_from_bundle(bundle)
+        if predicted is None:
+            log_branch_decision(
+                logger,
+                branch="predicted_answer",
+                outcome="SKIP",
+                reason="no_pipeline_decision",
+                claim=bundle.claim_id,
+            )
+            return None
+
+        results_claim = self.results_root / claim_out.name
+        results_claim.mkdir(parents=True, exist_ok=True)
+        predicted_path = results_claim / names.predicted_answer
+        predicted_path.write_text(predicted.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        log_branch_decision(
+            logger,
+            branch="predicted_answer",
+            outcome="WROTE",
+            reason=str(predicted.explanation) if isinstance(predicted.explanation, str) else "decision",
+            claim=bundle.claim_id,
+            decision=predicted.decision,
+            path=str(predicted_path),
+        )
+        return predicted_path
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Load config and run the full preprocessing workflow.
+def output_root_from_config(config: AppConfig) -> Path:
+    """Resolve the workflows preprocessed output root from config.
 
-    :param argv: Optional CLI arguments; defaults to ``sys.argv[1:]``.
-    :return: ``0`` on success; ``2`` when the config file is missing.
+    :param config: Loaded application configuration.
+    :return: Path to ``preprocessing.preprocessed_dir``.
     """
-    parser = argparse.ArgumentParser(prog="compliance.workflows")
-    parser.add_argument(
-        "--config",
-        default="config.yaml",
-        help="Path to application YAML config (default: config.yaml)",
-    )
-    args = parser.parse_args(argv)
-
-    try:
-        config = load_config(args.config)
-    except FileNotFoundError:
-        logger.error("Config file not found: %s", args.config)
-        return 2
-
-    written = run_preprocessing_workflow(config)
-    logger.info("Preprocessing workflow complete (%d claims written)", len(written))
-    return 0
+    return PreprocessingPipeline(config).output_root
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def results_root_from_config(config: AppConfig) -> Path:
+    """Resolve the pipeline results output root from config.
+
+    :param config: Loaded application configuration.
+    :return: Path to ``preprocessing.results_dir``.
+    """
+    return PreprocessingPipeline(config).results_root

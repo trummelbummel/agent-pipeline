@@ -8,6 +8,15 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 _MISSING = np.nan
 
 
+def is_nan_scalar(value: object) -> bool:
+    """Return True when ``value`` is a float NaN sentinel.
+
+    :param value: Arbitrary value that may be a NanStr/NanFloat missing marker.
+    :return: Whether the value is float NaN.
+    """
+    return isinstance(value, float) and np.isnan(value)
+
+
 def _none_to_nan(value: Any) -> Any:
     """Map JSON null to np.nan for optional scalar fields.
 

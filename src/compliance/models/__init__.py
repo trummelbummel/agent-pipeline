@@ -6,6 +6,7 @@ from compliance.models.claim import (
     DocumentData,
     GroundTruth,
     SourceFiles,
+    is_nan_scalar,
 )
 from compliance.models.classifier import (
     CaseClassifier,
@@ -22,4 +23,5 @@ __all__ = [
     "DocumentData",
     "GroundTruth",
     "SourceFiles",
+    "is_nan_scalar",
 ]

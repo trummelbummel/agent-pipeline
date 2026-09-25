@@ -2,48 +2,43 @@ from __future__ import annotations
 
 import json
 
-import numpy as np
-
 from compliance.models import (
     BookingData,
     ClaimBundle,
     DocumentData,
     GroundTruth,
     SourceFiles,
+    is_nan_scalar,
 )
-
-
-def _is_nan(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
 
 
 def test_ground_truth_minimal_fills_nan() -> None:
     gt = GroundTruth(decision="APPROVE")
     assert gt.decision == "APPROVE"
-    assert _is_nan(gt.explanation)
-    assert _is_nan(gt.acceptable_decision)
+    assert is_nan_scalar(gt.explanation)
+    assert is_nan_scalar(gt.acceptable_decision)
 
 
 def test_booking_data_all_nan_by_default() -> None:
     booking = BookingData()
     for field_name in BookingData.model_fields:
-        assert _is_nan(getattr(booking, field_name)), field_name
+        assert is_nan_scalar(getattr(booking, field_name)), field_name
 
 
 def test_booking_data_partial_fields() -> None:
     booking = BookingData(name="Ada Lovelace", booking_ref="ABC123")
     assert booking.name == "Ada Lovelace"
     assert booking.booking_ref == "ABC123"
-    assert _is_nan(booking.origin)
-    assert _is_nan(booking.destination)
+    assert is_nan_scalar(booking.origin)
+    assert is_nan_scalar(booking.destination)
 
 
 def test_document_data_core_person_date_defaults() -> None:
     doc = DocumentData()
-    assert _is_nan(doc.person)
-    assert _is_nan(doc.date)
-    assert _is_nan(doc.raw_text)
-    assert _is_nan(doc.confidence)
+    assert is_nan_scalar(doc.person)
+    assert is_nan_scalar(doc.date)
+    assert is_nan_scalar(doc.raw_text)
+    assert is_nan_scalar(doc.confidence)
     assert doc.human_in_the_loop is False
     assert doc.fields == {}
 
@@ -81,6 +76,6 @@ def test_claim_bundle_round_trip() -> None:
     assert restored.claim_id == "claim-1"
     assert restored.ground_truth.decision == "DENY"
     assert restored.booking_data.name == "Ada"
-    assert _is_nan(restored.booking_data.origin)
-    assert _is_nan(restored.source_files.answer_path)
+    assert is_nan_scalar(restored.booking_data.origin)
+    assert is_nan_scalar(restored.source_files.answer_path)
     assert restored.description_text == "I missed my flight"

@@ -5,27 +5,21 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
-
 from compliance.config.settings import (
     AppConfig,
     ClassificationConfig,
     ExtractionConfig,
     PreprocessingConfig,
 )
-from compliance.models.claim import BookingData, ClaimBundle, DocumentData
-from compliance.preprocessing.description import DescriptionReader
-from compliance.preprocessing.extractor import InformationExtractor
-from compliance.preprocessing.pipeline import (
+from compliance.models.claim import BookingData, ClaimBundle, DocumentData, is_nan_scalar
+from compliance.preprocessing.claim_batch import (
     _classify_files,
     _discover_claim_folders,
     _process_single_claim,
     run_pipeline,
 )
-
-
-def _is_nan(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
+from compliance.preprocessing.description import DescriptionReader
+from compliance.preprocessing.extractor import InformationExtractor
 
 
 def _config(data_dir: Path) -> AppConfig:
@@ -35,7 +29,8 @@ def _config(data_dir: Path) -> AppConfig:
             output_filename="processed.json",
             document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
             confidence_threshold=0.7,
-            preprocessed_dir="preprocessed",
+            preprocessed_dir="data/preprocessed",
+            results_dir="data/results",
         ),
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
         classification=ClassificationConfig(
@@ -125,7 +120,7 @@ def test_process_single_claim_missing_optional_files(tmp_path: Path) -> None:
     assert bundle.description_text == "Please refund."
     assert bundle.documents == []
     assert bundle.internal_data == []
-    assert _is_nan(bundle.booking_data.name)
+    assert is_nan_scalar(bundle.booking_data.name)
 
 
 def test_process_single_claim_with_markdown_and_document(tmp_path: Path) -> None:

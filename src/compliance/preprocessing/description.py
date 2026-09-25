@@ -3,15 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from pydantic import BaseModel
 
-from compliance.models.claim import BookingData
+from compliance.models.claim import _MISSING, BookingData
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.preprocessing.preprocessing import Preprocessor
 from compliance.preprocessing.reader import Reader
-
-_MISSING = np.nan
 
 
 class DescriptionPreprocessor(Preprocessor):
@@ -72,6 +69,6 @@ class DescriptionReader(Reader):
         :param processed: Dict of BookingData field values.
         :return: BookingData instance.
         """
-        fields = {name: _MISSING for name in BookingData.model_fields}
+        fields = dict.fromkeys(BookingData.model_fields, _MISSING)
         fields.update(processed)
         return BookingData.model_validate(fields)

@@ -33,13 +33,27 @@
   - Runnable main entrypoint executes all preprocessing steps
   - mypy + pytest pass
 
+- [ ] **Phase 04: Claim Analysis Pipeline** `profiles: []`
+  Plans: TBD
+  Goal: ClaimPipeline LangGraph over preprocessed claims — coverage/reason/document classifiers + Checker, local LLM
+  Success criteria:
+  - ClaimPipeline is a LangGraph that loads preprocessed claim artifacts and routes through classifiers and Checker steps
+  - description.txt → coverage type: Trip Cancellation or Rescheduling | Personal Effects | Missed Departure or Missed Connection | None
+  - When coverage is Trip Cancellation or Rescheduling → reason: Jury duty | Medical emergency | Theft or criminal incident | Other specified personal emergencies | None
+  - Supporting documents → medical certificate | police report | jury summon letter | None (cancellation path)
+  - When coverage is Personal Effects → supporting docs: Proof of theft, loss, or damage | None
+  - When coverage is Missed Departure or Missed Connection → supporting docs: Incident report / delay documentation | Proof of booking | None
+  - Classifiers configured with a local LLM via config.yaml (no hardcoded model names)
+  - mypy + pytest pass
+
 ## Progress
 
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
-| 03 | 1/2 | Complete   | 2026-09-25 |
+| 03 | 2/2 | Complete   | 2026-09-25 |
+| 04 | 0/0 | Not started | — |
 
 ### Phase 2: Case Classifier Models
 
@@ -67,3 +81,23 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 03-02-PLAN.md — Batch all claims with soft-fail + `python -m compliance.workflows` main entrypoint
+
+### Phase 4: Claim Analysis Pipeline
+
+**Goal:** Build a `ClaimPipeline` that analyzes preprocessed claim data via classifiers and Checker steps. Structure the pipeline as a LangGraph. Classifiers use a local LLM from config.
+
+Classification graph:
+1. **Coverage type** (description.txt) → Trip Cancellation or Rescheduling | Personal Effects | Missed Departure or Missed Connection | None
+2. **Cancellation reason** (description.txt, only if Trip Cancellation or Rescheduling) → Jury duty | Medical emergency (needs medical report) | Theft or criminal incident (needs police report) | Other specified personal emergencies | None
+3. **Supporting document type** (cancellation path) → medical certificate | police report | jury summon letter | None
+4. **Personal Effects document** (only if Personal Effects) → Proof of theft, loss, or damage (e.g. police report / airline acknowledgement) | None
+5. **Missed Departure/Connection document** (only if Missed Departure or Missed Connection) → Incident report or documentation explaining the cause of delay | Proof of booking | None
+
+Reuse/extend Phase 02 `Classifier`/`CaseClassifier` and existing `Checker`; wire them as graph nodes over Phase 03 preprocessed artifacts.
+**Requirements**: R010, R011, R012, R013, R014, R015, R016
+**Depends on:** Phase 2 (classifiers), Phase 3 (preprocessed data)
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 4 to break down)

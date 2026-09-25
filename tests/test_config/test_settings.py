@@ -8,6 +8,12 @@ from pydantic import ValidationError
 from compliance.config import AnalysisConfig, CheckingConfig, ClassificationConfig, load_config
 from compliance.llm import CaseClassifier, ClassificationResult, Classifier
 
+_MINIMAL_EVALUATION_YAML = """
+evaluation:
+  labels: [APPROVE, DENY, UNCERTAIN]
+  metrics_artifact: evaluation_metrics.json
+"""
+
 _MINIMAL_CHECKING_YAML = """
 checking:
   model: test-model
@@ -79,7 +85,8 @@ checking:
   contradicts_prompt: |
     check contradicts
 """
-        + _MINIMAL_ANALYSIS_YAML,
+        + _MINIMAL_ANALYSIS_YAML
+        + _MINIMAL_EVALUATION_YAML,
         encoding="utf-8",
     )
     config = load_config(config_path)
@@ -220,7 +227,8 @@ extraction:
   model: test-model
   prompt: extract
 """
-        + _MINIMAL_CHECKING_YAML,
+        + _MINIMAL_CHECKING_YAML
+        + _MINIMAL_EVALUATION_YAML,
         encoding="utf-8",
     )
     with pytest.raises(ValidationError):

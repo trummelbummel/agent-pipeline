@@ -122,6 +122,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
         AppConfig,
         CheckingConfig,
         ClassificationConfig,
+        EvaluationConfig,
         ExtractionConfig,
         PreprocessingConfig,
     )
@@ -163,6 +164,10 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             cancellation_document=stage,
             personal_effects_document=stage,
             missed_departure_document=stage,
+        ),
+        evaluation=EvaluationConfig(
+            labels=["APPROVE", "DENY", "UNCERTAIN"],
+            metrics_artifact="evaluation_metrics.json",
         ),
     )
     bundles = run_pipeline(config, description_reader=_passthrough_description_reader())

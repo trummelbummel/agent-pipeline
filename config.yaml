@@ -192,3 +192,10 @@ ocr_retry:
     Transcribe all readable text from this document image into clean markdown
     or plain text. Preserve key-value lines and headings. Do not add commentary,
     translation notes, or explanations — return only the document text.
+
+evaluation:
+  labels:
+    - APPROVE
+    - DENY
+    - UNCERTAIN
+  metrics_artifact: evaluation_metrics.json

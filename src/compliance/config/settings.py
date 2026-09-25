@@ -141,6 +141,17 @@ class LoggingConfig(BaseModel):
     format: str = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 
+class EvaluationConfig(BaseModel):
+    """Prediction-evaluation settings for scoring predicted vs ground-truth answers.
+
+    :param labels: Decision vocabulary for confusion-matrix axes and macro F1.
+    :param metrics_artifact: Filename for the batch metrics JSON under results_dir.
+    """
+
+    labels: list[str]
+    metrics_artifact: str
+
+
 class OcrRetryConfig(BaseModel):
     """Vision-model OCR retry after ExtractionFailure flags Docling text as unusable.
 
@@ -166,6 +177,7 @@ class AppConfig(BaseModel):
     :param extraction_failure: Thresholds for unusable Docling OCR detection.
     :param ocr_retry: Optional vision OCR retry after faulty Docling extraction.
     :param logging: CLI logging level and format.
+    :param evaluation: Labels and metrics artifact for prediction evaluation.
     """
 
     preprocessing: PreprocessingConfig
@@ -173,6 +185,7 @@ class AppConfig(BaseModel):
     classification: ClassificationConfig
     checking: CheckingConfig
     analysis: AnalysisConfig
+    evaluation: EvaluationConfig
     benford: BenfordConfig = BenfordConfig()
     extraction_failure: ExtractionFailureConfig = Field(
         default_factory=ExtractionFailureConfig

@@ -14,6 +14,7 @@ from compliance.config.settings import (
     AppConfig,
     CheckingConfig,
     ClassificationConfig,
+    EvaluationConfig,
     ExtractionConfig,
     PreprocessingConfig,
 )
@@ -128,6 +129,10 @@ def _config(
             contradicts_prompt="contradicts",
         ),
         analysis=_analysis_config(),
+        evaluation=EvaluationConfig(
+            labels=["APPROVE", "DENY", "UNCERTAIN"],
+            metrics_artifact="evaluation_metrics.json",
+        ),
     )
 
 
@@ -547,6 +552,9 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
                 stage,
                 "  missed_departure_document:",
                 stage,
+                "evaluation:",
+                "  labels: [APPROVE, DENY, UNCERTAIN]",
+                "  metrics_artifact: evaluation_metrics.json",
                 "ocr_retry:",
                 "  enabled: false",
                 "  model: test-vision",

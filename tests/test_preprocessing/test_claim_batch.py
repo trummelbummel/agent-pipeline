@@ -10,6 +10,7 @@ from compliance.config.settings import (
     AppConfig,
     CheckingConfig,
     ClassificationConfig,
+    EvaluationConfig,
     ExtractionConfig,
     PreprocessingConfig,
 )
@@ -62,6 +63,10 @@ def _config(data_dir: Path) -> AppConfig:
             contradicts_prompt="contradicts",
         ),
         analysis=_analysis_config(),
+        evaluation=EvaluationConfig(
+            labels=["APPROVE", "DENY", "UNCERTAIN"],
+            metrics_artifact="evaluation_metrics.json",
+        ),
     )
 
 

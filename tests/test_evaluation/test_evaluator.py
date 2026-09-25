@@ -10,6 +10,7 @@ from compliance.config.settings import (
     AppConfig,
     CheckingConfig,
     ClassificationConfig,
+    EvaluationConfig,
     ExtractionConfig,
     PreprocessingConfig,
 )
@@ -33,7 +34,7 @@ def _analysis_config() -> AnalysisConfig:
 
 
 def _config(data_dir: Path, results_dir: Path) -> AppConfig:
-    """Minimal AppConfig for evaluator tests (evaluation section added in GREEN)."""
+    """Minimal AppConfig with evaluation labels for evaluator tests."""
     return AppConfig(
         preprocessing=PreprocessingConfig(
             data_dir=str(data_dir),
@@ -55,6 +56,10 @@ def _config(data_dir: Path, results_dir: Path) -> AppConfig:
             contradicts_prompt="contradicts",
         ),
         analysis=_analysis_config(),
+        evaluation=EvaluationConfig(
+            labels=["APPROVE", "DENY", "UNCERTAIN"],
+            metrics_artifact="evaluation_metrics.json",
+        ),
     )
 
 

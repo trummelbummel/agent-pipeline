@@ -24,7 +24,7 @@
   - mypy + pytest pass
 
 - [ ] **Phase 03: Preprocessing Pipeline Orchestration** `profiles: []`
-  Plans: TBD
+  Plans: 03-01, 03-02
   Goal: Add `workflows/pipeline.py` that reads + preprocesses all claim files and writes a mirrored `preprocessed/` tree; add a main entrypoint to run the full pipeline
   Success criteria:
   - `src/compliance/workflows/pipeline.py` orchestrates Reader + Preprocessor over all claims
@@ -39,7 +39,7 @@
 |-------|-------|--------|-----------|
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 0/1 | Planned     | — |
-| 03 | 0/0 | Not started | — |
+| 03 | 0/2 | Planned     | — |
 
 ### Phase 2: Case Classifier Models
 
@@ -57,8 +57,9 @@ Plans:
 **Goal:** Add `src/compliance/workflows/pipeline.py` that reads all claim files via the Reader, runs Preprocessor steps, and stores results under `preprocessed/` using the same folder structure as `data/claim N/`. Each claim folder emits `description.txt`, `answer.json`, `supporting_document.json`, and `supporting_documents.md` — this is the dataset used downstream. Provide a main entrypoint that runs the full preprocessing pipeline end-to-end.
 **Requirements**: TBD
 **Depends on:** Phase 1
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 3 to break down)
+- [ ] 03-01-PLAN.md — Tracer: one claim → four preprocessed/ artifacts via Phase 1 ClaimBundle composition + preprocessed_dir config
+- [ ] 03-02-PLAN.md — Batch all claims with soft-fail + `python -m compliance.workflows` main entrypoint

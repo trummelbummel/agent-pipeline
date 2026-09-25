@@ -33,7 +33,7 @@
   - Runnable main entrypoint executes all preprocessing steps
   - mypy + pytest pass
 
-- [ ] **Phase 04: Claim Analysis Pipeline** `profiles: []`
+- [x] **Phase 04: Claim Analysis Pipeline** `profiles: []` (completed 2026-09-25)
   Plans: 04-01, 04-02, 04-03, 04-04
   Goal: ClaimPipeline LangGraph over preprocessed claims — coverage/reason/document classifiers + Checker, local LLM
   Success criteria:
@@ -64,7 +64,7 @@
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
-| 04 | 0/4 | In Progress|  |
+| 04 | 0/4 | Complete    | 2026-09-25 |
 | 05 | 0/? | Not started |  |
 
 ### Phase 2: Case Classifier Models
@@ -109,7 +109,7 @@ Classification graph:
 Reuse/extend Phase 02 `Classifier`/`CaseClassifier` and existing `Checker`; wire them as graph nodes over Phase 03 preprocessed artifacts.
 **Requirements**: R010, R011, R012, R013, R014, R015, R016
 **Depends on:** Phase 2 (classifiers), Phase 3 (preprocessed data)
-**Plans:** 4/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 

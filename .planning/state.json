@@ -21,13 +21,18 @@
     {
       "number": "04",
       "name": "Claim Analysis Pipeline",
+      "status": "complete"
+    },
+    {
+      "number": "05",
+      "name": "FastAPI Claims API",
       "status": "in_progress"
     }
   ],
   "next": {
-    "command": "/gsd:progress",
-    "label": "Show progress",
-    "reason": "Unsure of state — showing progress"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (plan phase 05)",
+    "reason": "Phase 05 of 5 — needs a plan"
   },
-  "updated_at": "2026-09-25T15:28:36.788Z"
+  "updated_at": "2026-09-25T15:40:10.407Z"
 }

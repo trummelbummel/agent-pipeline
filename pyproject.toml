@@ -35,10 +35,9 @@ dev = [
     "pytest>=9.0.2",
     "pre-commit>=4.5.1",
     "tox-uv>=1.33.4",
-    
     "mypy>=1.19.1",
-    
     "ruff>=0.15.7",
+    "types-pyyaml>=6.0.12.20260906",
 ]
 
 [build-system]

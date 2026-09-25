@@ -1,0 +1,20 @@
+# Compliance project configuration
+# Externalize all tunable values here — model names, thresholds, URLs, retry params.
+
+preprocessing:
+  data_dir: data
+  output_filename: processed.json
+  document_formats:
+    - webp
+    - jpg
+    - jpeg
+    - png
+    - pdf
+  confidence_threshold: 0.7
+  # FormatConverter converts document_formats → PNG before Docling (png passthrough)
+
+extraction:
+  model: llama3.2
+  prompt: |
+    Extract booking/travel fields matching the provided schema from the claim description.
+    Return only fields present in the text; omit unknowns.

@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_orchestration.py::test_process_then_analyze_calls_process_then_analyze_order -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_process_then_analyze_calls_process_then_analyze_order\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_process_then_analyze_calls_process_then_analyze_order",
+  "targetFile": "tests/test_workflows/test_orchestration.py",
+  "expected": "process_then_analyze exported; writes preprocessed artifacts then analysis_result.json and returns analysis path",
+  "actual": "ImportError: cannot import name 'process_then_analyze' from 'compliance.workflows'"
+}

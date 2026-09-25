@@ -12,16 +12,22 @@ from compliance.config.settings import AppConfig, ClassificationConfig
 from compliance.llm.chat import ChatFn
 from compliance.llm.checker import Checker
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
+from compliance.models.claim import GroundTruth
 from compliance.preprocessing.claim_batch import _discover_claim_folders
-from compliance.workflows.pipeline import _validate_claim_dir_name
+from compliance.workflows.pipeline import _is_claim_folder, _validate_claim_dir_name
 
 logger = logging.getLogger(__name__)
+
+_DECISION_APPROVE = "APPROVE"
+_DECISION_DENY = "DENY"
+_DECISION_UNCERTAIN = "UNCERTAIN"
 
 
 class ClaimAnalysisState(TypedDict, total=False):
     """LangGraph state for one-shot claim analysis.
 
     :param claim_id: Safe claim folder segment (validated at analyze_claim boundary).
+    :param input_root: Absolute path to the preprocessed claim folder to load from.
     :param description_text: Contents of the configured description artifact.
     :param supporting_document_text: Docling markdown for the primary supporting document.
     :param supporting_documents_text: Booking/internal markdown artifact text.
@@ -33,6 +39,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     """
 
     claim_id: str
+    input_root: str
     description_text: str
     supporting_document_text: str
     supporting_documents_text: str
@@ -103,10 +110,14 @@ class ClaimPipeline:
         """Run claim analysis for one claim and write analysis_result.json.
 
         :param claim_dir: Claim folder whose ``name`` is the safe path segment.
+            When the folder already contains preprocessed artifacts, those are
+            loaded directly; otherwise artifacts are read from config
+            ``preprocessed_dir`` / ``claim_dir.name`` (process_then_analyze path).
         :return: Path to the written analysis_result.json under results_dir.
         :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
         """
         _validate_claim_dir_name(claim_dir.name)
+        input_root = self._input_root_for_claim(claim_dir)
         log_branch_decision(
             logger,
             branch="claim_analysis",
@@ -115,25 +126,35 @@ class ClaimPipeline:
             claim=claim_dir.name,
         )
         graph = self.build_graph()
-        graph.invoke({"claim_id": claim_dir.name})
+        graph.invoke({"claim_id": claim_dir.name, "input_root": str(input_root)})
         return self._analysis_result_path(claim_dir.name)
 
-    def run(self) -> list[Path]:
-        """Discover preprocessed claims and write analysis_result.json (batch).
+    def run(self, source: Path | None = None) -> list[Path]:
+        """Analyze one claim folder or soft-fail batch under a claims directory.
 
         Per-claim failures are logged and skipped so the full run continues.
         Logs claim names, counts, and exception types only — never description
         or OCR payloads (T-04-02).
 
+        :param source: Caller-supplied path — one claim folder, a directory of
+            claims, or ``None`` to use config ``preprocessed_dir``.
         :return: Paths to successfully written analysis_result.json files.
         """
-        folders = _discover_claim_folders(self.preprocessed_root)
-        logger.info(
-            "Discovered %d claim folders under %s",
-            len(folders),
-            self.preprocessed_root,
-        )
         self.results_root.mkdir(parents=True, exist_ok=True)
+
+        if source is not None and _is_claim_folder(source):
+            log_branch_decision(
+                logger,
+                branch="analysis_batch",
+                outcome="SINGLE",
+                reason="caller_claim_folder",
+                claim=source.name,
+            )
+            return [self.analyze_claim(source)]
+
+        root = self.preprocessed_root if source is None else source
+        folders = _discover_claim_folders(root)
+        logger.info("Discovered %d claim folders under %s", len(folders), root)
         written = self._written_analysis_outputs(folders)
         log_branch_decision(
             logger,
@@ -144,6 +165,17 @@ class ClaimPipeline:
             total=len(folders),
         )
         return written
+
+    def _input_root_for_claim(self, claim_dir: Path) -> Path:
+        """Resolve which directory holds preprocessed artifacts for ``claim_dir``.
+
+        :param claim_dir: Caller path (raw folder or preprocessed claim folder).
+        :return: Directory to read description/supporting_document artifacts from.
+        """
+        artifacts = self._config.preprocessing.artifacts
+        if (claim_dir / artifacts.supporting_document).is_file():
+            return claim_dir
+        return self.preprocessed_root / claim_dir.name
 
     def _written_analysis_outputs(self, folders: list[Path]) -> list[Path]:
         """Analyze each claim folder; soft-fail and continue on errors.
@@ -236,7 +268,12 @@ class ClaimPipeline:
     def _load_artifacts_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         claim_id = state["claim_id"]
         _validate_claim_dir_name(claim_id)
-        texts = self._loaded_claim_texts(claim_id)
+        input_root = (
+            Path(state["input_root"])
+            if state.get("input_root")
+            else self.preprocessed_root / claim_id
+        )
+        texts = self._loaded_claim_texts(claim_id, input_root=input_root)
         log_branch_decision(
             logger,
             branch="load_artifacts",
@@ -336,6 +373,7 @@ class ClaimPipeline:
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         path = self._written_analysis_result(state)
+        predicted_path = self._written_predicted_answer(state)
         log_branch_decision(
             logger,
             branch="persist",
@@ -343,18 +381,23 @@ class ClaimPipeline:
             reason="analysis_result",
             claim=state.get("claim_id"),
             path=str(path),
+            predicted_answer=str(predicted_path),
         )
         return {}
 
-    def _loaded_claim_texts(self, claim_id: str) -> dict[str, str]:
-        """Read description and supporting markdown from preprocessed_dir.
+    def _loaded_claim_texts(
+        self, claim_id: str, *, input_root: Path | None = None
+    ) -> dict[str, str]:
+        """Read description and supporting markdown from a claim artifact folder.
 
         :param claim_id: Validated claim folder segment.
+        :param input_root: Directory holding artifacts; defaults to
+            ``preprocessed_dir`` / ``claim_id``.
         :return: Dict with description_text, supporting_document_text,
             supporting_documents_text.
         """
         artifacts = self._config.preprocessing.artifacts
-        claim_in = self.preprocessed_root / claim_id
+        claim_in = input_root if input_root is not None else self.preprocessed_root / claim_id
         supporting_documents_path = claim_in / artifacts.supporting_documents
         supporting_documents_text = (
             supporting_documents_path.read_text(encoding="utf-8")
@@ -432,21 +475,94 @@ class ClaimPipeline:
     def _analysis_result_payload(self, state: ClaimAnalysisState) -> dict[str, object]:
         """Build the structured analysis_result.json body from graph state.
 
+        Numeric classifier codes stay in ``*_labels``; semantic names from
+        ``config.analysis.*.label_names`` are written alongside as ``*_label_names``.
+        Also records the evaluator-facing ``decision`` derived from checker flags.
+
         :param state: Final ClaimAnalysisState after checker (or coverage-only).
         :return: JSON-serializable analysis payload. Checker keys are omitted when
             the Checker node did not run (coverage other_label path).
         """
+        analysis = self._config.analysis
+        coverage_codes = list(state.get("coverage_labels") or [])
+        reason_codes = list(state.get("reason_labels") or [])
+        document_codes = list(state.get("document_labels") or [])
+        document_stage = self._document_stage_for_coverage(coverage_codes)
         payload: dict[str, object] = {
             "claim_id": state["claim_id"],
-            "coverage_labels": list(state.get("coverage_labels") or []),
-            "reason_labels": list(state.get("reason_labels") or []),
-            "document_labels": list(state.get("document_labels") or []),
+            "coverage_labels": coverage_codes,
+            "coverage_label_names": analysis.coverage.resolve_label_names(
+                coverage_codes
+            ),
+            "reason_labels": reason_codes,
+            "reason_label_names": analysis.cancellation_reason.resolve_label_names(
+                reason_codes
+            ),
+            "document_labels": document_codes,
+            "document_label_names": document_stage.resolve_label_names(document_codes),
         }
         if "checker_containment" in state:
             payload["checker_containment"] = bool(state["checker_containment"])
         if "checker_contradicts" in state:
             payload["checker_contradicts"] = bool(state["checker_contradicts"])
+        decision = self._decision_from_state(state)
+        payload["decision"] = decision.decision
+        payload["decision_explanation"] = (
+            decision.explanation
+            if isinstance(decision.explanation, str)
+            else None
+        )
         return payload
+
+    def _document_stage_for_coverage(
+        self, coverage_codes: list[str]
+    ) -> ClassificationConfig:
+        """Pick the document-stage config whose label_names match the coverage path.
+
+        :param coverage_codes: Coverage codes from the coverage classifier.
+        :return: Document ClassificationConfig for semantic name resolution.
+        """
+        analysis = self._config.analysis
+        if "2" in coverage_codes:
+            return analysis.personal_effects_document
+        if "3" in coverage_codes:
+            return analysis.missed_departure_document
+        return analysis.cancellation_document
+
+    def _decision_from_state(self, state: ClaimAnalysisState) -> GroundTruth:
+        """Derive APPROVE/DENY/UNCERTAIN for evaluator-facing predicted_answer.
+
+        Uses checker flags when present; coverage-only (other) paths → UNCERTAIN.
+
+        :param state: Final graph state.
+        :return: GroundTruth decision written beside analysis_result.
+        """
+        coverage = list(state.get("coverage_labels") or [])
+        other = self._config.analysis.coverage.other_label
+        if coverage and set(coverage) <= {other}:
+            return GroundTruth(
+                decision=_DECISION_UNCERTAIN,
+                explanation="coverage_other_label",
+            )
+        if "checker_contradicts" in state and bool(state["checker_contradicts"]):
+            return GroundTruth(
+                decision=_DECISION_DENY,
+                explanation="checker_contradicts",
+            )
+        if "checker_containment" in state and not bool(state["checker_containment"]):
+            return GroundTruth(
+                decision=_DECISION_DENY,
+                explanation="checker_missing_documentation",
+            )
+        if "checker_containment" in state:
+            return GroundTruth(
+                decision=_DECISION_APPROVE,
+                explanation="checker_consistent",
+            )
+        return GroundTruth(
+            decision=_DECISION_UNCERTAIN,
+            explanation="no_checker_result",
+        )
 
     def _written_analysis_result(self, state: ClaimAnalysisState) -> Path:
         """Persist analysis_result.json under results_dir/{claim_id}/.
@@ -460,6 +576,30 @@ class ClaimPipeline:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = self._analysis_result_payload(state)
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return path
+
+    def _written_predicted_answer(self, state: ClaimAnalysisState) -> Path:
+        """Persist predicted_answer.json for the evaluator from analysis decision.
+
+        :param state: Final ClaimAnalysisState.
+        :return: Path to the written predicted_answer.json file.
+        """
+        claim_id = state["claim_id"]
+        _validate_claim_dir_name(claim_id)
+        artifacts = self._config.preprocessing.artifacts
+        path = self.results_root / claim_id / artifacts.predicted_answer
+        path.parent.mkdir(parents=True, exist_ok=True)
+        decision = self._decision_from_state(state)
+        path.write_text(decision.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        log_branch_decision(
+            logger,
+            branch="predicted_answer",
+            outcome="WROTE",
+            reason="analysis_decision",
+            claim=claim_id,
+            decision=decision.decision,
+            path=str(path),
+        )
         return path
 
     def _analysis_result_path(self, claim_id: str) -> Path:

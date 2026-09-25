@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_api/test_claims_list.py::test_list_claims_empty_results_dir_returns_empty_list -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_list_claims_empty_results_dir_returns_empty_list\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_list_claims_empty_results_dir_returns_empty_list",
+  "targetFile": "tests/test_api/test_claims_list.py",
+  "expected": "GET /claims returns 200 with [] when results_dir is empty",
+  "actual": "AssertionError: assert 404 == 200 (list route not implemented)"
+}

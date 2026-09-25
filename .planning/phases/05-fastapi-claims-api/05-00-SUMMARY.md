@@ -17,7 +17,7 @@ affects:
 actuals:
   tokens: 11898
   tasks: 3
-  commits: 2
+  commits: 3
   plan_head_before: 847e9c4016621f476ba4c7e2c858dfe962c1f9e5
 
 tech-stack:
@@ -102,7 +102,7 @@ status: complete
 2. **Task 2: Install FastAPI stack and hatch-package src/api** - `f449a2c` (chore)
 3. **Task 3: Scaffold tests/test_api Nyquist stubs** - `a1491b1` (test)
 
-**Plan metadata:** (docs commit after state updates)
+**Plan metadata:** `ed9d449` (docs: complete plan)
 
 ## Files Created/Modified
 

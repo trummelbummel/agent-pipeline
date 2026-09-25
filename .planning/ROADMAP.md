@@ -23,7 +23,7 @@
   - Labels (and fallback Other) are configurable via config.yaml
   - mypy + pytest pass
 
-- [ ] **Phase 03: Preprocessing Pipeline Orchestration** `profiles: []`
+- [x] **Phase 03: Preprocessing Pipeline Orchestration** `profiles: []` (completed 2026-09-25)
   Plans: 03-01, 03-02
   Goal: Add `workflows/pipeline.py` that reads + preprocesses all claim files and writes a mirrored `preprocessed/` tree; add a main entrypoint to run the full pipeline
   Success criteria:
@@ -39,7 +39,7 @@
 |-------|-------|--------|-----------|
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
-| 03 | 1/2 | In Progress|  |
+| 03 | 1/2 | Complete   | 2026-09-25 |
 
 ### Phase 2: Case Classifier Models
 
@@ -57,7 +57,7 @@ Plans:
 **Goal:** Add `src/compliance/workflows/pipeline.py` that reads all claim files via the Reader, runs Preprocessor steps, and stores results under `preprocessed/` using the same folder structure as `data/claim N/`. Each claim folder emits `description.txt`, `answer.json`, `supporting_document.json`, and `supporting_documents.md` — this is the dataset used downstream. Provide a main entrypoint that runs the full preprocessing pipeline end-to-end.
 **Requirements**: TBD
 **Depends on:** Phase 1
-**Plans:** 2/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 **Wave 1**

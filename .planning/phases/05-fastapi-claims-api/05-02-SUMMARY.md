@@ -121,7 +121,7 @@ status: complete
 5. **Task 3 RED: GET list tests** - `8b30919` (test)
 6. **Task 3 GREEN: GET /claims list** - `17bd40f` (feat)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `7384fcf` (docs: complete plan)
 
 ## Files Created/Modified
 

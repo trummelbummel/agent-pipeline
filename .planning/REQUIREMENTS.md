@@ -142,7 +142,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R018 — GET /claims/{claim_id} runs preprocess then analyze
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: `GET /claims/{claim_id}` runs PreprocessingPipeline then ClaimPipeline for one claim (same orchestration as main) and returns the decision JSON
 - Why it matters: Single-claim decision path must not drift between API and CLI
 - Source: ROADMAP Phase 05; 05-RESEARCH.md
@@ -150,7 +150,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R019 — GET /claims lists processed answers from results_dir
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: `GET /claims` lists all processed claim answers from config `results_dir` (optional predicted_answer and/or analysis_result per claim)
 - Why it matters: Operators need a roster of decisions without scanning the filesystem manually
 - Source: ROADMAP Phase 05; 05-RESEARCH.md
@@ -267,8 +267,8 @@ This file is the explicit capability and coverage contract for the project.
 | R015 | quality-attribute | validated | 04-01 | none | analysis section externalized in config.yaml |
 | R016 | quality-attribute | validated | 04-01 | 04-02, 04-04 | Injectable chat_fn tests; mypy + pytest pass |
 | R017 | core-capability | validated | 05-01 | 05-00 | POST /claims multipart writes under config data_dir/{claim_id}/ |
-| R018 | core-capability | active | 05-02 | none | GET /claims/{id} process_then_analyze → decision JSON |
-| R019 | core-capability | active | 05-02 | none | GET /claims lists results_dir answers |
+| R018 | core-capability | validated | 05-02 | none | GET /claims/{id} process_then_analyze → decision JSON |
+| R019 | core-capability | validated | 05-02 | none | GET /claims lists results_dir answers |
 | R020 | core-capability | active | 05-03 | 05-02 | run(source): one claim folder or claims directory from outside |
 | R021 | core-capability | validated | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
 | R022 | quality-attribute | active | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
@@ -282,7 +282,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 13
+- Active requirements: 11
 - Mapped to slices: 29
-- Validated: 16
+- Validated: 18
 - Unmapped active requirements: 0

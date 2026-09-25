@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_evaluation/test_evaluator.py::test_unknown_pred_label_raises -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_unknown_pred_label_raises\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_unknown_pred_label_raises",
+  "targetFile": "tests/test_evaluation/test_evaluator.py",
+  "expected": "evaluate_claim raises ValueError when pred or gt decision is not in config.evaluation.labels",
+  "actual": "Failed: DID NOT RAISE ValueError (unknown labels silently skipped in matrix)"
+}

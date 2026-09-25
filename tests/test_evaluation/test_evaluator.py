@@ -140,3 +140,83 @@ def test_evaluator_import_requires_no_network() -> None:
     from evaluation import Evaluator as Ev
 
     assert Ev is Evaluator
+
+
+def test_acceptable_decision_counts_as_match(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    claim_id = "claim 13"
+    _write_pair(
+        data_dir,
+        results_dir,
+        claim_id,
+        gt={"decision": "UNCERTAIN", "acceptable_decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    result = Evaluator(_config(data_dir, results_dir)).evaluate_claim(claim_id)
+    assert result.matches == [True]
+    assert result.accuracy == 1.0
+    # A5: effective pred remapped to UNCERTAIN when matched via acceptable_decision
+    uncertain_idx = result.labels.index("UNCERTAIN")
+    assert result.confusion_matrix[uncertain_idx][uncertain_idx] == 1
+    assert result.f1_macro == pytest.approx(1.0 / 3.0)
+
+
+def test_acceptable_decision_ignored_when_nan(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    claim_id = "claim 3"
+    _write_pair(
+        data_dir,
+        results_dir,
+        claim_id,
+        gt={"decision": "DENY", "acceptable_decision": None},
+        pred={"decision": "UNCERTAIN"},
+    )
+    result = Evaluator(_config(data_dir, results_dir)).evaluate_claim(claim_id)
+    assert result.matches == [False]
+    assert result.accuracy == 0.0
+
+
+def test_confusion_matrix_label_order(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    claim_id = "claim 4"
+    custom_labels = ["UNCERTAIN", "APPROVE", "DENY"]
+    _write_pair(
+        data_dir,
+        results_dir,
+        claim_id,
+        gt={"decision": "APPROVE"},
+        pred={"decision": "APPROVE"},
+    )
+    config = _config(data_dir, results_dir)
+    config = config.model_copy(
+        update={
+            "evaluation": EvaluationConfig(
+                labels=custom_labels,
+                metrics_artifact="evaluation_metrics.json",
+            )
+        }
+    )
+    result = Evaluator(config).evaluate_claim(claim_id)
+    assert result.labels == custom_labels
+    assert len(result.confusion_matrix) == len(custom_labels)
+    assert all(len(row) == len(custom_labels) for row in result.confusion_matrix)
+    approve_idx = custom_labels.index("APPROVE")
+    assert result.confusion_matrix[approve_idx][approve_idx] == 1
+
+
+def test_unknown_pred_label_raises(tmp_path: Path) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    claim_id = "claim 5"
+    _write_pair(
+        data_dir,
+        results_dir,
+        claim_id,
+        gt={"decision": "DENY"},
+        pred={"decision": "OTHER"},
+    )
+    with pytest.raises(ValueError, match="not in"):
+        Evaluator(_config(data_dir, results_dir)).evaluate_claim(claim_id)

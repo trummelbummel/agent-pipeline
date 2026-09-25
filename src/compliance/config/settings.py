@@ -148,8 +148,10 @@ class EvaluationConfig(BaseModel):
     :param metrics_artifact: Filename for the batch metrics JSON under results_dir.
     """
 
-    labels: list[str]
-    metrics_artifact: str
+    labels: list[str] = Field(
+        default_factory=lambda: ["APPROVE", "DENY", "UNCERTAIN"]
+    )
+    metrics_artifact: str = "evaluation_metrics.json"
 
 
 class OcrRetryConfig(BaseModel):
@@ -185,7 +187,7 @@ class AppConfig(BaseModel):
     classification: ClassificationConfig
     checking: CheckingConfig
     analysis: AnalysisConfig
-    evaluation: EvaluationConfig
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     benford: BenfordConfig = BenfordConfig()
     extraction_failure: ExtractionFailureConfig = Field(
         default_factory=ExtractionFailureConfig

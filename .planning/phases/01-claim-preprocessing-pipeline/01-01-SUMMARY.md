@@ -16,7 +16,7 @@ affects:
 actuals:
   tokens: 175138
   tasks: 3
-  commits: 3
+  commits: 4
 
 plan_head_before: 09e00c132d971824d7efc12e4c30989f9c5048d7
 
@@ -121,7 +121,7 @@ Each task was committed atomically:
 2. **Task 2: Create config loader and populate config.yaml** - `9657454` (feat)
 3. **Task 3: Write tests for models and config** - `fc1583e` (test)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `c30087f` (docs: complete plan)
 
 ## Files Created/Modified
 - `src/compliance/models/claim.py` - Maximal claim Pydantic schemas

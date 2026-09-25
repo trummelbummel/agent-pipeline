@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_evaluation/test_cli.py::test_cli_writes_metrics_json tests/test_evaluation/test_cli.py::test_cli_exit_zero_on_empty_batch -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_cli_writes_metrics_json\nnot ok 2 - test_cli_exit_zero_on_empty_batch\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_cli_writes_metrics_json",
+  "targetFile": "tests/test_evaluation/test_cli.py",
+  "expected": "main(--config) exits 0 and writes evaluation_metrics.json with accuracy/f1_macro/confusion_matrix/labels/n_evaluated",
+  "actual": "AssertionError: assert 1 == 0 (stub main returns 1 without writing metrics)"
+}

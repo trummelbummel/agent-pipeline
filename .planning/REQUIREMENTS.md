@@ -54,7 +54,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R007 — Classifier ABC with structured labels and probability estimates
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: `Classifier` ABC in `models/classifier.py` defines a `classify(text: str)` interface that returns a structured `ClassificationResult` carrying selected label(s) and probability estimates (not raw scalars or bare tuples)
 - Why it matters: Downstream agents/rules need a typed classification contract before orchestration wires case routing
 - Source: ROADMAP Phase 02 goal
@@ -62,7 +62,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R008 — CaseClassifier maps description text to coverage-type labels
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: `CaseClassifier` classifies description.txt narrative into coverage-type label(s) with probabilities. Default targets match policy coverage types (Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection) plus a configurable Other when no class fits. Uses config LLM via injectable `chat_fn` (same pattern as InformationExtractor)
 - Why it matters: Case type gates which policy rules apply; free-text descriptions cannot be keyword-routed reliably across languages
 - Source: ROADMAP Phase 02 goal; policy.md coverage types
@@ -70,7 +70,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R009 — Classification labels, model, and prompt externalized in config.yaml
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: `classification` section in config.yaml holds `labels`, `other_label`, `model`, and `prompt`; `load_config()` exposes typed `ClassificationConfig`. CaseClassifier reads classification targets from config — no hardcoded model names, prompts, or label lists in source
 - Why it matters: CLAUDE.md mandate; coverage taxonomy may change without code edits
 - Source: ROADMAP Phase 02; extends R005 pattern
@@ -79,6 +79,7 @@ This file is the explicit capability and coverage contract for the project.
 ## Validated
 
 - R001, R002, R003, R004, R005, R006 — completed in phase 01 plans 01-01 through 01-03
+- R007, R008, R009 — completed in phase 02 plan 02-01
 
 ## Deferred
 
@@ -94,13 +95,13 @@ This file is the explicit capability and coverage contract for the project.
 | R004 | quality-attribute | validated | 01-03 | none | Claims 1, 21 produce valid processed.json with np.nan/empty optional fields |
 | R005 | quality-attribute | validated | 01-01 | none | Formats, model, prompt, paths come from config.yaml only |
 | R006 | core-capability | validated | 01-03 | 01-02 | Reader/Preprocessor ABCs + InformationExtractor produce BookingData from description.txt |
-| R007 | core-capability | active | 02-01 | none | Classifier ABC + ClassificationResult with labels and probabilities |
-| R008 | core-capability | active | 02-01 | none | CaseClassifier classifies description text into config-driven coverage labels |
-| R009 | quality-attribute | active | 02-01 | none | classification section in config.yaml via load_config / ClassificationConfig |
+| R007 | core-capability | validated | 02-01 | none | Classifier ABC + ClassificationResult with labels and probabilities |
+| R008 | core-capability | validated | 02-01 | none | CaseClassifier classifies description text into config-driven coverage labels |
+| R009 | quality-attribute | validated | 02-01 | none | classification section in config.yaml via load_config / ClassificationConfig |
 
 ## Coverage Summary
 
-- Active requirements: 3 (R007–R009)
+- Active requirements: 0
 - Mapped to slices: 9
-- Validated: 6
+- Validated: 9
 - Unmapped active requirements: 0

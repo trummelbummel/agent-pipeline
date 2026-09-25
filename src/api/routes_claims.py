@@ -1,18 +1,22 @@
-"""Claims API routes — multipart intake under config data_dir."""
+"""Claims API routes — multipart intake and claim decision endpoints."""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from api.deps import get_config
-from api.schemas import ClaimCreated
+from api.deps import get_claims, get_config, get_preprocessing
+from api.schemas import ClaimCreated, ClaimDecision
 from compliance.config.settings import AppConfig
 from compliance.preprocessing.claim_batch import _claim_sort_key
-from compliance.workflows.pipeline import _validate_claim_dir_name
+from compliance.workflows.claim_pipeline import ClaimPipeline
+from compliance.workflows.orchestration import process_then_analyze
+from compliance.workflows.pipeline import PreprocessingPipeline, _validate_claim_dir_name
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,18 @@ def _write_claim_upload(
     (claim_dir / image_basename).write_bytes(image.file.read())
 
 
+def _load_optional_json(path: Path) -> dict[str, Any] | None:
+    """Load a JSON object from disk when the file exists.
+
+    :param path: Candidate JSON file path under results_dir.
+    :return: Parsed object, or None when the file is absent.
+    """
+    if not path.is_file():
+        return None
+    payload: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return payload
+
+
 @router.post("/claims", response_model=ClaimCreated, status_code=201)
 def create_claim(
     description: UploadFile = File(...),
@@ -141,3 +157,50 @@ def create_claim(
     )
     logger.info("Created claim_id=%s", claim_id)
     return ClaimCreated(claim_id=claim_id)
+
+
+@router.get("/claims/{claim_id}", response_model=ClaimDecision)
+def get_claim(
+    claim_id: str,
+    config: AppConfig = Depends(get_config),
+    preprocessing: PreprocessingPipeline = Depends(get_preprocessing),
+    claims: ClaimPipeline = Depends(get_claims),
+) -> ClaimDecision:
+    """Run process_then_analyze for one claim and return the decision JSON.
+
+    :param claim_id: Raw claim folder name under config data_dir.
+    :param config: Injected application configuration.
+    :param preprocessing: Shared PreprocessingPipeline from lifespan.
+    :param claims: Shared ClaimPipeline from lifespan.
+    :return: Claim decision including analysis_result payload.
+    """
+    try:
+        _validate_claim_dir_name(claim_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    claim_dir = Path(config.preprocessing.data_dir) / claim_id
+    if not claim_dir.is_dir():
+        raise HTTPException(status_code=404, detail="claim not found")
+
+    try:
+        analysis_path = process_then_analyze(claim_dir, preprocessing, claims)
+    except Exception as exc:
+        logger.error(
+            "process_then_analyze failed claim_id=%s error=%s",
+            claim_id,
+            type(exc).__name__,
+        )
+        raise
+
+    analysis_result = json.loads(analysis_path.read_text(encoding="utf-8"))
+    artifacts = config.preprocessing.artifacts
+    predicted_path = (
+        Path(config.preprocessing.results_dir) / claim_id / artifacts.predicted_answer
+    )
+    predicted_answer = _load_optional_json(predicted_path)
+    return ClaimDecision(
+        claim_id=claim_id,
+        analysis_result=analysis_result,
+        predicted_answer=predicted_answer,
+    )

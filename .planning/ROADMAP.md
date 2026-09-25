@@ -170,7 +170,7 @@ Plans:
 **Goal:** Add `src/evaluation` with an `Evaluator` that loads pipeline prediction results and ground-truth `answer.json`, compares decisions, builds a confusion matrix, and calculates accuracy and F1 score.
 **Requirements**: TBD
 **Depends on:** Phase 4 (predicted results + ground-truth answers)
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans executed
 
 Plans:
 
@@ -180,4 +180,4 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 06-02-PLAN.md — Batch soft-skip evaluate + `python -m evaluation` metrics artifact + phase gate
+- [x] 06-02-PLAN.md — Batch soft-skip evaluate + `python -m evaluation` metrics artifact + phase gate

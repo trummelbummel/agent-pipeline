@@ -4,17 +4,17 @@ milestone: v1.0
 current_phase: 06
 current_phase_name: Prediction Evaluation
 current_plan: 2
-status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-09-25T16:14:46.494Z"
+status: verifying
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-09-25T16:18:58.922Z"
 last_activity: 2026-09-25
 last_activity_desc: Completed 06-01 one-claim Evaluator tracer
-state_head: fc34b15252fb4dde043a8587647ffba292160400
+state_head: 354cee6e5313c9db7879ccc479cf1fddcdbf381e
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 16
-  completed_plans: 11
+  completed_plans: 12
 milestone_name: Claim Preprocessing
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md
 Phase: 06 (Prediction Evaluation) — IN PROGRESS
 Current Plan: 2
 Total Plans in Phase: 2
-Status: Executing
+Status: Phase complete — ready for verification
 Last activity: 2026-09-25 — Completed 06-01-PLAN.md (Evaluator tracer)
 
 Progress: [████████░░] 80% (4/5 phases complete)
@@ -85,6 +85,7 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 04]: CLI --mode analyze on main; preprocess remains default
 - [Phase 06]: Unknown pred/gt decisions raise ValueError at evaluate_claim boundary
 - [Phase 06]: evaluation package at src/evaluation (hatch); scores predicted_answer vs answer.json only
+- [Phase 06]: Public batch API named evaluate(); soft-skip unsafe/missing pairs; always write metrics JSON including empty batch
 
 ### Blockers/Concerns
 
@@ -99,8 +100,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:14:46.410Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-09-25T16:18:58.903Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -118,3 +119,4 @@ Resume file: None
 | Phase 04 P03 | 3min | 2 tasks | 5 files |
 | Phase 04 P04 | 3min | 2 tasks | 6 files |
 | Phase 06 P01 | 5 min | 2 tasks | 15 files |
+| Phase 06 P02 | 2 min | 2 tasks | 6 files |

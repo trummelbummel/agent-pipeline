@@ -6,7 +6,7 @@
 
 ## Phases
 
-- [ ] **Phase 01: Claim Preprocessing Pipeline** `profiles: []`
+- [x] **Phase 01: Claim Preprocessing Pipeline** `profiles: []` (completed 2026-09-25)
   Plans: 01-01, 01-02, 01-03
   Goal: Parse all 25 insurance claim folders into structured processed.json via Reader/Preprocessor ABCs, FormatConverter→PNG→Docling, and InformationExtractor
   Success criteria:
@@ -18,4 +18,4 @@
 
 | Phase | Plans | Status | Completed |
 |-------|-------|--------|-----------|
-| 01 | 3/3 | In Progress | 01-01, 01-02, 01-03 |
+| 01 | 3/3 | Complete    | 2026-09-25 |

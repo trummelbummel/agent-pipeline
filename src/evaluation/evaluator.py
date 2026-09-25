@@ -58,14 +58,15 @@ class Evaluator:
 
         :param claim_id: Claim folder name under data_dir / results_dir.
         :return: Structured EvaluationResult for the one-claim batch.
-        :raises ValueError: When claim_id is not a single safe path segment.
+        :raises ValueError: When claim_id is unsafe or a decision is outside labels.
         :raises FileNotFoundError: When predicted or ground-truth JSON is missing.
         """
         _validate_claim_dir_name(claim_id)
         pred = self._read_predicted(claim_id)
         gt = self._read_ground_truth(claim_id)
-        match = self._match_decision(pred, gt)
         labels = list(self._config.evaluation.labels)
+        self._require_known_labels(pred.decision, gt.decision, labels)
+        match = self._match_decision(pred, gt)
         y_true = [gt.decision]
         y_pred = [pred.decision]
         matches = [match]
@@ -117,6 +118,27 @@ class Evaluator:
         path = Path(self._config.preprocessing.data_dir) / claim_id / artifacts.answer
         return cast(GroundTruth, self._reader.read(path))
 
+    def _require_known_labels(
+        self,
+        pred_decision: str,
+        gt_decision: str,
+        labels: list[str],
+    ) -> None:
+        """Reject decisions outside the configured vocabulary (T-06-04).
+
+        :param pred_decision: Predicted decision string.
+        :param gt_decision: Ground-truth decision string.
+        :param labels: Allowed labels from config.evaluation.labels.
+        :raises ValueError: When either decision is not in ``labels``.
+        """
+        allowed = set(labels)
+        if gt_decision not in allowed:
+            msg = f"ground-truth decision {gt_decision!r} not in evaluation.labels {labels}"
+            raise ValueError(msg)
+        if pred_decision not in allowed:
+            msg = f"predicted decision {pred_decision!r} not in evaluation.labels {labels}"
+            raise ValueError(msg)
+
     def _match_decision(self, pred: GroundTruth, gt: GroundTruth) -> bool:
         """Return whether prediction matches ground truth per A4.
 
@@ -158,8 +180,6 @@ class Evaluator:
         n = len(labels)
         matrix = [[0 for _ in range(n)] for _ in range(n)]
         for true_label, pred_label in zip(y_true, y_pred, strict=True):
-            if true_label not in index or pred_label not in index:
-                continue
             matrix[index[true_label]][index[pred_label]] += 1
         return matrix
 

@@ -48,17 +48,30 @@ class ClassificationConfig(BaseModel):
     prompt: str
 
 
+class BenfordConfig(BaseModel):
+    """Benford's Law analysis settings for image forensic checks.
+
+    :param block_size: Side length of the square DCT block (pixels).
+    :param chi_squared_threshold: Maximum chi-squared statistic for conformity (8 dof).
+    """
+
+    block_size: int = 8
+    chi_squared_threshold: float = 15.51
+
+
 class AppConfig(BaseModel):
     """Top-level application configuration.
 
     :param preprocessing: Document discovery and Docling-related settings.
     :param extraction: LLM model and prompt for description extraction.
     :param classification: LLM model, labels, and prompt for case classification.
+    :param benford: DCT-based Benford's Law image forensics parameters.
     """
 
     preprocessing: PreprocessingConfig
     extraction: ExtractionConfig
     classification: ClassificationConfig
+    benford: BenfordConfig = BenfordConfig()
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:

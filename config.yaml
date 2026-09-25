@@ -31,3 +31,7 @@ classification:
     Return JSON with keys "labels" (array of selected label strings) and
     "probabilities" (object mapping each allowed label to a float in [0, 1]).
     Use Other only when no coverage class fits.
+
+benford:
+  block_size: 8
+  chi_squared_threshold: 15.51

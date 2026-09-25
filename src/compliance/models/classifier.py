@@ -102,7 +102,12 @@ class CaseClassifier(Classifier):
         :return: ClassificationResult with Other fallback and full key coverage.
         """
         allowed = set(self.labels) | {self.other_label}
-        selected = [label for label in raw_labels if label in allowed]
+        selected: list[str] = []
+        seen: set[str] = set()
+        for label in raw_labels:
+            if label in allowed and label not in seen:
+                selected.append(label)
+                seen.add(label)
         used_other_fallback = False
         if not selected:
             selected = [self.other_label]

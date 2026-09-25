@@ -206,9 +206,9 @@ tests/
 **Example:**
 
 ```python
-# Source: existing CaseClassifier [VERIFIED: src/compliance/models/classifier.py:50-74]
+# Source: existing CaseClassifier [VERIFIED: src/compliance/llm/classifier.py]
 # + AppConfig classification shape [VERIFIED: src/compliance/config/settings.py:59-71]
-from compliance.models.classifier import CaseClassifier
+from compliance.llm.classifier import CaseClassifier
 
 coverage_clf = CaseClassifier(
     labels=config.analysis.coverage.labels,
@@ -492,27 +492,31 @@ result = graph.invoke(initial_state)
 | A4 | Full LOGIC.md adjudication is out of Phase 04 scope beyond Checker wiring | Pitfall 5 | If user expected automatic APPROVE/DENY matching answer.json, success criteria undershoot |
 | A5 | Legitimacy SUS on langgraph is a false positive of “latest publish date” heuristics | Package Audit | Human may block install unnecessarily — checkpoint still required by protocol |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Coverage fallback label: `Other` vs `None`?**
    - What we know: Phase 02 config uses `other_label: Other` `[VERIFIED: config.yaml:37]`; ROADMAP Phase 04 success criteria say `None`
    - What's unclear: Whether to migrate Phase 02 vocabulary
    - Recommendation: analysis stages use `None`; keep `classification.other_label: Other` until explicitly migrated; router treats both as terminal for coverage if both can appear
+   - **RESOLVED:** analysis stages `other_label: None`; keep Phase 02 `classification.other_label: Other` (04-01 A6)
 
 2. **Analysis artifact filename and schema?**
    - What we know: `results_dir` holds `predicted_answer.json` today `[VERIFIED: config.yaml:8-9,21]`
    - What's unclear: New file vs overwrite/extend predicted_answer
    - Recommendation: write `analysis_result.json` (labels + checker bools + optional explanation) under `results_dir/{claim}/`; leave preprocessing predicted_answer alone
+   - **RESOLVED:** write `analysis_result.json` under `results_dir/{claim}/`; leave `predicted_answer` alone (04-01 A1)
 
 3. **Checker depth for Phase 04?**
    - What we know: Checker has containment + contradicts `[VERIFIED: src/compliance/llm/checker.py:38-56]`
    - What's unclear: One node both modes vs reason-specific checks (e.g. contradicts only for medical path)
    - Recommendation: single `run_checker` node both modes; specialize later
+   - **RESOLVED:** single `run_checker` node runs both containment and contradicts (04-01 A2)
 
 4. **CLI entrypoint?**
    - What we know: `compliance-preprocess` / `main.py` runs preprocessing only `[VERIFIED: src/main.py:12-39]`
    - What's unclear: Separate module `__main__` vs flag
    - Recommendation: `python -m compliance.workflows.claim_pipeline` or `--mode analyze` — planner picks one; avoid breaking preprocess script
+   - **RESOLVED:** `--mode analyze` on main without breaking preprocess (04-04)
 
 ## Environment Availability
 

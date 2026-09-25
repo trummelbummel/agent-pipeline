@@ -1,5 +1,5 @@
 ---
-status: testing
+status: complete
 phase: 04-claim-analysis-pipeline
 source:
   - 04-01-SUMMARY.md
@@ -7,20 +7,12 @@ source:
   - 04-03-SUMMARY.md
   - 04-04-SUMMARY.md
 started: 2026-09-25T15:55:58Z
-updated: 2026-09-25T15:58:30Z
+updated: 2026-09-25T16:05:00Z
 ---
 
 ## Current Test
 
-number: 3
-name: Confirm auto-covered ClaimPipeline behaviors
-expected: |
-  Automated tests already green for these deliverables — confirm nothing contradicts your understanding of Phase 04:
-  - AnalysisConfig loads five analysis stages from config.yaml; analysis other_label is None; Phase 02 Other unchanged
-  - Cancellation path writes analysis_result.json with coverage/reason/document labels + checker bools
-  - PE and Missed Departure routes classify docs and run Checker; reason skipped; other_label skips reason/doc/checker but still persists
-  - ClaimPipeline.run soft-fails per claim; `main --mode analyze` runs analysis; default remains preprocess
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -37,11 +29,12 @@ result: pass
 ### 3. Confirm auto-covered ClaimPipeline behaviors
 expected: |
   Automated tests already green for these deliverables — confirm nothing contradicts your understanding of Phase 04:
-  - AnalysisConfig loads five analysis stages from config.yaml; analysis other_label is None; Phase 02 Other unchanged
-  - Cancellation path writes analysis_result.json with coverage/reason/document labels + checker bools
+  - Numeric coverage/reason/document labels with descriptions in prompts
+  - AnalysisConfig loads five analysis stages; analysis other_label is None; Phase 02 Other unchanged
+  - Cancellation path writes analysis_result.json with labels + checker bools
   - PE and Missed Departure routes classify docs and run Checker; reason skipped; other_label skips reason/doc/checker but still persists
   - ClaimPipeline.run soft-fails per claim; `main --mode analyze` runs analysis; default remains preprocess
-result: [pending]
+result: pass
 
 ### 4. Typed AnalysisConfig + config.yaml analysis stages load via load_config
 expected: Typed AnalysisConfig + config.yaml analysis stages load via load_config
@@ -148,9 +141,9 @@ coverage_id: D4
 ## Summary
 
 total: 20
-passed: 19
+passed: 20
 issues: 0
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -162,4 +155,4 @@ blocked: 0
 
 - Commit-claim reconciliation: SUMMARY `commits:` fields are `absent` (legacy) — WARNING only, not a blocker.
 - UI automated verification: N/A (no UI-SPEC / no frontend for this phase).
-- Active session for Phase 03 UAT exists separately and was not resumed.
+- Mid-UAT config change: all analysis (and Phase 02 classification coverage) labels converted to numeric codes with descriptions in prompts; tests updated accordingly.

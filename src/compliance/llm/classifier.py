@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import json
-import logging
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import Annotated, NamedTuple
 
 import ollama
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
-from compliance.llm.chat import ChatFn, response_content
-
-logger = logging.getLogger(__name__)
+from compliance.llm.chat import ChatFn, parse_llm_json_object, response_content
 
 
 class _ClassificationPayload(NamedTuple):
@@ -18,7 +14,9 @@ class _ClassificationPayload(NamedTuple):
     probabilities: dict[str, float]
 
 
-_EMPTY_PAYLOAD = _ClassificationPayload(labels=[], probabilities={})
+class _LabelSelection(NamedTuple):
+    labels: list[str]
+    used_other_fallback: bool
 
 
 class ClassificationResult(BaseModel):
@@ -31,8 +29,12 @@ class ClassificationResult(BaseModel):
     :param probabilities: Per-label probability estimates keyed by label name.
     """
 
-    labels: list[str]
-    probabilities: dict[str, float]
+    model_config = ConfigDict(strict=True)
+
+    labels: list[str] = Field(description="Selected coverage label(s)")
+    probabilities: dict[str, Annotated[float, Field(ge=0, le=1)]] = Field(
+        description="Per-label probability estimates in [0, 1]"
+    )
 
 
 class Classifier(ABC):
@@ -88,10 +90,9 @@ class CaseClassifier(Classifier):
         )
         content = response_content(response)
         payload = self._parse_classification_payload(content)
-        return self._normalized_classification(
-            raw_labels=payload.labels,
-            raw_probabilities=payload.probabilities,
-        )
+        if payload is None:
+            return self._normalized_classification([], {})
+        return self._normalized_classification(payload.labels, payload.probabilities)
 
     def _classification_messages(self, text: str) -> list[dict[str, str]]:
         label_list = ", ".join(self._label_vocabulary())
@@ -110,6 +111,17 @@ class CaseClassifier(Classifier):
         raw_labels: list[str],
         raw_probabilities: dict[str, float],
     ) -> ClassificationResult:
+        selection = self._selected_labels(raw_labels)
+        probabilities = self._normalized_probabilities(
+            raw_probabilities,
+            used_other_fallback=selection.used_other_fallback,
+        )
+        return ClassificationResult(
+            labels=selection.labels,
+            probabilities=probabilities,
+        )
+
+    def _selected_labels(self, raw_labels: list[str]) -> _LabelSelection:
         allowed = set(self.labels) | {self.other_label}
         selected: list[str] = []
         seen: set[str] = set()
@@ -117,49 +129,52 @@ class CaseClassifier(Classifier):
             if label in allowed and label not in seen:
                 selected.append(label)
                 seen.add(label)
-        used_other_fallback = False
-        if not selected:
-            selected = [self.other_label]
-            used_other_fallback = True
+        if selected:
+            return _LabelSelection(labels=selected, used_other_fallback=False)
+        return _LabelSelection(labels=[self.other_label], used_other_fallback=True)
 
+    def _normalized_probabilities(
+        self,
+        raw_probabilities: dict[str, float],
+        *,
+        used_other_fallback: bool,
+    ) -> dict[str, float]:
         probabilities: dict[str, float] = {
             label: self._clamped_probability(raw_probabilities.get(label, 0.0))
             for label in self._label_vocabulary()
         }
         if used_other_fallback:
             probabilities[self.other_label] = 1.0
-
-        return ClassificationResult(labels=selected, probabilities=probabilities)
+        return probabilities
 
     @staticmethod
     def _clamped_probability(value: float) -> float:
         return max(0.0, min(1.0, float(value)))
 
     @staticmethod
-    def _parse_classification_payload(content: str) -> _ClassificationPayload:
-        content = content.strip()
-        if not content:
-            logger.warning("Empty LLM classification response")
-            return _EMPTY_PAYLOAD
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse LLM classification JSON")
-            return _EMPTY_PAYLOAD
-        if not isinstance(parsed, dict):
-            logger.warning("LLM classification JSON was not an object")
-            return _EMPTY_PAYLOAD
-        labels = parsed.get("labels", [])
-        probabilities = parsed.get("probabilities", {})
-        if not isinstance(labels, list):
-            labels = []
-        if not isinstance(probabilities, dict):
-            probabilities = {}
+    def _parse_classification_payload(content: str) -> _ClassificationPayload | None:
+        parsed = parse_llm_json_object(content, context="classification")
+        if parsed is None:
+            return None
         return _ClassificationPayload(
-            labels=[str(item) for item in labels],
-            probabilities={
-                str(key): float(value)
-                for key, value in probabilities.items()
-                if isinstance(value, (int, float))
-            },
+            labels=CaseClassifier._coerced_labels(parsed.get("labels", [])),
+            probabilities=CaseClassifier._coerced_probabilities(
+                parsed.get("probabilities", {})
+            ),
         )
+
+    @staticmethod
+    def _coerced_labels(raw: object) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        return [str(item) for item in raw]
+
+    @staticmethod
+    def _coerced_probabilities(raw: object) -> dict[str, float]:
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(key): float(value)
+            for key, value in raw.items()
+            if isinstance(value, (int, float))
+        }

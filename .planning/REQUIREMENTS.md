@@ -132,6 +132,54 @@ This file is the explicit capability and coverage contract for the project.
 - Source: 04-RESEARCH.md; Phase 02 pattern
 - Validation: Default unit path never calls live ollama; mypy + pytest green
 
+### R017 — POST /claims multipart intake under config data_dir
+- Class: core-capability
+- Status: active
+- Description: `POST /claims` accepts multipart description.txt, supporting_documents.md, and an image whose extension is in config `document_formats`; writes under config `data_dir/{claim_id}/`
+- Why it matters: HTTP boundary for new claim intake without hardcoding filesystem roots
+- Source: ROADMAP Phase 05; 05-RESEARCH.md
+- Validation: TestClient multipart → 201; files under injected data_dir; bad extension → 422; collision → 409
+
+### R018 — GET /claims/{claim_id} runs preprocess then analyze
+- Class: core-capability
+- Status: active
+- Description: `GET /claims/{claim_id}` runs PreprocessingPipeline then ClaimPipeline for one claim (same orchestration as main) and returns the decision JSON
+- Why it matters: Single-claim decision path must not drift between API and CLI
+- Source: ROADMAP Phase 05; 05-RESEARCH.md
+- Validation: Injectable chat_fn TestClient returns analysis_result payload; missing raw folder → 404
+
+### R019 — GET /claims lists processed answers from results_dir
+- Class: core-capability
+- Status: active
+- Description: `GET /claims` lists all processed claim answers from config `results_dir` (optional predicted_answer and/or analysis_result per claim)
+- Why it matters: Operators need a roster of decisions without scanning the filesystem manually
+- Source: ROADMAP Phase 05; 05-RESEARCH.md
+- Validation: Empty results → []; non-empty list stable by claim_id sort key
+
+### R020 — Pipelines accept single claim folder and full directory
+- Class: core-capability
+- Status: active
+- Description: PreprocessingPipeline / ClaimPipeline / main accept a single claim folder as well as full-directory batch; shared orchestrator preferred
+- Why it matters: API GET and CLI single-claim must reuse the same process_claim → analyze_claim path
+- Source: ROADMAP Phase 05 locked decisions
+- Validation: `--claim-id` CLI path + batch default regression tests
+
+### R021 — Pipelines provided as FastAPI lifespan/DI resources
+- Class: core-capability
+- Status: active
+- Description: PreprocessingPipeline and ClaimPipeline created once in FastAPI lifespan and injected via Depends/request.state
+- Why it matters: Expensive Docling/LLM resources must not be reconstructed per request; TestClient needs `create_app(config=...)`
+- Source: ROADMAP Phase 05; 05-RESEARCH.md Pattern 1
+- Validation: test_deps_lifespan proves Depends resolves lifespan instances
+
+### R022 — mypy + pytest pass for API + pipeline refactor
+- Class: quality-attribute
+- Status: active
+- Description: mypy and pytest pass for `src/api`, workflow orchestration changes, and related tests (TestClient + httpx)
+- Why it matters: Phase quality gate; hatch must package `src/api`
+- Source: ROADMAP Phase 05; 05-VALIDATION.md
+- Validation: Phase gate `pytest tests/test_api tests/test_workflows ... && mypy src/api ...` green
+
 ## Validated
 
 - R001, R002, R003, R004, R005, R006 — completed in phase 01 plans 01-01 through 01-03
@@ -162,10 +210,16 @@ This file is the explicit capability and coverage contract for the project.
 | R014 | core-capability | validated | 04-02 | none | Checker wired as graph node(s) |
 | R015 | quality-attribute | validated | 04-01 | none | analysis section externalized in config.yaml |
 | R016 | quality-attribute | validated | 04-01 | 04-02, 04-04 | Injectable chat_fn tests; mypy + pytest pass |
+| R017 | core-capability | active | 05-01 | 05-00 | POST /claims multipart writes under config data_dir/{claim_id}/ |
+| R018 | core-capability | active | 05-02 | none | GET /claims/{id} process_then_analyze → decision JSON |
+| R019 | core-capability | active | 05-02 | none | GET /claims lists results_dir answers |
+| R020 | core-capability | active | 05-03 | 05-02 | Single-claim + batch via CLI/orchestrator |
+| R021 | core-capability | active | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
+| R022 | quality-attribute | active | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
 
 ## Coverage Summary
 
-- Active requirements: 0
-- Mapped to slices: 16
+- Active requirements: 6
+- Mapped to slices: 22
 - Validated: 16
 - Unmapped active requirements: 0

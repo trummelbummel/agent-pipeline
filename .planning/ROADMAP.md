@@ -47,15 +47,25 @@
   - mypy + pytest pass
 
 - [ ] **Phase 05: FastAPI Claims API** `profiles: []`
-  Plans: TBD
+  Plans: 05-00, 05-01, 05-02, 05-03
   Goal: FastAPI under `src/api` with claim submit/process/list endpoints; refactor pipelines for single-claim + batch
   Success criteria:
-  - `POST /claims` accepts description.txt, supporting_documents.md, and a config-allowed image; writes `data/raw/{claim_id}/`
+  - `POST /claims` accepts description.txt, supporting_documents.md, and a config-allowed image; writes under config `data_dir/{claim_id}/`
   - `GET /claims/{claim_id}` runs preprocessing + ClaimPipeline (same logic as main) for one claim and returns the decision
   - `GET /claims` lists all processed claims from results (answers per claim_id)
   - Pipelines accept a single claim folder as well as a full directory (refactor PreprocessingPipeline / ClaimPipeline / main)
   - Pipelines provided as FastAPI lifespan/resource fixtures (dependency injection)
   - mypy + pytest pass
+
+- [ ] **Phase 06: Prediction Evaluation** `profiles: []`
+  Plans: TBD
+  Goal: Add `src/evaluation` with an `Evaluator` that compares pipeline predictions to ground-truth `answer.json`, builds a confusion matrix, and reports accuracy and F1
+  Success criteria:
+  - `src/evaluation/` package with public `Evaluator` class
+  - Evaluator takes predicted results and raw/ground-truth `answer.json` (per claim or batch)
+  - Produces a confusion matrix over decision labels
+  - Reports accuracy and F1 score
+  - Paths/labels from config where applicable; mypy + pytest pass
 
 ## Progress
 
@@ -65,7 +75,8 @@
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
-| 05 | 0/? | Not started |  |
+| 05 | 0/4 | Not started |  |
+| 06 | 0/? | Not started |  |
 
 ### Phase 2: Case Classifier Models
 
@@ -131,11 +142,36 @@ Plans:
 
 ### Phase 5: FastAPI Claims API
 
-**Goal:** Add FastAPI under `src/api` with three endpoints: `POST /claims` (multipart: description.txt, supporting_documents.md, image in config `document_formats`) writes a new folder under `data/raw/{claim_id}`; `GET /claims/{claim_id}` runs PreprocessingPipeline + ClaimPipeline for that claim (same orchestration as `main`) and returns the decision; `GET /claims` lists all processed claim answers from `results_dir`. Refactor pipelines so they accept a single claim folder as well as a full directory. Inject pipelines as FastAPI app resources/dependencies (lifespan fixture).
-**Requirements**: TBD
+**Goal:** Add FastAPI under `src/api` with three endpoints: `POST /claims` (multipart: description.txt, supporting_documents.md, image in config `document_formats`) writes a new folder under config `data_dir/{claim_id}/`; `GET /claims/{claim_id}` runs PreprocessingPipeline + ClaimPipeline for that claim (same orchestration as `main`) and returns the decision; `GET /claims` lists all processed claim answers from `results_dir`. Refactor pipelines so they accept a single claim folder as well as a full directory. Inject pipelines as FastAPI app resources/dependencies (lifespan fixture).
+**Requirements**: R017, R018, R019, R020, R021, R022
 **Depends on:** Phase 4
+**Plans:** 4 plans
+
+Plans:
+
+**Wave 0**
+
+- [ ] 05-00-PLAN.md — Wave 0: human-verify FastAPI stack + uv add + hatch `src/api` + Nyquist stubs (R022)
+
+**Wave 1** *(blocked on Wave 0)*
+
+- [ ] 05-01-PLAN.md — create_app lifespan DI + POST /claims multipart under data_dir (R017, R021)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05-02-PLAN.md — process_then_analyze + GET /claims/{id} + GET /claims list (R018, R019)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-03-PLAN.md — CLI --claim-id single-claim + mypy/pytest phase gate (R020, R022)
+
+### Phase 6: Prediction Evaluation
+
+**Goal:** Add `src/evaluation` with an `Evaluator` that loads pipeline prediction results and ground-truth `answer.json`, compares decisions, builds a confusion matrix, and calculates accuracy and F1 score.
+**Requirements**: TBD
+**Depends on:** Phase 4 (predicted results + ground-truth answers)
 **Plans:** 0 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 5 to break down)
+- [ ] TBD (run /gsd-plan-phase 6 to break down)

@@ -26,13 +26,23 @@
     {
       "number": "05",
       "name": "FastAPI Claims API",
+      "status": "in_progress"
+    },
+    {
+      "number": "06",
+      "name": "Prediction Evaluation",
+      "status": "complete"
+    },
+    {
+      "number": "07",
+      "name": "Denial-rule checkers in analysis pipeline",
       "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd:discuss-phase 5",
-    "label": "Discuss Phase 05 before planning",
-    "reason": "Phase 04 complete — next is FastAPI Claims API"
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step (verify)",
+    "reason": "Phase 05 of 7 · ready to verify"
   },
-  "updated_at": "2026-09-25T15:40:00.000Z"
+  "updated_at": "2026-09-25T16:51:51.542Z"
 }

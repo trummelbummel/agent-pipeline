@@ -46,7 +46,7 @@
   - Classifiers configured with a local LLM via config.yaml (no hardcoded model names)
   - mypy + pytest pass
 
-- [ ] **Phase 05: FastAPI Claims API** `profiles: []`
+- [x] **Phase 05: FastAPI Claims API** `profiles: []`
   Plans: 05-00, 05-01, 05-02, 05-03
   Goal: FastAPI under `src/api` with claim submit/process/list endpoints; refactor pipelines for single-claim + batch
   Success criteria:
@@ -84,7 +84,7 @@
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
-| 05 | 2/4 | In Progress|  |
+| 05 | 4/4 | Complete    | 2026-09-25 |
 | 06 | 1/2 | Complete    | 2026-09-25 |
 | 07 | 0/0 | Not started |  |
 

@@ -53,7 +53,7 @@
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
-| 04 | 0/4 | Planned     | — |
+| 04 | 0/4 | In Progress|  |
 
 ### Phase 2: Case Classifier Models
 
@@ -87,6 +87,7 @@ Plans:
 **Goal:** Build a `ClaimPipeline` that analyzes preprocessed claim data via classifiers and Checker steps. Structure the pipeline as a LangGraph. Classifiers use a local LLM from config.
 
 Classification graph:
+
 1. **Coverage type** (description.txt) → Trip Cancellation or Rescheduling | Personal Effects | Missed Departure or Missed Connection | None
 2. **Cancellation reason** (description.txt, only if Trip Cancellation or Rescheduling) → Jury duty | Medical emergency (needs medical report) | Theft or criminal incident (needs police report) | Other specified personal emergencies | None
 3. **Supporting document type** (cancellation path) → medical certificate | police report | jury summon letter | None
@@ -96,13 +97,13 @@ Classification graph:
 Reuse/extend Phase 02 `Classifier`/`CaseClassifier` and existing `Checker`; wire them as graph nodes over Phase 03 preprocessed artifacts.
 **Requirements**: R010, R011, R012, R013, R014, R015, R016
 **Depends on:** Phase 2 (classifiers), Phase 3 (preprocessed data)
-**Plans:** 0/4 plans complete
+**Plans:** 1/4 plans executed
 
 Plans:
 
 **Wave 0**
 
-- [ ] 04-01-PLAN.md — Wave 0: human-verify langgraph + AnalysisConfig taxonomy + Nyquist stubs (R015, R016)
+- [x] 04-01-PLAN.md — Wave 0: human-verify langgraph + AnalysisConfig taxonomy + Nyquist stubs (R015, R016)
 
 **Wave 1** *(blocked on Wave 0)*
 

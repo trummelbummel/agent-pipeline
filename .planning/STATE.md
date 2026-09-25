@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 04
 current_phase_name: Claim Analysis Pipeline
-current_plan: null
+current_plan: 02 (Wave 0)
 status: ready_to_execute
-stopped_at: Phase 04 planned (4 plans verified)
-last_updated: "2026-09-25T15:17:00.000Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-09-25T15:23:10.136Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 04 plans verified — ready to execute
-state_head: 51fd93b
+state_head: f5fb5cd367726a052dad347a8e5bc345fd111227
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 10
-  completed_plans: 6
+  completed_plans: 7
 milestone_name: Claim Preprocessing
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 04 (Claim Analysis Pipeline) — READY TO EXECUTE
-Current Plan: 01 (Wave 0)
+Current Plan: 02 (Wave 0)
 Total Plans in Phase: 4
 Status: Ready to execute
 Last activity: 2026-09-25 - Phase 04 planned and verified (4 plans)
@@ -44,6 +44,7 @@ Progress: [████████░░] 75% (3/4 phases complete)
 - Phase 3 added: Preprocessing Pipeline Orchestration — workflows/pipeline.py + main entrypoint writing mirrored preprocessed/ (description.txt, answer.json, supporting_document.json, supporting_documents.md)
 - Phase 4 added: Claim Analysis Pipeline — ClaimPipeline LangGraph over preprocessed data; coverage/reason/document classifiers + Checker; local LLM config
 - Phase 4 planned: 04-01..04-04 (Wave 0 langgraph+AnalysisConfig → tracer cancellation → PE/missed → batch/CLI)
+
 ### Roadmap Evolution
 
 - Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)
@@ -69,6 +70,9 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 03]: Refuse claim_dir.name with path separators or .. before any mkdir/write (T-03-03)
 - [Phase 03]: Soft-fail test raises via answer_reader (Phase 1 soft-catches document_reader)
 - [Phase 03]: main tested via monkeypatch of run_preprocessing_workflow; no console_scripts added
+- [Phase 04]: Task 1 approved langgraph (LangChain) legitimacy before uv add (T-04-SC)
+- [Phase 04]: analysis other_label is string None; Phase 02 classification.other_label Other preserved
+- [Phase 04]: analysis_result.json externalized on PreprocessedArtifactNames
 
 ### Blockers/Concerns
 
@@ -83,8 +87,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T12:14:32.394Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-09-25T15:23:10.120Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -97,3 +101,4 @@ Resume file: None
 | Phase 02 P01 | 4 min | 3 tasks | 9 files |
 | Phase 03 P01 | 4min | 3 tasks | 9 files |
 | Phase 03 P02 | 3min | 2 tasks | 6 files |
+| Phase 04 P01 | 3min | 3 tasks | 14 files |

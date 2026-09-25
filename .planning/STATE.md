@@ -1,18 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 1
+current_phase: 2
+current_phase_name: Case Classifier Models
 current_plan: Not started
-status: completed
-stopped_at: Phase 01 complete — all phases complete
-last_updated: "2026-09-25T11:02:18.470Z"
+status: ready
+stopped_at: Phase 03 added — not planned yet
+last_updated: "2026-09-25T11:49:10.851Z"
 last_activity: 2026-09-25
-last_activity_desc: Phase 01 complete
-state_head: 01f2506336b6c3b005a75bef3865a9ca9006696d
+last_activity_desc: Phase 03 added (Preprocessing Pipeline Orchestration)
+state_head: 61a3dabad4496075f1422685af0826b6b29c8225
 progress:
-  total_phases: 1
+  total_phases: 3
   completed_phases: 1
-  total_plans: 3
+  total_plans: 4
   completed_plans: 3
 milestone_name: Claim Preprocessing
 ---
@@ -23,19 +24,24 @@ milestone_name: Claim Preprocessing
 
 See: .planning/PROJECT.md
 
-**Current focus:** Phase 01 — Claim Preprocessing Pipeline
+**Current focus:** Phase 02 — Case Classifier Models
 
 ## Current Position
 
-Phase: 01
+Phase: 2 (Case Classifier Models) — READY TO EXECUTE
 Current Plan: Not started
-Total Plans in Phase: 3
-Status: All phases complete
-Last activity: 2026-09-25 — Phase 01 complete
+Total Plans in Phase: 1
+Status: ready
+Last activity: 2026-09-25 — Phase 03 added
 
-Progress: [██████████] 100%
+Progress: [███·······] 33%
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)
+- Phase 3 added: Preprocessing Pipeline Orchestration — workflows/pipeline.py + main entrypoint writing mirrored preprocessed/ (description.txt, answer.json, supporting_document.json, supporting_documents.md)
 
 ### Decisions
 
@@ -56,8 +62,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T10:25:30.864Z
-Stopped at: Phase 01 complete — all phases complete
+Last session: 2026-09-25T11:25:00.000Z
+Stopped at: Phase 02 added — not planned yet
 Resume file: None
 
 ## Performance Metrics

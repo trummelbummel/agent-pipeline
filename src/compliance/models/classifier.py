@@ -67,6 +67,9 @@ class CaseClassifier(Classifier):
     def classify(self, text: str) -> ClassificationResult:
         """Call the LLM and parse labels with probability estimates.
 
+        Invalid or empty model output falls back to ``other_label``. Probability
+        values are clamped to [0, 1] and treated as estimates (not calibrated).
+
         :param text: Free-text claim description.
         :return: ClassificationResult with selected labels and probabilities.
         """
@@ -82,7 +85,49 @@ class CaseClassifier(Classifier):
         )
         content = self._response_content(response)
         payload = self._parse_classification_payload(content)
-        return ClassificationResult.model_validate(payload)
+        return self._normalized_classification(
+            raw_labels=payload["labels"],
+            raw_probabilities=payload["probabilities"],
+        )
+
+    def _normalized_classification(
+        self,
+        raw_labels: list[str],
+        raw_probabilities: dict[str, float],
+    ) -> ClassificationResult:
+        """Filter labels to the configured set and fill probability coverage.
+
+        :param raw_labels: Labels parsed from the LLM JSON payload.
+        :param raw_probabilities: Probability map parsed from the LLM JSON payload.
+        :return: ClassificationResult with Other fallback and full key coverage.
+        """
+        allowed = set(self.labels) | {self.other_label}
+        selected = [label for label in raw_labels if label in allowed]
+        used_other_fallback = False
+        if not selected:
+            selected = [self.other_label]
+            used_other_fallback = True
+
+        probabilities: dict[str, float] = {}
+        for label in [*self.labels, self.other_label]:
+            if label in probabilities:
+                continue
+            raw_value = raw_probabilities.get(label, 0.0)
+            probabilities[label] = self._clamped_probability(raw_value)
+
+        if used_other_fallback:
+            probabilities[self.other_label] = 1.0
+
+        return ClassificationResult(labels=selected, probabilities=probabilities)
+
+    @staticmethod
+    def _clamped_probability(value: float) -> float:
+        """Clamp a probability estimate into [0, 1].
+
+        :param value: Raw numeric probability from the model.
+        :return: Value restricted to the unit interval.
+        """
+        return max(0.0, min(1.0, float(value)))
 
     @staticmethod
     def _response_content(response: Any) -> str:
@@ -105,7 +150,7 @@ class CaseClassifier(Classifier):
         """Parse LLM JSON into a ClassificationResult-shaped dict.
 
         :param content: Raw model output expected to be JSON.
-        :return: Dict with labels and probabilities for model_validate.
+        :return: Dict with labels and probabilities for normalization.
         """
         content = content.strip()
         if not content:

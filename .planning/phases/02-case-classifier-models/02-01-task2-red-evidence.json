@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_models/test_classifier.py::test_case_classifier_empty_labels_uses_other -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_case_classifier_empty_labels_uses_other\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_case_classifier_empty_labels_uses_other",
+  "targetFile": "tests/test_models/test_classifier.py",
+  "expected": "result.labels == [other_label] and probabilities[other_label] == 1.0",
+  "actual": "AssertionError on empty labels (no Other fallback yet)"
+}

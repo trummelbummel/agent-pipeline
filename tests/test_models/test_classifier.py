@@ -58,3 +58,50 @@ def test_case_classifier_happy_path_trip_cancellation() -> None:
     assert call_kwargs["model"] == "test-model"
     assert call_kwargs["format"] == "json"
     assert "classify the claim" in call_kwargs["messages"][0]["content"]
+
+
+def _make_classifier(chat: MagicMock) -> CaseClassifier:
+    return CaseClassifier(
+        labels=_SAMPLE_LABELS,
+        model_name="test-model",
+        prompt="classify",
+        other_label=OTHER,
+        chat_fn=chat,
+    )
+
+
+def test_case_classifier_empty_labels_uses_other() -> None:
+    chat = _chat_returning({"labels": [], "probabilities": {}})
+    result = _make_classifier(chat).classify("unrelated narrative")
+
+    assert result.labels == [OTHER]
+    assert result.probabilities[OTHER] == 1.0
+
+
+def test_case_classifier_unknown_label_mapped_to_other() -> None:
+    chat = _chat_returning(
+        {
+            "labels": ["Not A Real Coverage Type"],
+            "probabilities": {"Not A Real Coverage Type": 0.8},
+        }
+    )
+    result = _make_classifier(chat).classify("something odd")
+
+    assert result.labels == [OTHER]
+    assert OTHER in result.probabilities
+
+
+def test_case_classifier_probabilities_cover_configured_labels() -> None:
+    chat = _chat_returning(
+        {
+            "labels": [PERSONAL_EFFECTS],
+            "probabilities": {PERSONAL_EFFECTS: 0.7},
+        }
+    )
+    result = _make_classifier(chat).classify("my bag was stolen")
+
+    expected_keys = set(_SAMPLE_LABELS) | {OTHER}
+    assert expected_keys <= set(result.probabilities)
+    for value in result.probabilities.values():
+        assert isinstance(value, float)
+        assert 0.0 <= value <= 1.0

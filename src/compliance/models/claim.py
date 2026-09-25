@@ -80,6 +80,8 @@ class DocumentData(NanAwareModel):
     raw_text: NanStr = _MISSING
     confidence: NanFloat = _MISSING
     human_in_the_loop: bool = False
+    has_signature: bool = False
+    timestamps: list[str] = Field(default_factory=list)
     fields: dict[str, Any] = Field(default_factory=dict)
 
 

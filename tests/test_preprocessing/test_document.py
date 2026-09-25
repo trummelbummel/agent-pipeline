@@ -169,3 +169,129 @@ def test_document_data_arbitrary_fields(tmp_path: Path) -> None:
     assert result.fields["seat"] == "12A"
     assert result.fields["airline"] == "Acme"
     assert result.human_in_the_loop is False
+
+
+def test_signature_detected_spanish(tmp_path: Path) -> None:
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    text = "CONSTANCIA MÉDICA\nFirmado por Dr. Pérez\nDate: 2024-01-15"
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(text, 0.9),
+    )
+    result = reader.read(src)
+
+    assert result.has_signature is True
+
+
+def test_signature_detected_french(tmp_path: Path) -> None:
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    text = "CERTIFICAT D'HOSPITALISATION\nJe soussigné, Docteur Mohamed"
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(text, 0.9),
+    )
+    result = reader.read(src)
+
+    assert result.has_signature is True
+
+
+def test_no_signature_detected(tmp_path: Path) -> None:
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    text = "CERTIFICACION DE HOSPITALIZACION\nEl paciente fue admitido"
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(text, 0.9),
+    )
+    result = reader.read(src)
+
+    assert result.has_signature is False
+
+
+def test_timestamps_extracted(tmp_path: Path) -> None:
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    text = (
+        "Name: Ada\n"
+        "Admitted: 14-04-2017\n"
+        "Discharged: 18/04/2017\n"
+        "Date: 2017-04-20\n"
+        "Signed by Dr. García"
+    )
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(text, 0.9),
+    )
+    result = reader.read(src)
+
+    assert "14-04-2017" in result.timestamps
+    assert "18/04/2017" in result.timestamps
+    assert "2017-04-20" in result.timestamps
+    assert result.has_signature is True
+
+
+def test_timestamps_with_month_names(tmp_path: Path) -> None:
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    text = "Ingresando el día 13 de Agosto de 2015\nFecha: 22 de Abril 2020"
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(text, 0.9),
+    )
+    result = reader.read(src)
+
+    assert len(result.timestamps) >= 2
+    assert any("Agosto" in t for t in result.timestamps)
+    assert any("Abril" in t for t in result.timestamps)
+
+
+def test_timestamps_deduplication(tmp_path: Path) -> None:
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    text = "Date: 2024-01-15\nAdmission: 2024-01-15\nDischarge: 2024-01-20"
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(text, 0.9),
+    )
+    result = reader.read(src)
+
+    assert result.timestamps.count("2024-01-15") == 1
+    assert "2024-01-20" in result.timestamps

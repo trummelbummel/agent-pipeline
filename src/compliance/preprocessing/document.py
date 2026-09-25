@@ -21,6 +21,27 @@ _RASTER_SUFFIXES = frozenset({"webp", "jpg", "jpeg", "png"})
 _WHITESPACE = re.compile(r"\s+")
 _KV_LINE = re.compile(r"^([^:\n]+):\s*(.+)$")
 
+_SIGNATURE_PATTERNS = re.compile(
+    r"(?:firma|signature|sello|stamp|signé|signatur|suscrit[oa]|soussigné|"
+    r"je\s+soussigné|firmado|signed\s+by|dr\.\s*\w+|docteur\s+\w+|"
+    r"médico\s+tratante|praticien)",
+    re.IGNORECASE,
+)
+
+_TIMESTAMP_PATTERN = re.compile(
+    r"\b("
+    r"\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}"      # DD/MM/YYYY or similar
+    r"|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}"        # YYYY-MM-DD
+    r"|\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|octubre|noviembre|diciembre|"
+    r"janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)"
+    r"(?:\s+(?:de\s+|del?\s+)?\d{2,4})?"       # optional year after month name
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Normalized label → DocumentData core field or fields-dict key
 _PERSON_KEYS = frozenset({"person", "name", "patient", "patient name", "claimant", "nombre"})
 _DATE_KEYS = frozenset({"date", "fecha", "admission date", "visit date", "document date"})
@@ -33,7 +54,7 @@ class DocumentPreprocessor(Preprocessor):
         """Normalize Docling output into DocumentData construction inputs.
 
         :param raw: Dict with ``text`` and ``confidence`` from DocumentReader._load.
-        :return: Dict with cleaned ``raw_text``, ``confidence``, ``person``, ``date``, ``fields``.
+        :return: Dict with cleaned text, confidence, person, date, has_signature, timestamps, fields.
         :raises TypeError: If raw is not a mapping.
         """
         if not isinstance(raw, dict):
@@ -43,12 +64,16 @@ class DocumentPreprocessor(Preprocessor):
         text = str(raw.get("text", "") or "")
         cleaned = self._clean_text(text)
         person, date, fields = self._extract_candidates(cleaned)
+        has_signature = self._detect_signature(cleaned)
+        timestamps = self._extract_timestamps(cleaned)
         confidence = raw.get("confidence", _MISSING)
         return {
             "raw_text": cleaned if cleaned else _MISSING,
             "confidence": confidence,
             "person": person,
             "date": date,
+            "has_signature": has_signature,
+            "timestamps": timestamps,
             "fields": fields,
         }
 
@@ -89,6 +114,31 @@ class DocumentPreprocessor(Preprocessor):
                 fields[key] = value
 
         return person, date, fields
+
+    @staticmethod
+    def _detect_signature(text: str) -> bool:
+        """Check whether text contains signature-related indicators.
+
+        :param text: Cleaned document text.
+        :return: True when a signature pattern is found.
+        """
+        return bool(_SIGNATURE_PATTERNS.search(text))
+
+    @staticmethod
+    def _extract_timestamps(text: str) -> list[str]:
+        """Extract all date/timestamp occurrences from text.
+
+        :param text: Cleaned document text.
+        :return: De-duplicated timestamps in order of first appearance.
+        """
+        seen: set[str] = set()
+        timestamps: list[str] = []
+        for match in _TIMESTAMP_PATTERN.finditer(text):
+            value = match.group(1).strip()
+            if value not in seen:
+                seen.add(value)
+                timestamps.append(value)
+        return timestamps
 
 
 class DocumentReader(Reader):
@@ -204,6 +254,8 @@ class DocumentReader(Reader):
                 "raw_text": processed.get("raw_text", _MISSING),
                 "confidence": confidence,
                 "human_in_the_loop": hitl,
+                "has_signature": processed.get("has_signature", False),
+                "timestamps": processed.get("timestamps", []),
                 "fields": processed.get("fields", {}),
             }
         )

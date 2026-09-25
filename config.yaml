@@ -31,7 +31,7 @@ classification:
     Classify the claim description into one or more of the allowed coverage labels.
     Return JSON with keys "labels" (array of selected label strings) and
     "probabilities" (object mapping each allowed label to a float in [0, 1]).
-    Use Other only when no coverage class fits.
+    Use {other_label} only when no coverage class fits.
 
 benford:
   block_size: 8

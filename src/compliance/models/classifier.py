@@ -74,7 +74,8 @@ class CaseClassifier(Classifier):
         :return: ClassificationResult with selected labels and probabilities.
         """
         label_list = ", ".join([*self.labels, self.other_label])
-        system_prompt = f"{self.prompt}\n\nAllowed labels: {label_list}"
+        prompt = self.prompt.replace("{other_label}", self.other_label)
+        system_prompt = f"{prompt}\n\nAllowed labels: {label_list}"
         response = self._chat(
             model=self.model_name,
             messages=[

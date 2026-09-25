@@ -76,7 +76,7 @@
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
 | 05 | 0/4 | Not started |  |
-| 06 | 0/2 | Not started |  |
+| 06 | 1/2 | In Progress|  |
 
 ### Phase 2: Case Classifier Models
 
@@ -170,13 +170,13 @@ Plans:
 **Goal:** Add `src/evaluation` with an `Evaluator` that loads pipeline prediction results and ground-truth `answer.json`, compares decisions, builds a confusion matrix, and calculates accuracy and F1 score.
 **Requirements**: TBD
 **Depends on:** Phase 4 (predicted results + ground-truth answers)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Tracer: hatch `src/evaluation` + EvaluationConfig + single-claim Evaluator (confusion matrix, accuracy, macro F1)
+- [x] 06-01-PLAN.md — Tracer: hatch `src/evaluation` + EvaluationConfig + single-claim Evaluator (confusion matrix, accuracy, macro F1)
 
 **Wave 2** *(blocked on Wave 1)*
 

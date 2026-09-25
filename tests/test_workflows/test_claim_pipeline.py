@@ -18,14 +18,17 @@ from compliance.config.settings import (
     PreprocessingConfig,
 )
 
-_XFAIL_WAVE0 = pytest.mark.xfail(
-    strict=False,
-    reason="Wave 0 stub — PE/missed routing implemented in 04-03",
-)
-
 TRIP_CANCELLATION = "Trip cancellation or rescheduling"
+PERSONAL_EFFECTS = "Personal Effects"
+MISSED_DEPARTURE = "Missed Departure or Missed Connection"
+COVERAGE_OTHER = "None"
 MEDICAL_EMERGENCY = "Medical emergency"
 MEDICAL_CERTIFICATE = "medical certificate"
+PROOF_OF_THEFT = "Proof of theft, loss, or damage"
+INCIDENT_REPORT = (
+    "Incident report or documentation explaining the cause of delay"
+)
+PROOF_OF_BOOKING = "Proof of booking"
 
 
 def _claim_pipeline_cls() -> type:
@@ -276,26 +279,91 @@ def test_unit_path_uses_injected_chat_fn(tmp_path: Path) -> None:
     assert chat_fn.call_count >= 1
 
 
-@_XFAIL_WAVE0
+def _pe_chat_fn() -> MagicMock:
+    """Injected chat_fn: coverage PE → PE document → checker contradicts."""
+    coverage = _chat_response(
+        {
+            "labels": [PERSONAL_EFFECTS],
+            "probabilities": {PERSONAL_EFFECTS: 0.9, "None": 0.1},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [PROOF_OF_THEFT],
+            "probabilities": {PROOF_OF_THEFT: 0.85, "None": 0.15},
+        }
+    )
+    contradicts = _chat_response({"result": False})
+    return MagicMock(side_effect=[coverage, document, contradicts])
+
+
+def _missed_chat_fn() -> MagicMock:
+    """Injected chat_fn: coverage missed → missed document → checker contradicts."""
+    coverage = _chat_response(
+        {
+            "labels": [MISSED_DEPARTURE],
+            "probabilities": {MISSED_DEPARTURE: 0.9, "None": 0.1},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [INCIDENT_REPORT, PROOF_OF_BOOKING],
+            "probabilities": {
+                INCIDENT_REPORT: 0.7,
+                PROOF_OF_BOOKING: 0.6,
+                "None": 0.1,
+            },
+        }
+    )
+    contradicts = _chat_response({"result": False})
+    return MagicMock(side_effect=[coverage, document, contradicts])
+
+
 def test_routes_personal_effects(tmp_path: Path) -> None:
     """R013: Personal Effects coverage routes to personal_effects_document."""
+    ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
-    chat_fn = MagicMock()
-    raise AssertionError(
-        f"personal-effects routing not implemented (chat_fn={chat_fn}, "
-        f"labels={config.analysis.personal_effects_document.labels})"
-    )
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim pe")
+    chat_fn = _pe_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert PERSONAL_EFFECTS in payload["coverage_labels"]
+    assert PROOF_OF_THEFT in payload["document_labels"]
+    pe_allowed = set(config.analysis.personal_effects_document.labels) | {
+        config.analysis.personal_effects_document.other_label
+    }
+    assert set(payload["document_labels"]) <= pe_allowed
+    assert not payload.get("reason_labels")
+    assert payload["checker_containment"] is True
+    assert payload["checker_contradicts"] is False
+    assert chat_fn.call_count == 3
 
 
-@_XFAIL_WAVE0
 def test_routes_missed_departure(tmp_path: Path) -> None:
     """R013: Missed Departure coverage routes to missed_departure_document."""
+    ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
-    chat_fn = MagicMock()
-    raise AssertionError(
-        f"missed-departure routing not implemented (chat_fn={chat_fn}, "
-        f"labels={config.analysis.missed_departure_document.labels})"
-    )
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim missed")
+    chat_fn = _missed_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert MISSED_DEPARTURE in payload["coverage_labels"]
+    assert INCIDENT_REPORT in payload["document_labels"]
+    assert PROOF_OF_BOOKING in payload["document_labels"]
+    missed_allowed = set(config.analysis.missed_departure_document.labels) | {
+        config.analysis.missed_departure_document.other_label
+    }
+    assert set(payload["document_labels"]) <= missed_allowed
+    assert not payload.get("reason_labels")
+    assert payload["checker_containment"] is True
+    assert payload["checker_contradicts"] is False
+    assert chat_fn.call_count == 3
 
 
 def test_refuses_unsafe_claim_dir_name(tmp_path: Path) -> None:

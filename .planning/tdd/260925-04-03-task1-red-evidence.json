@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_routes_personal_effects -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_routes_personal_effects\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_routes_personal_effects",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "Personal Effects coverage routes to personal_effects_document then Checker then persist; reason_labels empty; document_labels from PE stage; analysis_result written",
+  "actual": "FileNotFoundError: PE coverage still routes to END stub — no analysis_result.json written under results_dir"
+}

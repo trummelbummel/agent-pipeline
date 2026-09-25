@@ -1,0 +1,7 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+E   FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-108/test_routes_personal_effects0/results/claim pe/analysis_result.json'
+/Users/theresa/.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/pathlib.py:1013: FileNotFoundError: [Errno 2] No such file or directory: '/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-108/test_routes_personal_effects0/results/claim pe/analysis_result.json'
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_claim_pipeline.py::test_routes_personal_effects
+1 failed in 1.91s

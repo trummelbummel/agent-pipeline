@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.deps import get_claims, get_config, get_preprocessing
-from api.schemas import ClaimCreated, ClaimDecision
+from api.schemas import ClaimCreated, ClaimDecision, ClaimListItem
 from compliance.config.settings import AppConfig
 from compliance.preprocessing.claim_batch import _claim_sort_key
 from compliance.workflows.claim_pipeline import ClaimPipeline
@@ -157,6 +157,42 @@ def create_claim(
     )
     logger.info("Created claim_id=%s", claim_id)
     return ClaimCreated(claim_id=claim_id)
+
+
+@router.get("/claims", response_model=list[ClaimListItem])
+def list_claims(
+    config: AppConfig = Depends(get_config),
+) -> list[ClaimListItem]:
+    """List claim folders under results_dir with optional artifact payloads.
+
+    :param config: Injected application configuration.
+    :return: Claim list items ordered by numeric claim_id sort key; [] when empty.
+    """
+    results_root = Path(config.preprocessing.results_dir)
+    if not results_root.is_dir():
+        return []
+
+    folders = [
+        path
+        for path in results_root.iterdir()
+        if path.is_dir() and path.name.lower().startswith("claim")
+    ]
+    folders = sorted(folders, key=_claim_sort_key)
+    artifacts = config.preprocessing.artifacts
+    items: list[ClaimListItem] = []
+    for folder in folders:
+        items.append(
+            ClaimListItem(
+                claim_id=folder.name,
+                analysis_result=_load_optional_json(
+                    folder / artifacts.analysis_result
+                ),
+                predicted_answer=_load_optional_json(
+                    folder / artifacts.predicted_answer
+                ),
+            )
+        )
+    return items
 
 
 @router.get("/claims/{claim_id}", response_model=ClaimDecision)

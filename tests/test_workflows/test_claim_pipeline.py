@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -297,10 +298,34 @@ def test_routes_missed_departure(tmp_path: Path) -> None:
     )
 
 
-@_XFAIL_WAVE0
 def test_refuses_unsafe_claim_dir_name(tmp_path: Path) -> None:
     """R010/T-04-01: claim_dir.name with path separators or .. raises before I/O."""
+    ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
-    raise AssertionError(
-        f"path-safety refusal not implemented (results_dir={config.preprocessing.results_dir})"
-    )
+    results_root = Path(config.preprocessing.results_dir)
+    results_root.mkdir(parents=True, exist_ok=True)
+    before = set(results_root.iterdir())
+    chat_fn = MagicMock(name="should_not_be_called")
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    class _UnsafeDir:
+        name = f"..{os.sep}escape"
+
+        def __truediv__(self, other: object) -> Path:
+            raise AssertionError("should not join before validation")
+
+    with pytest.raises(ValueError, match="Unsafe claim directory name"):
+        pipeline.analyze_claim(_UnsafeDir())  # type: ignore[arg-type]
+
+    class _DotDot:
+        name = ".."
+
+        def __truediv__(self, other: object) -> Path:
+            raise AssertionError("should not join before validation")
+
+    with pytest.raises(ValueError, match="Unsafe claim directory name"):
+        pipeline.analyze_claim(_DotDot())  # type: ignore[arg-type]
+
+    assert set(results_root.iterdir()) == before
+    chat_fn.assert_not_called()
+

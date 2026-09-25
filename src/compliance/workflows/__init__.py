@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+from compliance.workflows.claim_pipeline import ClaimPipeline
 from compliance.workflows.pipeline import (
-    main,
+    PreprocessingPipeline,
     output_root_from_config,
-    process_claim_to_preprocessed,
-    run_preprocessing_workflow,
+    results_root_from_config,
 )
 
 __all__ = [
-    "main",
+    "ClaimPipeline",
+    "PreprocessingPipeline",
     "output_root_from_config",
-    "process_claim_to_preprocessed",
-    "run_preprocessing_workflow",
+    "results_root_from_config",
 ]

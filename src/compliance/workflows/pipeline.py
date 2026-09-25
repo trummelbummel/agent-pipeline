@@ -194,3 +194,16 @@ def process_claim_to_preprocessed(
     _write_claim_artifacts(claim_out, bundle)
     logger.info("Wrote %s for %s", ", ".join(_ARTIFACT_NAMES), claim_dir.name)
     return claim_out
+
+
+def run_preprocessing_workflow(
+    config: AppConfig,
+    **reader_overrides: Any,
+) -> list[Path]:
+    """Discover all claims and write mirrored preprocessed artifacts (batch).
+
+    :param config: Loaded application configuration.
+    :param reader_overrides: Optional injected readers for tests.
+    :return: Paths to successfully written claim output directories.
+    """
+    return []

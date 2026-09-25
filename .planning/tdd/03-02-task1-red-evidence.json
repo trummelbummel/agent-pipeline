@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_pipeline.py::test_run_preprocessing_workflow_mirrors_all_claims tests/test_workflows/test_pipeline.py::test_run_preprocessing_workflow_soft_fails_one_claim -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_run_preprocessing_workflow_mirrors_all_claims\nnot ok 2 - test_run_preprocessing_workflow_soft_fails_one_claim\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_run_preprocessing_workflow_mirrors_all_claims",
+  "targetFile": "tests/test_workflows/test_pipeline.py",
+  "expected": "written claim output paths for claim 1 and claim 2 with four artifacts each",
+  "actual": "AssertionError: assert [] == ['claim 1', 'claim 2'] (stub returns empty list)"
+}

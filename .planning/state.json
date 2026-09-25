@@ -1,0 +1,33 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v1.0",
+  "phases": [
+    {
+      "number": "01",
+      "name": "Claim Preprocessing Pipeline",
+      "status": "complete"
+    },
+    {
+      "number": "02",
+      "name": "Case Classifier Models",
+      "status": "complete"
+    },
+    {
+      "number": "03",
+      "name": "Preprocessing Pipeline Orchestration",
+      "status": "complete"
+    },
+    {
+      "number": "04",
+      "name": "Claim Analysis Pipeline",
+      "status": "planned"
+    }
+  ],
+  "next": {
+    "command": "/gsd:execute-phase 4",
+    "label": "Execute Phase 04",
+    "reason": "4 plans verified — Wave 0 starts with langgraph human-verify checkpoint"
+  },
+  "updated_at": "2026-09-25T15:17:00.000Z"
+}

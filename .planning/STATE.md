@@ -4,12 +4,12 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Claim Analysis Pipeline
 current_plan: null
-status: ready_to_plan
-stopped_at: Phase 04 added to roadmap
-last_updated: "2026-09-25T15:16:47.731Z"
+status: ready_to_execute
+stopped_at: Phase 04 planned (4 plans verified)
+last_updated: "2026-09-25T15:17:00.000Z"
 last_activity: 2026-09-25
-last_activity_desc: Phase 04 Claim Analysis Pipeline added
-state_head: ba32d8fbb2a7448e1b487c73228f0bf181a95d50
+last_activity_desc: Phase 04 plans verified — ready to execute
+state_head: 51fd93b
 progress:
   total_phases: 4
   completed_phases: 3
@@ -29,15 +29,21 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 04 (Claim Analysis Pipeline) — READY TO EXECUTE
-Current Plan: —
+Current Plan: 01 (Wave 0)
 Total Plans in Phase: 4
-Status: Phase added; awaiting plan
-Last activity: 2026-09-25 - Added Phase 04 Claim Analysis Pipeline
+Status: Ready to execute
+Last activity: 2026-09-25 - Phase 04 planned and verified (4 plans)
 
 Progress: [████████░░] 75% (3/4 phases complete)
 
 ## Accumulated Context
 
+### Roadmap Evolution
+
+- Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)
+- Phase 3 added: Preprocessing Pipeline Orchestration — workflows/pipeline.py + main entrypoint writing mirrored preprocessed/ (description.txt, answer.json, supporting_document.json, supporting_documents.md)
+- Phase 4 added: Claim Analysis Pipeline — ClaimPipeline LangGraph over preprocessed data; coverage/reason/document classifiers + Checker; local LLM config
+- Phase 4 planned: 04-01..04-04 (Wave 0 langgraph+AnalysisConfig → tracer cancellation → PE/missed → batch/CLI)
 ### Roadmap Evolution
 
 - Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)

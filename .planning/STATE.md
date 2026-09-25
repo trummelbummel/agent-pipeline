@@ -32,7 +32,7 @@ Phase: 03 — COMPLETE
 Current Plan: 2
 Total Plans in Phase: 3
 Status: Phase 03 complete
-Last activity: 2026-09-25 - Completed quick task 260925-mol: Checker class containment + contradicts modes
+Last activity: 2026-09-25 - Completed quick task 260925-mqh: after ExtractionFailure a retry with an expensive model should be done
 
 Progress: [██████████] 100%
 
@@ -71,6 +71,7 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260925-mqh | after ExtractionFailure a retry with an expensive model should be done | 2026-09-25 | 87de07c | [260925-mqh-after-extractionfailure-a-retry-with-an-](./quick/260925-mqh-after-extractionfailure-a-retry-with-an-/) |
 | 260925-mol | Checker class: modes containment (deterministic normalize+lowercase then LLM) and contradicts (LLM: True if claim contradicts text, False if supported); takes input and checks against a text | 2026-09-25 | 47de8d6 | [260925-mol-checker-class-modes-containment-determin](./quick/260925-mol-checker-class-modes-containment-determin/) |
 
 ## Session Continuity

@@ -177,6 +177,16 @@ def test_analysis_result_artifact_name_externalized() -> None:
     assert config.preprocessing.artifacts.analysis_result == "analysis_result.json"
 
 
+def test_load_config_reads_evaluation_section() -> None:
+    config = load_config("config.yaml")
+    evaluation = getattr(config, "evaluation", None)
+    assert evaluation is not None
+    assert "APPROVE" in evaluation.labels
+    assert "DENY" in evaluation.labels
+    assert "UNCERTAIN" in evaluation.labels
+    assert evaluation.metrics_artifact == "evaluation_metrics.json"
+
+
 def test_load_config_reads_ocr_retry_section() -> None:
     config = load_config("config.yaml")
     assert config.ocr_retry.enabled is True

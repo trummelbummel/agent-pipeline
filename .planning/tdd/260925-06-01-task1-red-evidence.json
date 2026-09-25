@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_evaluation/test_evaluator.py::test_evaluate_claim_perfect_match tests/test_config/test_settings.py::test_load_config_reads_evaluation_section -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_evaluate_claim_perfect_match\nnot ok 2 - test_load_config_reads_evaluation_section\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_evaluate_claim_perfect_match",
+  "targetFile": "tests/test_evaluation/test_evaluator.py",
+  "expected": "Evaluator.evaluate_claim returns accuracy=1.0 and f1_macro≈1/3 for perfect DENY/DENY under 3-label config; load_config exposes evaluation.labels",
+  "actual": "AssertionError: assert -1.0 == 1.0 (stub Evaluator returns accuracy=-1.0)"
+}

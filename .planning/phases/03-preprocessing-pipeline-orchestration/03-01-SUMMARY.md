@@ -124,7 +124,7 @@ Each task was committed atomically:
 5. **Task 2 GREEN: Externalize preprocessed_dir** - `5218a86` (feat)
 6. **Task 3: output_root_from_config helper** - `dc08279` (feat)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `3ede379` (docs: complete plan), `b0d2494` (docs: advance STATE)
 
 _Note: TDD tasks produced RED → GREEN commits; measured `commits: 10` includes interleaved Phase 02 docs commits on main between plan start and finish._
 

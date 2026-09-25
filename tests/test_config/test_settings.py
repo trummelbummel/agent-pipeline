@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from compliance.config import CheckingConfig, ClassificationConfig, load_config
+from compliance.config import AnalysisConfig, CheckingConfig, ClassificationConfig, load_config
 from compliance.llm import CaseClassifier, ClassificationResult, Classifier
 
 _MINIMAL_CHECKING_YAML = """
@@ -201,15 +201,12 @@ extraction:
 
 
 def test_public_exports_include_classifier_and_classification_config() -> None:
-    from compliance import config as config_pkg
-
     assert issubclass(Classifier, object)
     assert issubclass(CaseClassifier, Classifier)
     assert ClassificationResult is not None
     assert ClassificationConfig is not None
     assert CheckingConfig is not None
-    assert hasattr(config_pkg, "AnalysisConfig")
-    assert config_pkg.AnalysisConfig is not None
+    assert AnalysisConfig is not None
 
 
 def test_load_config_missing_file_raises(tmp_path: Path) -> None:

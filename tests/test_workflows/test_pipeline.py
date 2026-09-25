@@ -10,7 +10,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from compliance.config.settings import (
+    AnalysisConfig,
     AppConfig,
+    CheckingConfig,
     ClassificationConfig,
     ExtractionConfig,
     PreprocessingConfig,
@@ -24,6 +26,22 @@ from compliance.workflows import (
     results_root_from_config,
 )
 from main import main
+
+
+def _analysis_config() -> AnalysisConfig:
+    stage = ClassificationConfig(
+        labels=["Trip cancellation or rescheduling"],
+        other_label="None",
+        model="test-model",
+        prompt="classify",
+    )
+    return AnalysisConfig(
+        coverage=stage,
+        cancellation_reason=stage,
+        cancellation_document=stage,
+        personal_effects_document=stage,
+        missed_departure_document=stage,
+    )
 
 
 def _config(
@@ -47,6 +65,12 @@ def _config(
             model="test-model",
             prompt="classify",
         ),
+        checking=CheckingConfig(
+            model="test-model",
+            containment_prompt="containment",
+            contradicts_prompt="contradicts",
+        ),
+        analysis=_analysis_config(),
     )
 
 

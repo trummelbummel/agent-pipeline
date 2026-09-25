@@ -19,6 +19,7 @@ preprocessing:
     description: description.txt
     answer: answer.json
     predicted_answer: predicted_answer.json
+    analysis_result: analysis_result.json
     supporting_document: supporting_document.md
     supporting_documents: supporting_documents.md
     document_metadata: document_metadata.json
@@ -53,6 +54,62 @@ checking:
     Return JSON only: {"result": true} if the claim contradicts the text,
     {"result": false} if the claim is supported by or consistent with the text.
 
+analysis:
+  coverage:
+    labels:
+      - Trip cancellation or rescheduling
+      - Personal Effects
+      - Missed Departure or Missed Connection
+    other_label: "None"
+    model: llama3.2
+    prompt: |
+      Classify the claim description into one or more of the allowed coverage labels.
+      Return JSON with keys "labels" (array of selected label strings) and
+      "probabilities" (object mapping each allowed label to a float in [0, 1]).
+      Use {other_label} only when no coverage class fits.
+  cancellation_reason:
+    labels:
+      - Jury duty
+      - Medical emergency
+      - Theft or criminal incident
+      - Other specified personal emergencies
+    other_label: "None"
+    model: llama3.2
+    prompt: |
+      Classify the cancellation reason from the claim description into the allowed labels.
+      Return JSON with keys "labels" and "probabilities".
+      Use {other_label} only when no reason class fits.
+  cancellation_document:
+    labels:
+      - medical certificate
+      - police report
+      - jury summon letter
+    other_label: "None"
+    model: llama3.2
+    prompt: |
+      Classify the supporting document type from the document text into the allowed labels.
+      Return JSON with keys "labels" and "probabilities".
+      Use {other_label} only when no document class fits.
+  personal_effects_document:
+    labels:
+      - Proof of theft, loss, or damage
+    other_label: "None"
+    model: llama3.2
+    prompt: |
+      Classify the personal-effects supporting document from the document text.
+      Return JSON with keys "labels" and "probabilities".
+      Use {other_label} only when no document class fits.
+  missed_departure_document:
+    labels:
+      - Incident report or documentation explaining the cause of delay
+      - Proof of booking
+    other_label: "None"
+    model: llama3.2
+    prompt: |
+      Classify the missed-departure supporting document from the document text.
+      Return JSON with keys "labels" and "probabilities".
+      Use {other_label} only when no document class fits.
+
 benford:
   # Off for this take-home dataset: all claim images are synthetic/fake, so DCT
   # Benford checks fire as "fraud" on nearly every file (too sensitive). Keep the
@@ -60,6 +117,14 @@ benford:
   enabled: false
   block_size: 8
   chi_squared_threshold: 15.51
+
+extraction_failure:
+  min_substantive_chars: 40
+  min_words: 5
+
+logging:
+  level: INFO
+  format: "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 ocr_retry:
   # After ExtractionFailure flags Docling OCR as unusable, retry once with a

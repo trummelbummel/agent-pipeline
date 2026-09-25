@@ -13,6 +13,7 @@ class PreprocessedArtifactNames(BaseModel):
     :param description: Claim letter text artifact.
     :param answer: Ground-truth answer JSON artifact.
     :param predicted_answer: Pipeline-predicted decision JSON (when available).
+    :param analysis_result: Claim-analysis JSON artifact under results_dir.
     :param supporting_document: Docling-extracted document content as markdown.
     :param supporting_documents: Booking/internal markdown artifact.
     :param document_metadata: Per-document DocumentMetaData JSON artifact.
@@ -21,6 +22,7 @@ class PreprocessedArtifactNames(BaseModel):
     description: str = "description.txt"
     answer: str = "answer.json"
     predicted_answer: str = "predicted_answer.json"
+    analysis_result: str = "analysis_result.json"
     supporting_document: str = "supporting_document.md"
     supporting_documents: str = "supporting_documents.md"
     document_metadata: str = "document_metadata.json"
@@ -84,6 +86,25 @@ class CheckingConfig(BaseModel):
     contradicts_prompt: str
 
 
+class AnalysisConfig(BaseModel):
+    """Multi-stage claim-analysis classifier settings for ClaimPipeline.
+
+    Each stage reuses ClassificationConfig (labels, other_label, model, prompt).
+
+    :param coverage: Coverage-type classifier on description text.
+    :param cancellation_reason: Cancellation-reason classifier (trip-cancellation path).
+    :param cancellation_document: Supporting-document type on the cancellation path.
+    :param personal_effects_document: Document type for personal-effects coverage.
+    :param missed_departure_document: Document type for missed-departure coverage.
+    """
+
+    coverage: ClassificationConfig
+    cancellation_reason: ClassificationConfig
+    cancellation_document: ClassificationConfig
+    personal_effects_document: ClassificationConfig
+    missed_departure_document: ClassificationConfig
+
+
 class BenfordConfig(BaseModel):
     """Benford's Law analysis settings for image forensic checks.
 
@@ -96,6 +117,28 @@ class BenfordConfig(BaseModel):
     enabled: bool = False
     block_size: int = 8
     chi_squared_threshold: float = 15.51
+
+
+class ExtractionFailureConfig(BaseModel):
+    """Thresholds for detecting unusable Docling OCR text.
+
+    :param min_substantive_chars: Minimum non-noise characters required for usable OCR.
+    :param min_words: Minimum alphabetic word tokens (length ≥ 3) required.
+    """
+
+    min_substantive_chars: int = 40
+    min_words: int = 5
+
+
+class LoggingConfig(BaseModel):
+    """Application logging defaults for the CLI entrypoint.
+
+    :param level: Logging level name (e.g. ``INFO``, ``DEBUG``).
+    :param format: ``logging.basicConfig`` format string.
+    """
+
+    level: str = "INFO"
+    format: str = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 
 class OcrRetryConfig(BaseModel):
@@ -118,23 +161,32 @@ class AppConfig(BaseModel):
     :param extraction: LLM model and prompt for description extraction.
     :param classification: LLM model, labels, and prompt for case classification.
     :param checking: LLM model and prompts for claim containment/contradiction checks.
+    :param analysis: Multi-stage claim-analysis classifier taxonomies and prompts.
     :param benford: DCT-based Benford's Law image forensics parameters.
+    :param extraction_failure: Thresholds for unusable Docling OCR detection.
     :param ocr_retry: Optional vision OCR retry after faulty Docling extraction.
+    :param logging: CLI logging level and format.
     """
 
     preprocessing: PreprocessingConfig
     extraction: ExtractionConfig
     classification: ClassificationConfig
     checking: CheckingConfig
+    analysis: AnalysisConfig
     benford: BenfordConfig = BenfordConfig()
+    extraction_failure: ExtractionFailureConfig = Field(
+        default_factory=ExtractionFailureConfig
+    )
     ocr_retry: OcrRetryConfig = Field(default_factory=OcrRetryConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
     """Load and validate application config from a YAML file.
 
     :param path: Path to the YAML config file.
-    :return: Typed AppConfig covering preprocessing, extraction, classification, and checking.
+    :return: Typed AppConfig covering preprocessing, extraction, classification,
+        checking, and analysis.
     :raises FileNotFoundError: If the config file does not exist.
     :raises ValueError: If required sections or fields are missing/invalid.
     """

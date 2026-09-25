@@ -1,25 +1,19 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
 from compliance.config.settings import load_config
-from compliance.models.claim import BookingData, ClaimBundle, DocumentData
+from compliance.models.claim import BookingData, ClaimBundle, DocumentData, is_nan_scalar
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
-from compliance.preprocessing.pipeline import run_pipeline
+from compliance.preprocessing.claim_batch import run_pipeline
 
-DATA_DIR = Path("data")
-
-
-def _is_nan(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
+DATA_DIR = Path("data/raw")
 
 
 def _ollama_available() -> bool:
@@ -56,14 +50,12 @@ def _document_suffixes(claim_dir: Path, formats: list[str]) -> list[Path]:
 
 
 @pytest.mark.integration
-def test_pipeline_all_25_claims_write_processed_json() -> None:
+def test_pipeline_all_25_claims_return_bundles() -> None:
     if not DATA_DIR.is_dir():
-        pytest.skip("data/ directory not present")
+        pytest.skip("data/raw directory not present")
 
     config = load_config("config.yaml")
-    assert Path(config.preprocessing.data_dir).resolve() == DATA_DIR.resolve() or Path(
-        config.preprocessing.data_dir
-    ).name == "data"
+    assert Path(config.preprocessing.data_dir).resolve() == DATA_DIR.resolve()
 
     kwargs: dict[str, Any] = {}
     if not _ollama_available():
@@ -72,37 +64,29 @@ def test_pipeline_all_25_claims_write_processed_json() -> None:
     bundles = run_pipeline(config, **kwargs)
 
     assert len(bundles) == 25
+    by_id = {bundle.claim_id: bundle for bundle in bundles}
     for claim_dir in sorted(DATA_DIR.glob("claim *"), key=lambda p: p.name):
-        out = claim_dir / config.preprocessing.output_filename
-        assert out.is_file(), f"missing {out}"
-        bundle = ClaimBundle.model_validate_json(out.read_text(encoding="utf-8"))
-        assert bundle.claim_id == claim_dir.name
+        bundle = by_id[claim_dir.name]
         assert isinstance(bundle.ground_truth.decision, str)
-        assert isinstance(bundle.description_text, str) or _is_nan(bundle.description_text)
+        assert isinstance(bundle.description_text, str) or is_nan_scalar(bundle.description_text)
+        assert not (claim_dir / "processed.json").exists()
 
 
 @pytest.mark.integration
 def test_spot_checks_key_claims() -> None:
     if not DATA_DIR.is_dir():
-        pytest.skip("data/ directory not present")
+        pytest.skip("data/raw directory not present")
 
     config = load_config("config.yaml")
-    output_name = config.preprocessing.output_filename
     formats = config.preprocessing.document_formats
 
-    def load_claim(n: int) -> ClaimBundle:
-        path = DATA_DIR / f"claim {n}" / output_name
-        if not path.is_file():
-            pytest.skip(f"processed.json missing for claim {n}; run full integration first")
-        return ClaimBundle.model_validate_json(path.read_text(encoding="utf-8"))
+    kwargs: dict[str, Any] = {}
+    if not _ollama_available():
+        kwargs["description_reader"] = _passthrough_description_reader()
+    bundles = {bundle.claim_id: bundle for bundle in run_pipeline(config, **kwargs)}
 
-    # Ensure processed files exist (depends on prior test or prior run)
-    claim1_out = DATA_DIR / "claim 1" / output_name
-    if not claim1_out.is_file():
-        kwargs: dict[str, Any] = {}
-        if not _ollama_available():
-            kwargs["description_reader"] = _passthrough_description_reader()
-        run_pipeline(config, **kwargs)
+    def load_claim(n: int) -> ClaimBundle:
+        return bundles[f"claim {n}"]
 
     claim1 = load_claim(1)
     assert any(
@@ -120,7 +104,7 @@ def test_spot_checks_key_claims() -> None:
     assert not _document_suffixes(DATA_DIR / "claim 21", formats)
 
     claim13 = load_claim(13)
-    # claim 13 currently includes a medical image in data/; assert matches disk
+    # claim 13 currently includes a medical image in data/raw; assert matches disk
     expected_13 = len(_document_suffixes(DATA_DIR / "claim 13", formats))
     assert len(claim13.documents) == expected_13 or len(claim13.documents) <= expected_13
 
@@ -134,7 +118,9 @@ def test_spot_checks_key_claims() -> None:
 def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> None:
     """Sanity: pipeline continues when optional files are absent."""
     from compliance.config.settings import (
+        AnalysisConfig,
         AppConfig,
+        CheckingConfig,
         ClassificationConfig,
         ExtractionConfig,
         PreprocessingConfig,
@@ -145,13 +131,19 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
     (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
     (claim / "description.txt").write_text("refund please", encoding="utf-8")
 
+    stage = ClassificationConfig(
+        labels=["Trip cancellation or rescheduling"],
+        other_label="None",
+        model="unused",
+        prompt="unused",
+    )
     config = AppConfig(
         preprocessing=PreprocessingConfig(
             data_dir=str(tmp_path),
-            output_filename="processed.json",
             document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
             confidence_threshold=0.7,
-            preprocessed_dir="preprocessed",
+            preprocessed_dir="data/preprocessed",
+            results_dir="data/results",
         ),
         extraction=ExtractionConfig(model="unused", prompt="unused"),
         classification=ClassificationConfig(
@@ -160,9 +152,20 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             model="unused",
             prompt="unused",
         ),
+        checking=CheckingConfig(
+            model="unused",
+            containment_prompt="containment",
+            contradicts_prompt="contradicts",
+        ),
+        analysis=AnalysisConfig(
+            coverage=stage,
+            cancellation_reason=stage,
+            cancellation_document=stage,
+            personal_effects_document=stage,
+            missed_departure_document=stage,
+        ),
     )
     bundles = run_pipeline(config, description_reader=_passthrough_description_reader())
     assert len(bundles) == 1
-    assert (claim / "processed.json").is_file()
-    payload = json.loads((claim / "processed.json").read_text(encoding="utf-8"))
-    assert payload["claim_id"] == "claim 1"
+    assert bundles[0].claim_id == "claim 1"
+    assert not (claim / "processed.json").exists()

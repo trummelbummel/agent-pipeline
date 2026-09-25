@@ -6,12 +6,14 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from compliance.config.settings import (
+    AnalysisConfig,
     AppConfig,
+    CheckingConfig,
     ClassificationConfig,
     ExtractionConfig,
     PreprocessingConfig,
 )
-from compliance.models.claim import BookingData, ClaimBundle, DocumentData, is_nan_scalar
+from compliance.models.claim import BookingData, DocumentData, DocumentMetaData, is_nan_scalar
 from compliance.preprocessing.claim_batch import (
     _classify_files,
     _discover_claim_folders,
@@ -22,11 +24,26 @@ from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
 
 
+def _analysis_config() -> AnalysisConfig:
+    stage = ClassificationConfig(
+        labels=["Trip cancellation or rescheduling"],
+        other_label="None",
+        model="test-model",
+        prompt="classify",
+    )
+    return AnalysisConfig(
+        coverage=stage,
+        cancellation_reason=stage,
+        cancellation_document=stage,
+        personal_effects_document=stage,
+        missed_departure_document=stage,
+    )
+
+
 def _config(data_dir: Path) -> AppConfig:
     return AppConfig(
         preprocessing=PreprocessingConfig(
             data_dir=str(data_dir),
-            output_filename="processed.json",
             document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
             confidence_threshold=0.7,
             preprocessed_dir="data/preprocessed",
@@ -39,6 +56,12 @@ def _config(data_dir: Path) -> AppConfig:
             model="test-model",
             prompt="classify",
         ),
+        checking=CheckingConfig(
+            model="test-model",
+            containment_prompt="containment",
+            contradicts_prompt="contradicts",
+        ),
+        analysis=_analysis_config(),
     )
 
 
@@ -65,7 +88,10 @@ def _mock_document_reader(docs: dict[str, DocumentData] | None = None) -> MagicM
     def _read(path: Path) -> DocumentData:
         if path.name in mapping:
             return mapping[path.name]
-        return DocumentData(raw_text="x", confidence=0.9, human_in_the_loop=False)
+        return DocumentData(
+            raw_text="x",
+            metadata=DocumentMetaData(extraction_probability=0.9),
+        )
 
     reader.read.side_effect = _read
     return reader
@@ -132,7 +158,11 @@ def test_process_single_claim_with_markdown_and_document(tmp_path: Path) -> None
     (claim / "internal flight data.md").write_text("**Name**: Internal", encoding="utf-8")
     (claim / "pass.png").write_bytes(b"png")
 
-    doc = DocumentData(person="Ada", raw_text="pass", confidence=0.95, human_in_the_loop=False)
+    doc = DocumentData(
+        person="Ada",
+        raw_text="pass",
+        metadata=DocumentMetaData(extraction_probability=0.95),
+    )
     bundle = _process_single_claim(
         claim,
         _config(tmp_path),
@@ -148,7 +178,7 @@ def test_process_single_claim_with_markdown_and_document(tmp_path: Path) -> None
     assert bundle.documents[0].person == "Ada"
 
 
-def test_run_pipeline_writes_processed_json(tmp_path: Path) -> None:
+def test_run_pipeline_returns_claim_bundles(tmp_path: Path) -> None:
     claim = tmp_path / "claim 1"
     claim.mkdir()
     (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
@@ -161,8 +191,6 @@ def test_run_pipeline_writes_processed_json(tmp_path: Path) -> None:
     )
 
     assert len(bundles) == 1
-    out = claim / "processed.json"
-    assert out.is_file()
-    reloaded = ClaimBundle.model_validate_json(out.read_text(encoding="utf-8"))
-    assert reloaded.claim_id == "claim 1"
-    assert reloaded.ground_truth.decision == "APPROVE"
+    assert bundles[0].claim_id == "claim 1"
+    assert bundles[0].ground_truth.decision == "APPROVE"
+    assert not (claim / "processed.json").exists()

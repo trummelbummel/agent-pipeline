@@ -18,6 +18,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    "docling>=2.130.0",
     "mcp>=2.0.0",
     "numpy>=2.2.6",
     "ollama>=0.6.2",

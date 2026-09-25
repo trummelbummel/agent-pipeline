@@ -54,6 +54,8 @@ def _config(data_dir: Path, results_dir: Path) -> AppConfig:
             model="test-model",
             containment_prompt="containment",
             contradicts_prompt="contradicts",
+            identity_prompt="identity",
+            healthy_prompt="healthy",
         ),
         analysis=_analysis_config(),
         evaluation=EvaluationConfig(
@@ -263,10 +265,13 @@ def test_evaluate_batch_skips_missing_prediction(tmp_path: Path) -> None:
     )
     (results_dir / "claim 2").mkdir(parents=True)
     result = Evaluator(_config(data_dir, results_dir)).evaluate()
-    assert result.n_evaluated == 1
-    assert result.claim_ids == ["claim 1"]
-    assert result.accuracy == 1.0
-
+    # Missing prediction still counts as an incorrect sample for accuracy.
+    assert result.n_evaluated == 2
+    assert result.accuracy == 0.5
+    assert set(result.claim_ids) == {"claim 1", "claim 2"}
+    assert sum(sum(row) for row in result.confusion_matrix) == 1
+    assert result.y_true == ["DENY"]
+    assert result.y_pred == ["DENY"]
 
 def test_evaluate_batch_skips_missing_ground_truth(tmp_path: Path) -> None:
     data_dir = tmp_path / "raw"

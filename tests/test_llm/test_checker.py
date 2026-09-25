@@ -21,6 +21,8 @@ def _make_checker(chat: MagicMock) -> Checker:
         model_name="test-model",
         containment_prompt="check containment of claim in text",
         contradicts_prompt="check whether claim contradicts text",
+        identity_prompt="check whether claimant name matches document",
+        healthy_prompt="check whether document says patient is healthy",
         chat_fn=chat,
     )
 
@@ -96,6 +98,169 @@ def test_checker_contradicts_false_when_supported() -> None:
         claim="The flight departed on time",
         text="The flight departed on time.",
         mode="contradicts",
+    )
+
+    assert result is False
+    chat.assert_called_once()
+
+
+def test_checker_identity_false_when_name_obscured() -> None:
+    chat = _chat_returning({"result": "mismatch"})
+    checker = _make_checker(chat)
+
+    result = checker.check(
+        claim="# Supporting documents\n\n**name**: Roy Hoffman\n",
+        text="Patient: R\n*19.12.1945\n",
+        mode="identity",
+    )
+
+    assert result is False
+    chat.assert_called_once()
+    call_kwargs = chat.call_args.kwargs
+    user = call_kwargs["messages"][1]["content"]
+    assert "Booking / internal" in user
+    assert "Roy Hoffman" in user
+    assert "Patient: R" in user
+
+
+def test_checker_identity_deterministic_containment_skips_llm() -> None:
+    """Lowercase name containment in OCR → match without calling the LLM."""
+    chat = MagicMock()
+    checker = _make_checker(chat)
+
+    status = checker.check_identity(
+        "# Supporting documents\n\n**name**: Amy Ndiaye\n",
+        "Je soussigné certifie que Mme Amy NDIAYE, née le 21/12/1981 "
+        "est hospitalisée depuis le 01/12/2022.\n",
+    )
+
+    assert status == "match"
+    chat.assert_not_called()
+
+
+def test_checker_identity_deterministic_token_containment_handles_glue_and_order() -> None:
+    """All booking-name tokens in OCR (glued / reordered) → match, skip LLM."""
+    chat = MagicMock()
+    checker = _make_checker(chat)
+
+    # Claim-3 style: patient name glued to the next word; doctor name first.
+    status = checker.check_identity(
+        "**name**: Kacou Meitiale Evelyne\n",
+        "docteur KOUASSI KONE FRANCOIS que l'état de santé de "
+        "Mme KACOU MEITIALE EVELYNEnécessite unehospitalisation\n",
+    )
+    assert status == "match"
+    chat.assert_not_called()
+
+    # Claim-9 style: token reorder (Daisy vs DAYSI still needs LLM — Daysi typo).
+    # Exact token reorder with matching spelling skips LLM.
+    status = checker.check_identity(
+        "**name**: Bastidas Angulo Daisy Mariuxi\n",
+        "paciente BASTIDAS ANGULO DAISY MARIUXI cédula\n",
+    )
+    assert status == "match"
+    chat.assert_not_called()
+
+
+def test_checker_identity_falls_back_to_llm_when_not_contained() -> None:
+    chat = _chat_returning({"result": "mismatch"})
+    checker = _make_checker(chat)
+
+    status = checker.check_identity(
+        "**name**: Olivier Bayante\n",
+        "31. X. 20u\nSignature\nuv\n",
+    )
+
+    assert status == "mismatch"
+    chat.assert_called_once()
+
+
+def test_checker_identity_true_when_names_match() -> None:
+    """Spelling variants still use the LLM (Piccirilly vs PICCIRILLI)."""
+    chat = _chat_returning({"result": "match"})
+    checker = _make_checker(chat)
+
+    result = checker.check(
+        claim="# Supporting documents\n\n**name**: Piccirilly Francesca\n",
+        text="Patient: PICCIRILLI FRANCESCA\n",
+        mode="identity",
+    )
+
+    assert result is True
+    chat.assert_called_once()
+
+
+def test_checker_identity_unclear_when_no_patient_field() -> None:
+    chat = _chat_returning({"result": "unclear"})
+    checker = _make_checker(chat)
+
+    status = checker.check_identity(
+        "# Supporting documents\n\n**name**: Olivier Bayante\n",
+        "Dr. Rossi\nAmbulatorio\n",
+    )
+
+    assert status == "unclear"
+    assert checker.check(
+        claim="# Supporting documents\n\n**name**: Olivier Bayante\n",
+        text="Dr. Rossi\nAmbulatorio\n",
+        mode="identity",
+    ) is False
+
+
+def test_checker_identity_accepts_legacy_bool_result() -> None:
+    chat = _chat_returning({"result": True})
+    checker = _make_checker(chat)
+
+    # Spelling differs enough that containment misses → LLM legacy bool True.
+    assert (
+        checker.check_identity(
+            "**name**: Ada Lovelace\n",
+            "Patient: Augusta Ada King\n",
+        )
+        == "match"
+    )
+    chat.assert_called_once()
+
+
+def test_checker_identity_exact_containment_skips_llm_for_ada() -> None:
+    chat = MagicMock()
+    checker = _make_checker(chat)
+
+    assert (
+        checker.check_identity(
+            "**name**: Ada Lovelace\n",
+            "Patient: Ada Lovelace\n",
+        )
+        == "match"
+    )
+    chat.assert_not_called()
+
+
+def test_checker_healthy_true_when_document_says_healthy() -> None:
+    chat = _chat_returning({"result": True})
+    checker = _make_checker(chat)
+
+    result = checker.check(
+        claim="",
+        text="En el momento se encuentra CLÍNICAMENTE SANA\nAPTO PARA ACTIVIDAD FÍSICA: SI\n",
+        mode="healthy",
+    )
+
+    assert result is True
+    chat.assert_called_once()
+    user = chat.call_args.kwargs["messages"][1]["content"]
+    assert "CLÍNICAMENTE SANA" in user
+    assert "Supporting document" in user
+
+
+def test_checker_healthy_false_when_illness_documented() -> None:
+    chat = _chat_returning({"result": False})
+    checker = _make_checker(chat)
+
+    result = checker.check(
+        claim="",
+        text="Patient hospitalized for acute appendicitis.\n",
+        mode="healthy",
     )
 
     assert result is False

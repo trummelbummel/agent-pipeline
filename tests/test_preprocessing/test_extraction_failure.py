@@ -260,3 +260,114 @@ def test_faulty_extraction_retry_error_keeps_hitl(tmp_path: Path) -> None:
     assert result.metadata.retry_used is True
     assert result.metadata.retry_model == "llava"
     assert retry_chat.call_count == 1
+
+
+def test_low_confidence_triggers_vision_retry(tmp_path: Path) -> None:
+    """Claim-19 style: substantive OCR but low confidence still retries."""
+    src = tmp_path / "Spanish_medical_6.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    weak_but_long = (
+        "Certifico haber examinado a Marcos Junes quien autoriza informar que "
+        "el presente documento podra ser utilizado por el interesado para el fin "
+        "que bien considere sin constituir el mismo una referencia absoluta.\n"
+        "Firma del profesional\n"
+    )
+    clearer = (
+        "Certifico haber examinado a:\n"
+        "Marcos Junes\n"
+        "Quien autoriza informar el diagnostico.\n"
+        "Firma del profesional\n"
+    )
+    retry_chat = MagicMock(
+        return_value=SimpleNamespace(message=SimpleNamespace(content=clearer))
+    )
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(weak_but_long, 0.65),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=True,
+            on_human_in_the_loop=False,
+        ),
+        retry_chat_fn=retry_chat,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.retry_used is True
+    assert "Marcos Junes" in str(result.raw_text)
+    assert retry_chat.call_count == 1
+
+
+def test_hitl_triggers_vision_retry_when_faulty_flag_disabled(tmp_path: Path) -> None:
+    src = tmp_path / "scan.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    weak_but_long = (
+        "Certifico haber examinado a Marcos Junes quien autoriza informar que "
+        "el presente documento podra ser utilizado por el interesado para el fin "
+        "que bien considere sin constituir el mismo una referencia absoluta.\n"
+    )
+    retry_chat = MagicMock(
+        return_value=SimpleNamespace(message=SimpleNamespace(content=weak_but_long))
+    )
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(weak_but_long, 0.65),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=False,
+            on_human_in_the_loop=True,
+        ),
+        retry_chat_fn=retry_chat,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.human_in_the_loop is True
+    assert result.metadata.retry_used is True
+    assert retry_chat.call_count == 1
+
+
+def test_high_confidence_clean_ocr_skips_retry(tmp_path: Path) -> None:
+    src = tmp_path / "scan.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+
+    certificate = (
+        "## CERTIFICAT D'HOSPITALISATION\n"
+        "Je soussigné, Docteur Kurtneh Mohamed, Praticien Hospitalier dans le service "
+        "de Médecine Physique, atteste que Monsieur KOUADRI a été pris en charge."
+    )
+    retry_chat = MagicMock()
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter(certificate, 0.95),
+        ocr_retry=OcrRetryConfig(enabled=True, model="llava", prompt="ocr"),
+        retry_chat_fn=retry_chat,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.faulty_extraction is False
+    assert result.metadata.human_in_the_loop is False
+    assert result.metadata.retry_used is False
+    retry_chat.assert_not_called()

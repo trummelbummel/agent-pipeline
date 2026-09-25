@@ -42,11 +42,36 @@ def test_jpg_to_png(tmp_path: Path) -> None:
 
 def test_png_passthrough(tmp_path: Path) -> None:
     src = _write_image(tmp_path / "sample.png", "PNG")
-    converter = FormatConverter()
+    converter = FormatConverter(source_formats=["webp", "jpg", "jpeg", "png"])
 
     out = converter.to_png(src)
 
     assert out == src
+
+
+def test_png_copy_into_output_dir(tmp_path: Path) -> None:
+    src = _write_image(tmp_path / "sample.png", "PNG")
+    out_dir = tmp_path / "preprocessed"
+    converter = FormatConverter(source_formats=["webp", "jpg", "jpeg", "png"])
+
+    out = converter.to_png(src, output_dir=out_dir)
+
+    assert out == out_dir / "sample.png"
+    assert out.is_file()
+    assert out.read_bytes() == src.read_bytes()
+
+
+def test_webp_writes_into_output_dir(tmp_path: Path) -> None:
+    src = _write_image(tmp_path / "sample.webp", "WEBP")
+    out_dir = tmp_path / "preprocessed"
+    converter = FormatConverter(source_formats=["webp", "jpg", "jpeg", "png"])
+
+    out = converter.to_png(src, output_dir=out_dir)
+
+    assert out == out_dir / "sample.png"
+    assert out.is_file()
+    with Image.open(out) as converted:
+        assert converted.format == "PNG"
 
 
 def test_unsupported_suffix_raises(tmp_path: Path) -> None:

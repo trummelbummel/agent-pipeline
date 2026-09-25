@@ -3,15 +3,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import numpy as np
 import pytest
 
-from compliance.models.claim import BookingData
+from compliance.models.claim import BookingData, is_nan_scalar
 from compliance.preprocessing.markdown import MarkdownReader
-
-
-def _is_nan(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
 
 
 def test_markdown_full_english(tmp_path: Path) -> None:
@@ -46,12 +41,12 @@ def test_markdown_full_english(tmp_path: Path) -> None:
     assert result.destination == "Johannesburg (JNB)"
     assert result.seat == "16A"
     assert result.fare_type == "Economy"
-    assert _is_nan(result.booking_ref)
-    assert _is_nan(result.price)
+    assert is_nan_scalar(result.booking_ref)
+    assert is_nan_scalar(result.price)
 
 
 def test_markdown_spanish_claim_22() -> None:
-    path = Path("data/claim 22/supporting1.md")
+    path = Path("data/raw/claim 22/supporting1.md")
     if not path.is_file():
         pytest.skip("sample claim 22 not present")
 
@@ -68,7 +63,7 @@ def test_markdown_spanish_claim_22() -> None:
     assert result.seat == "10B (Primera Clase)"
     assert result.fare_type == "Regular"
     assert result.booked_on == "2015-10-10 14:32"
-    assert _is_nan(result.guests)
+    assert is_nan_scalar(result.guests)
 
 
 def test_markdown_sparse_current_date(tmp_path: Path) -> None:
@@ -81,7 +76,7 @@ def test_markdown_sparse_current_date(tmp_path: Path) -> None:
     for field in BookingData.model_fields:
         if field == "current_date":
             continue
-        assert _is_nan(getattr(result, field)), field
+        assert is_nan_scalar(getattr(result, field)), field
 
 
 def test_markdown_plain_unbolded_keys(tmp_path: Path) -> None:
@@ -134,6 +129,6 @@ def test_markdown_absent_fields_nan(tmp_path: Path) -> None:
     result = MarkdownReader().read(path)
 
     assert result.name == "Only Name"
-    assert _is_nan(result.current_date)
-    assert _is_nan(result.booking_ref)
-    assert _is_nan(result.cancellation)
+    assert is_nan_scalar(result.current_date)
+    assert is_nan_scalar(result.booking_ref)
+    assert is_nan_scalar(result.cancellation)

@@ -31,6 +31,8 @@ checking:
   model: test-model
   containment_prompt: containment
   contradicts_prompt: contradicts
+  identity_prompt: identity
+  healthy_prompt: healthy
 analysis:
   coverage:
     labels: ["1"]
@@ -63,6 +65,8 @@ logging:
 evaluation:
   labels: [APPROVE, DENY, UNCERTAIN]
   metrics_artifact: evaluation_metrics.json
+  confusion_matrix_artifact: confusion_matrix.json
+  visualization_artifact: evaluation_visualization.png
 """,
         encoding="utf-8",
     )
@@ -93,9 +97,20 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     assert "accuracy" in payload
     assert "f1_macro" in payload
     assert "confusion_matrix" in payload
+    assert payload["confusion_matrix_labeled"]["DENY"]["DENY"] == 1
     assert "labels" in payload
     assert "explanation" not in payload
     assert "explanations" not in payload
+    matrix_path = results_dir / "confusion_matrix.json"
+    assert matrix_path.is_file()
+    matrix_payload = json.loads(matrix_path.read_text(encoding="utf-8"))
+    assert matrix_payload["rows"] == "true_label"
+    assert matrix_payload["cols"] == "predicted_label"
+    assert matrix_payload["labeled"]["DENY"]["DENY"] == 1
+    assert matrix_payload["matrix"] == payload["confusion_matrix"]
+    viz_path = results_dir / "evaluation_visualization.png"
+    assert viz_path.is_file()
+    assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
@@ -112,3 +127,6 @@ def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
     assert payload["n_evaluated"] == 0
     assert payload["accuracy"] == 0.0
     assert payload["f1_macro"] == 0.0
+    viz_path = results_dir / "evaluation_visualization.png"
+    assert viz_path.is_file()
+    assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

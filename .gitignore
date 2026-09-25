@@ -248,4 +248,6 @@ coverage/
 .cache/
 tmp/
 data/**/processed.json
+data/preprocessed/
+data/results/
 preprocessed/

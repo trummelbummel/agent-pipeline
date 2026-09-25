@@ -34,24 +34,41 @@ def _analysis_config() -> AnalysisConfig:
         other_label="None",
         model="test-model",
         prompt="classify coverage",
+        label_names={
+            "1": "Trip cancellation or rescheduling",
+            "2": "Personal Effects",
+            "3": "Missed Departure or Missed Connection",
+        },
     )
     cancellation_reason = ClassificationConfig(
         labels=["1", "2", "3", "4"],
         other_label="None",
         model="test-model",
         prompt="classify reason",
+        label_names={
+            "1": "Jury duty",
+            "2": "Medical emergency",
+            "3": "Theft or criminal incident",
+            "4": "Other specified personal emergencies",
+        },
     )
     cancellation_document = ClassificationConfig(
         labels=["1", "2", "3"],
         other_label="None",
         model="test-model",
         prompt="classify cancel doc",
+        label_names={
+            "1": "medical certificate",
+            "2": "police report",
+            "3": "jury summon letter",
+        },
     )
     stage = ClassificationConfig(
         labels=["1"],
         other_label="None",
         model="test-model",
         prompt="classify",
+        label_names={"1": "Proof of theft, loss, or damage"},
     )
     return AnalysisConfig(
         coverage=coverage,
@@ -89,6 +106,8 @@ def _config(tmp_path: Path) -> AppConfig:
             model="test-model",
             containment_prompt="containment",
             contradicts_prompt="contradicts",
+            identity_prompt="identity",
+            healthy_prompt="healthy",
         ),
         analysis=_analysis_config(),
         evaluation=EvaluationConfig(
@@ -123,7 +142,9 @@ def _cancellation_chat_fn() -> MagicMock:
         }
     )
     contradicts = _chat_response({"result": False})
-    return MagicMock(side_effect=[coverage, reason, document, contradicts])
+    identity = _chat_response({"result": True})
+    healthy = _chat_response({"result": False})
+    return MagicMock(side_effect=[coverage, reason, document, contradicts, identity, healthy])
 
 
 def _mock_description_reader() -> DescriptionReader:
@@ -187,6 +208,9 @@ def test_process_then_analyze_calls_process_then_analyze_order(tmp_path: Path) -
     )
     payload = json.loads(analysis_path.read_text(encoding="utf-8"))
     assert payload["claim_id"] == "claim 1"
-    assert payload["coverage_labels"] == [TRIP_CANCELLATION]
+    assert payload["coverage_labels"] == ["Trip cancellation or rescheduling"]
+    assert payload["coverage_label_codes"] == [TRIP_CANCELLATION]
     assert "reason_labels" in payload
     assert "document_labels" in payload
+    assert "Medical emergency" in payload["reason_labels"]
+    assert "medical certificate" in payload["document_labels"]

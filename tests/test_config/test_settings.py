@@ -21,6 +21,10 @@ checking:
     check containment
   contradicts_prompt: |
     check contradicts
+  identity_prompt: |
+    check identity
+  healthy_prompt: |
+    check healthy
 """
 
 _MINIMAL_ANALYSIS_YAML = """
@@ -84,6 +88,10 @@ checking:
     check containment
   contradicts_prompt: |
     check contradicts
+  identity_prompt: |
+    check identity
+  healthy_prompt: |
+    check healthy
 """
         + _MINIMAL_ANALYSIS_YAML
         + _MINIMAL_EVALUATION_YAML,
@@ -192,6 +200,7 @@ def test_load_config_reads_evaluation_section() -> None:
     assert "DENY" in evaluation.labels
     assert "UNCERTAIN" in evaluation.labels
     assert evaluation.metrics_artifact == "evaluation_metrics.json"
+    assert evaluation.visualization_artifact == "evaluation_visualization.png"
 
 
 def test_load_config_reads_ocr_retry_section() -> None:
@@ -199,6 +208,10 @@ def test_load_config_reads_ocr_retry_section() -> None:
     assert config.ocr_retry.enabled is True
     assert config.ocr_retry.model
     assert config.ocr_retry.prompt.strip()
+    assert config.ocr_retry.on_faulty_extraction is True
+    assert config.ocr_retry.on_low_confidence is True
+    assert config.ocr_retry.on_human_in_the_loop is True
+    assert config.ocr_retry.on_identity_unclear is True
 
 
 def test_load_config_reads_classification_labels_and_other() -> None:
@@ -211,6 +224,15 @@ def test_load_config_reads_classification_labels_and_other() -> None:
     assert "Personal Effects" in config.classification.prompt
     assert "Missed Departure or Missed Connection" in config.classification.prompt
     assert config.classification.other_label.strip()
+    assert (
+        config.classification.label_names["1"]
+        == "Trip cancellation or rescheduling"
+    )
+    assert (
+        config.analysis.coverage.resolve_label_names(["1", "None"])
+        == ["Trip cancellation or rescheduling", "None"]
+    )
+    assert config.analysis.cancellation_reason.label_names["2"] == "Medical emergency"
 
 
 def test_load_config_missing_classification_section_raises(tmp_path: Path) -> None:

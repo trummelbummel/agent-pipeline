@@ -19,14 +19,6 @@ def _create_png(path: Path, size: tuple[int, int] = (64, 64), seed: int = 42) ->
     return path
 
 
-def _create_uniform_png(path: Path, value: int = 128, size: tuple[int, int] = (64, 64)) -> Path:
-    """Write a uniform grayscale PNG (all pixels same value)."""
-    arr = np.full(size, value, dtype=np.uint8)
-    img = Image.fromarray(arr, mode="L")
-    img.save(path, format="PNG")
-    return path
-
-
 @pytest.fixture
 def config() -> BenfordConfig:
     return BenfordConfig(block_size=8, chi_squared_threshold=15.51)

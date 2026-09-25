@@ -157,6 +157,8 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             model="unused",
             containment_prompt="containment",
             contradicts_prompt="contradicts",
+            identity_prompt="identity",
+            healthy_prompt="healthy",
         ),
         analysis=AnalysisConfig(
             coverage=stage,

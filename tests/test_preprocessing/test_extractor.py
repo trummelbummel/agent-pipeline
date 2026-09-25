@@ -4,14 +4,9 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 
-from compliance.models.claim import BookingData
+from compliance.models.claim import BookingData, is_nan_scalar
 from compliance.preprocessing.extractor import InformationExtractor
-
-
-def _is_nan(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
 
 
 def _chat_returning(payload: dict[str, Any]) -> MagicMock:
@@ -54,9 +49,9 @@ def test_extractor_missing_fields_are_nan() -> None:
     result = extractor.extract("Sam wrote a letter")
 
     assert result.name == "Sam"
-    assert _is_nan(result.booking_ref)
-    assert _is_nan(result.price)
-    assert _is_nan(result.operator)
+    assert is_nan_scalar(result.booking_ref)
+    assert is_nan_scalar(result.price)
+    assert is_nan_scalar(result.operator)
 
 
 def test_extractor_null_fields_become_nan() -> None:
@@ -71,5 +66,5 @@ def test_extractor_null_fields_become_nan() -> None:
     result = extractor.extract("text")
 
     assert result.name == "Sam"
-    assert _is_nan(result.price)
-    assert _is_nan(result.origin)
+    assert is_nan_scalar(result.price)
+    assert is_nan_scalar(result.origin)

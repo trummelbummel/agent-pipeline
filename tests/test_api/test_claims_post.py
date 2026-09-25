@@ -68,6 +68,8 @@ def _config(
             model="test-model",
             containment_prompt="containment",
             contradicts_prompt="contradicts",
+            identity_prompt="identity",
+            healthy_prompt="healthy",
         ),
         analysis=_analysis_config(),
         evaluation=EvaluationConfig(

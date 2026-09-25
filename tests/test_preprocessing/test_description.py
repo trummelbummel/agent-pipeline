@@ -5,15 +5,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-import numpy as np
 
-from compliance.models.claim import BookingData
+from compliance.models.claim import BookingData, is_nan_scalar
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
-
-
-def _is_nan(value: object) -> bool:
-    return isinstance(value, float) and np.isnan(value)
 
 
 def _mock_extractor(fields: dict[str, Any]) -> InformationExtractor:
@@ -43,7 +38,7 @@ def test_description_reader_extracts_booking_data(tmp_path: Path) -> None:
     assert result.name == "Jordan"
     assert result.service == "XY123"
     assert result.booking_ref == "REF99"
-    assert _is_nan(result.price)
+    assert is_nan_scalar(result.price)
     assert reader.last_raw_text == "I booked flight XY123 under ref REF99."
 
 

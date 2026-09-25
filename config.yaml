@@ -25,19 +25,23 @@ preprocessing:
     document_metadata: document_metadata.json
 
 extraction:
-  model: llama3.2
+  model: qwen2.5:7b
   prompt: |
     Extract booking/travel fields matching the provided schema from the claim description.
     Return only fields present in the text; omit unknowns.
 
 classification:
-  # Numeric coverage labels; descriptions live in the prompt mapping below.
+  # Numeric coverage labels; semantic names in label_names (prompts keep the mapping too).
   labels:
     - "1"
     - "2"
     - "3"
+  label_names:
+    "1": Trip cancellation or rescheduling
+    "2": Personal Effects
+    "3": Missed Departure or Missed Connection
   other_label: Other
-  model: llama3.2
+  model: qwen2.5:7b
   prompt: |
     Classify the claim description into one or more of the allowed coverage labels.
     Labels are numeric codes. Use this mapping:
@@ -55,7 +59,7 @@ classification:
     as a label — only the numeric codes (or {other_label}).
 
 checking:
-  model: llama3.2
+  model: qwen2.5:7b
   containment_prompt: |
     Decide whether the claim is present in or entailed by the reference text.
     Return JSON only: {"result": true} if the claim is contained/entailed,
@@ -64,6 +68,30 @@ checking:
     Decide whether the claim contradicts the reference text.
     Return JSON only: {"result": true} if the claim contradicts the text,
     {"result": false} if the claim is supported by or consistent with the text.
+  identity_prompt: |
+    Decide whether the passenger or claimant name in the booking / internal
+    supporting-documents text (first block, often a **name** field) matches the
+    patient or subject name on the medical supporting-document text (second block).
+
+    Compare only the patient / subject / claimant / insured name on the medical
+    document. Ignore doctor, physician, surgeon, nurse, facility, hospital,
+    clinic, laboratory, stamp, letterhead, and signature-block names — those are
+    not the patient.
+
+    Return JSON only with one of:
+    {"result": "match"} — same person (allow minor spelling variation or reordering)
+    {"result": "mismatch"} — name is redacted, obscured, initials-only and
+    inconsistent with the booking name, or clearly a different person
+    {"result": "unclear"} — OCR has no clear patient/subject name field to compare
+    (do not invent a patient name from doctor or facility text)
+  healthy_prompt: |
+    Decide whether the supporting document states that the patient is healthy,
+    clinically well, fit, able to travel or perform activity, or otherwise not ill
+    (e.g. "clínicamente sana", "apte", "in good health", "apto para actividad física").
+    Return JSON only: {"result": true} if the document asserts health / fitness
+    (no illness supporting a medical cancellation claim),
+    {"result": false} if the document describes illness, injury, hospitalization,
+    incapacity, or does not assert that the patient is healthy.
 
 analysis:
   coverage:
@@ -72,8 +100,12 @@ analysis:
       - "1"
       - "2"
       - "3"
+    label_names:
+      "1": Trip cancellation or rescheduling
+      "2": Personal Effects
+      "3": Missed Departure or Missed Connection
     other_label: "None"
-    model: llama3.2
+    model: qwen2.5:7b
     prompt: |
       Classify the claim description into one or more of the allowed coverage labels.
       Labels are numeric codes. Use this mapping:
@@ -96,8 +128,13 @@ analysis:
       - "2"
       - "3"
       - "4"
+    label_names:
+      "1": Jury duty
+      "2": Medical emergency
+      "3": Theft or criminal incident
+      "4": Other specified personal emergencies
     other_label: "None"
-    model: llama3.2
+    model: qwen2.5:7b
     prompt: |
       Classify the cancellation reason from the claim description into the allowed labels.
       Labels are numeric codes. Use this mapping:
@@ -117,8 +154,14 @@ analysis:
       - "1"
       - "2"
       - "3"
+      - "4"
+    label_names:
+      "1": medical certificate
+      "2": police report
+      "3": jury summon letter
+      "4": hospital admission
     other_label: "None"
-    model: llama3.2
+    model: qwen2.5:7b
     prompt: |
       Classify the supporting document type from the document text into the allowed labels.
       Labels are numeric codes. Use this mapping:
@@ -126,6 +169,7 @@ analysis:
       1 = medical certificate
       2 = police report
       3 = jury summon letter
+      4 = hospital admission
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
@@ -135,8 +179,10 @@ analysis:
     # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
       - "1"
+    label_names:
+      "1": Proof of theft, loss, or damage
     other_label: "None"
-    model: llama3.2
+    model: qwen2.5:7b
     prompt: |
       Classify the personal-effects supporting document from the document text.
       Labels are numeric codes. Use this mapping:
@@ -153,8 +199,11 @@ analysis:
     labels:
       - "1"
       - "2"
+    label_names:
+      "1": Incident report or documentation explaining the cause of delay
+      "2": Proof of booking
     other_label: "None"
-    model: llama3.2
+    model: qwen2.5:7b
     prompt: |
       Classify the missed-departure supporting document from the document text.
       Labels are numeric codes. Use this mapping:
@@ -166,6 +215,28 @@ analysis:
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
       Use {other_label} only when no document class fits. Do not return description text
       as a label — only the numeric codes (or {other_label}).
+  # Acceptable supporting-document codes for missing-documentation checks.
+  # Keys/codes match coverage, cancellation_reason, and document stage labels above.
+  required_documents:
+    # Cancellation reason code → acceptable cancellation_document codes
+    cancellation_by_reason:
+      "1": ["3"]       # Jury duty → jury summon letter
+      "2": ["1", "4"]  # Medical emergency → medical certificate or hospital admission
+      "3": ["2"]       # Theft / criminal → police report
+      "4": ["1", "2", "3", "4"]  # Other personal emergencies → any cancellation doc type
+    personal_effects:
+      - "1"            # Proof of theft, loss, or damage
+    missed_departure:
+      - "1"            # Incident / delay documentation
+      - "2"            # Proof of booking
+    # Medical certificate + hospital admission must show has_signature in metadata
+    signature_required_codes:
+      - "1"
+      - "4"
+    # Same medical / hospital codes: run identity only when one of these is classified
+    identity_required_codes:
+      - "1"
+      - "4"
 
 benford:
   # Off for this take-home dataset: all claim images are synthetic/fake, so DCT
@@ -184,10 +255,16 @@ logging:
   format: "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 ocr_retry:
-  # After ExtractionFailure flags Docling OCR as unusable, retry once with a
-  # vision model on the resolved PNG (skipped for PDF passthrough).
+  # Vision retry after weak Docling OCR. Triggers (any enabled match → one retry):
+  # faulty ExtractionFailure, low extraction_probability, or human_in_the_loop.
+  # Analysis may retry once more when identity returns unclear and preprocess
+  # did not already retry (on_identity_unclear).
   enabled: true
-  model: llama3.2-vision
+  on_faulty_extraction: true
+  on_low_confidence: true
+  on_human_in_the_loop: true
+  on_identity_unclear: true
+  model: Maternion/LightOnOCR-2:1b
   prompt: |
     Transcribe all readable text from this document image into clean markdown
     or plain text. Preserve key-value lines and headings. Do not add commentary,
@@ -199,3 +276,5 @@ evaluation:
     - DENY
     - UNCERTAIN
   metrics_artifact: evaluation_metrics.json
+  confusion_matrix_artifact: confusion_matrix.json
+  visualization_artifact: evaluation_visualization.png

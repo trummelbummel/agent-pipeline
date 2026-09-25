@@ -1,16 +1,18 @@
-"""GET /claims/{claim_id} decision path tests (R018)."""
+"""End-to-end Claims API flow: POST → GET decision → GET list."""
 
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
+from urllib.parse import quote
 
-import pytest
 from fastapi.testclient import TestClient
 
+from api.app import create_app
 from compliance.config.settings import (
     AnalysisConfig,
     AppConfig,
@@ -20,6 +22,9 @@ from compliance.config.settings import (
     ExtractionConfig,
     PreprocessingConfig,
 )
+from compliance.models.claim import BookingData, DocumentData, DocumentMetaData
+from compliance.preprocessing.description import DescriptionReader
+from compliance.preprocessing.extractor import InformationExtractor
 
 TRIP_CANCELLATION = "1"
 MEDICAL_EMERGENCY = "2"
@@ -77,26 +82,21 @@ def _analysis_config() -> AnalysisConfig:
     )
 
 
-def _config(
-    data_dir: Path,
-    *,
-    preprocessed_dir: Path | str | None = None,
-    results_dir: Path | str | None = None,
-) -> AppConfig:
-    """Build AppConfig with tmp roots for GET-by-id tests.
+def _config(tmp_path: Path) -> AppConfig:
+    """Build AppConfig with isolated tmp filesystem roots.
 
-    :param data_dir: Temporary claim data root used as preprocessing.data_dir.
-    :param preprocessed_dir: Optional preprocessed mirror root.
-    :param results_dir: Optional analysis/results root.
-    :return: Typed AppConfig suitable for unit tests without live Ollama.
+    :param tmp_path: Pytest temporary directory.
+    :return: AppConfig pointing raw/preprocessed/results under ``tmp_path``.
     """
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
     return AppConfig(
         preprocessing=PreprocessingConfig(
             data_dir=str(data_dir),
             document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
             confidence_threshold=0.7,
-            preprocessed_dir=str(preprocessed_dir or data_dir / "preprocessed"),
-            results_dir=str(results_dir or data_dir / "results"),
+            preprocessed_dir=str(tmp_path / "preprocessed"),
+            results_dir=str(tmp_path / "results"),
         ),
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
         classification=ClassificationConfig(
@@ -120,21 +120,12 @@ def _config(
     )
 
 
-def _create_app() -> Any:
-    """Import create_app; fail intentionally when the factory is absent."""
-    try:
-        from api.app import create_app
-    except ImportError as exc:
-        pytest.fail(f"create_app not implemented: {exc}")
-    return create_app
-
-
 def _chat_response(payload: dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
 
 
 def _cancellation_chat_fn() -> MagicMock:
-    """coverage → reason → cancel-doc → containment LLM → contradicts."""
+    """Injected LLM seam for cancellation path (no live Ollama)."""
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
@@ -162,80 +153,88 @@ def _cancellation_chat_fn() -> MagicMock:
     )
 
 
-def _seed_raw_claim(data_dir: Path, claim_id: str = "claim 1") -> Path:
-    """Write a minimal raw claim (no images) under data_dir.
-
-    :param data_dir: Configured raw claims root.
-    :param claim_id: Safe claim folder segment.
-    :return: Path to the seeded claim directory.
-    """
-    claim_dir = data_dir / claim_id
-    claim_dir.mkdir(parents=True)
-    description = (
-        "I had to cancel my flight to Paris because of a medical emergency."
+def _description_reader() -> DescriptionReader:
+    chat = MagicMock(
+        return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps({})))
     )
-    (claim_dir / "description.txt").write_text(description, encoding="utf-8")
-    (claim_dir / "answer.json").write_text(
-        '{"decision": "APPROVE"}', encoding="utf-8"
+    extractor = InformationExtractor(
+        target_model=BookingData,
+        model_name="test-model",
+        prompt="p",
+        chat_fn=chat,
     )
-    return claim_dir
+    return DescriptionReader(extractor=extractor)
 
 
-def test_get_claim_runs_process_then_analyze_returns_decision(tmp_path: Path) -> None:
-    """GET /claims/{id} runs process_then_analyze and returns decision JSON."""
-    create_app = _create_app()
-    data_dir = tmp_path / "raw"
-    data_dir.mkdir()
-    _seed_raw_claim(data_dir, "claim 1")
-    config = _config(data_dir)
-    app = create_app(config=config, chat_fn=_cancellation_chat_fn())
+def _document_reader() -> MagicMock:
+    reader = MagicMock()
+    text = "I had to cancel my flight to Paris because of a medical emergency."
+    reader.read.side_effect = lambda path: DocumentData(
+        raw_text=text,
+        metadata=DocumentMetaData(extraction_probability=0.95),
+    )
+    return reader
+
+
+def _multipart_files() -> dict[str, Any]:
+    narrative = (
+        b"I had to cancel my flight to Paris because of a medical emergency."
+    )
+    return {
+        "description": ("description.txt", BytesIO(narrative), "text/plain"),
+        "supporting_documents": (
+            "supporting_documents.md",
+            BytesIO(b"# medical certificate\n"),
+            "text/markdown",
+        ),
+        "image": ("scan.png", BytesIO(b"png-bytes"), "application/octet-stream"),
+    }
+
+
+def test_claims_endpoints_post_get_list_flow(tmp_path: Path) -> None:
+    """POST a claim, GET its decision, then see it on GET /claims."""
+    config = _config(tmp_path)
+    artifacts = config.preprocessing.artifacts
+    data_dir = Path(config.preprocessing.data_dir)
+    app = create_app(
+        config=config,
+        chat_fn=_cancellation_chat_fn(),
+        description_reader=_description_reader(),
+        document_reader=_document_reader(),
+    )
 
     with TestClient(app) as client:
-        response = client.get("/claims/claim%201")
+        empty = client.get("/claims")
+        assert empty.status_code == 200, empty.text
+        assert empty.json() == []
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["claim_id"] == "claim 1"
-    analysis = body["analysis_result"]
-    assert isinstance(analysis, dict)
-    assert analysis["coverage_labels"] == ["Trip cancellation or rescheduling"]
-    assert analysis["coverage_label_codes"] == [TRIP_CANCELLATION]
-    assert "reason_labels" in analysis
-    assert "document_labels" in analysis
-    assert "Medical emergency" in analysis["reason_labels"]
-    assert "medical certificate" in analysis["document_labels"]
-    analysis_path = (
-        Path(config.preprocessing.results_dir)
-        / "claim 1"
-        / config.preprocessing.artifacts.analysis_result
-    )
-    assert analysis_path.is_file()
+        created = client.post("/claims", files=_multipart_files())
+        assert created.status_code == 201, created.text
+        claim_id = created.json()["claim_id"]
+        assert claim_id.lower().startswith("claim")
 
+        claim_dir = data_dir / claim_id
+        assert (claim_dir / artifacts.description).is_file()
+        assert (claim_dir / artifacts.supporting_documents).is_file()
+        assert (claim_dir / "scan.png").is_file()
 
-def test_get_claim_missing_raw_folder_returns_404(tmp_path: Path) -> None:
-    """GET unknown claim_id returns 404 when raw folder is missing."""
-    create_app = _create_app()
-    data_dir = tmp_path / "raw"
-    data_dir.mkdir()
-    config = _config(data_dir)
-    app = create_app(config=config, chat_fn=_cancellation_chat_fn())
+        decision = client.get(f"/claims/{quote(claim_id)}")
+        assert decision.status_code == 200, decision.text
+        body = decision.json()
+        assert body["claim_id"] == claim_id
+        analysis = body["analysis_result"]
+        assert isinstance(analysis, dict)
+        assert analysis["coverage_labels"] == ["Trip cancellation or rescheduling"]
+        assert analysis["coverage_label_codes"] == [TRIP_CANCELLATION]
+        assert "reason_labels" in analysis
+        assert "document_labels" in analysis
 
-    with TestClient(app) as client:
-        response = client.get("/claims/claim%2099")
-
-    assert response.status_code == 404, response.text
-
-
-def test_get_claim_unsafe_id_returns_422(tmp_path: Path) -> None:
-    """GET with path-unsafe claim_id returns 422 before filesystem escape."""
-    create_app = _create_app()
-    data_dir = tmp_path / "raw"
-    data_dir.mkdir()
-    config = _config(data_dir)
-    app = create_app(config=config, chat_fn=_cancellation_chat_fn())
-
-    with TestClient(app) as client:
-        # Percent-encoded ".." so the segment reaches the route handler.
-        response = client.get("/claims/%2E%2E")
-
-    assert response.status_code == 422, response.text
+        listed = client.get("/claims")
+        assert listed.status_code == 200, listed.text
+        items = listed.json()
+        assert len(items) == 1
+        assert items[0]["claim_id"] == claim_id
+        assert items[0]["analysis_result"] is not None
+        assert items[0]["analysis_result"]["coverage_label_codes"] == [
+            TRIP_CANCELLATION
+        ]

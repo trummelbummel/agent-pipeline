@@ -12,6 +12,7 @@ from compliance.config.settings import AppConfig, ClassificationConfig
 from compliance.llm.chat import ChatFn
 from compliance.llm.checker import Checker
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
+from compliance.preprocessing.claim_batch import _discover_claim_folders
 from compliance.workflows.pipeline import _validate_claim_dir_name
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,60 @@ class ClaimPipeline:
         graph = self.build_graph()
         graph.invoke({"claim_id": claim_dir.name})
         return self._analysis_result_path(claim_dir.name)
+
+    def run(self) -> list[Path]:
+        """Discover preprocessed claims and write analysis_result.json (batch).
+
+        Per-claim failures are logged and skipped so the full run continues.
+        Logs claim names, counts, and exception types only — never description
+        or OCR payloads (T-04-02).
+
+        :return: Paths to successfully written analysis_result.json files.
+        """
+        folders = _discover_claim_folders(self.preprocessed_root)
+        logger.info(
+            "Discovered %d claim folders under %s",
+            len(folders),
+            self.preprocessed_root,
+        )
+        self.results_root.mkdir(parents=True, exist_ok=True)
+        written = self._written_analysis_outputs(folders)
+        log_branch_decision(
+            logger,
+            branch="analysis_batch",
+            outcome="COMPLETE",
+            reason="soft_fail_batch",
+            written=len(written),
+            total=len(folders),
+        )
+        return written
+
+    def _written_analysis_outputs(self, folders: list[Path]) -> list[Path]:
+        """Analyze each claim folder; soft-fail and continue on errors.
+
+        :param folders: Claim directories under preprocessed_dir.
+        :return: Paths of analysis_result.json files written successfully.
+        """
+        written: list[Path] = []
+        for claim_dir in folders:
+            logger.info("Analyzing %s", claim_dir.name)
+            try:
+                _validate_claim_dir_name(claim_dir.name)
+                written.append(self.analyze_claim(claim_dir))
+            except Exception as exc:
+                log_branch_decision(
+                    logger,
+                    branch="analysis_write",
+                    outcome="SKIP",
+                    reason="claim_failed",
+                    level=logging.ERROR,
+                    claim=claim_dir.name,
+                    error=type(exc).__name__,
+                )
+                logger.exception(
+                    "Failed to analyze %s: %s", claim_dir.name, type(exc).__name__
+                )
+        return written
 
     def _route_after_coverage(
         self, state: ClaimAnalysisState

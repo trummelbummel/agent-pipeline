@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_llm/test_checker.py::test_checker_containment_deterministic_hit_skips_llm tests/test_config/test_settings.py::test_load_config_reads_checking_section -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_checker_containment_deterministic_hit_skips_llm\nnot ok 2 - test_load_config_reads_checking_section\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_checker_containment_deterministic_hit_skips_llm",
+  "targetFile": "tests/test_llm/test_checker.py",
+  "expected": "Checker.check(..., mode='containment') returns True for case/whitespace-normalized substring without calling chat_fn",
+  "actual": "AssertionError: assert False is True (stub Checker always returns False)"
+}

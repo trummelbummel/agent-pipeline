@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_config/test_settings.py::test_load_config_reads_checking_section -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_load_config_reads_checking_section\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_load_config_reads_checking_section",
+  "targetFile": "tests/test_config/test_settings.py",
+  "expected": "load_config('config.yaml').checking exposes model and non-empty containment_prompt / contradicts_prompt",
+  "actual": "AttributeError: 'AppConfig' object has no attribute 'checking'"
+}

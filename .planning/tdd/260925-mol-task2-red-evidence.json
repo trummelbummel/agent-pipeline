@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_llm/test_checker.py -v --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_checker_containment_llm_fallback_true\nnot ok 2 - test_checker_containment_llm_fallback_false\nnot ok 3 - test_checker_contradicts_true_when_claim_conflicts\nnot ok 4 - test_checker_contradicts_false_when_supported\nnot ok 5 - test_checker_unparseable_llm_response_returns_false\n# tests 7\n# pass 2\n# fail 5\n",
+  "targetTest": "test_checker_containment_llm_fallback_true",
+  "targetFile": "tests/test_llm/test_checker.py",
+  "expected": "containment miss falls back to chat_fn JSON {\"result\": true} and returns True with format=json",
+  "actual": "AssertionError: assert False is True (containment miss returns False without calling LLM)"
+}

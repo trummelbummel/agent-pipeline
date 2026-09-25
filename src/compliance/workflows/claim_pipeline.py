@@ -64,7 +64,7 @@ class ClaimPipeline:
         return Path(self._config.preprocessing.results_dir)
 
     def build_graph(self) -> Any:
-        """Compile the cancellation-path StateGraph without a checkpointer.
+        """Compile the claim-analysis StateGraph without a checkpointer.
 
         :return: Compiled LangGraph ready for one-shot ``invoke``.
         """
@@ -77,6 +77,10 @@ class ClaimPipeline:
         builder.add_node(
             "classify_cancel_document", self._classify_cancel_document_node
         )
+        builder.add_node("classify_pe_document", self._classify_pe_document_node)
+        builder.add_node(
+            "classify_missed_document", self._classify_missed_document_node
+        )
         builder.add_node("run_checker", self._run_checker_node)
         builder.add_node("persist", self._persist_node)
 
@@ -88,12 +92,14 @@ class ClaimPipeline:
         )
         builder.add_edge("classify_reason", "classify_cancel_document")
         builder.add_edge("classify_cancel_document", "run_checker")
+        builder.add_edge("classify_pe_document", "run_checker")
+        builder.add_edge("classify_missed_document", "run_checker")
         builder.add_edge("run_checker", "persist")
         builder.add_edge("persist", END)
         return builder.compile()
 
     def analyze_claim(self, claim_dir: Path) -> Path:
-        """Run cancellation-path analysis for one claim and write analysis_result.json.
+        """Run claim analysis for one claim and write analysis_result.json.
 
         :param claim_dir: Claim folder whose ``name`` is the safe path segment.
         :return: Path to the written analysis_result.json under results_dir.
@@ -113,15 +119,24 @@ class ClaimPipeline:
 
     def _route_after_coverage(
         self, state: ClaimAnalysisState
-    ) -> Literal["classify_reason"] | object:
+    ) -> (
+        Literal[
+            "classify_reason",
+            "classify_pe_document",
+            "classify_missed_document",
+        ]
+        | object
+    ):
         """Route by exact config.analysis.coverage label strings (not ROADMAP Title Case).
 
-        PE/missed coverage labels stub to END until 04-03 fills those branches.
+        other_label still stubs to END until Task 2 wires persist-only.
         """
         labels = state.get("coverage_labels") or []
         primary = labels[0] if labels else None
         coverage = self._config.analysis.coverage
         cancellation_label = coverage.labels[0]
+        pe_label = coverage.labels[1]
+        missed_label = coverage.labels[2]
         if primary == cancellation_label:
             log_branch_decision(
                 logger,
@@ -132,11 +147,31 @@ class ClaimPipeline:
                 next_step="classify_reason",
             )
             return "classify_reason"
+        if primary == pe_label:
+            log_branch_decision(
+                logger,
+                branch="coverage_route",
+                outcome="ROUTE",
+                reason="personal_effects",
+                claim=state.get("claim_id"),
+                next_step="classify_pe_document",
+            )
+            return "classify_pe_document"
+        if primary == missed_label:
+            log_branch_decision(
+                logger,
+                branch="coverage_route",
+                outcome="ROUTE",
+                reason="missed_departure",
+                claim=state.get("claim_id"),
+                next_step="classify_missed_document",
+            )
+            return "classify_missed_document"
         log_branch_decision(
             logger,
             branch="coverage_route",
             outcome="END",
-            reason="non_cancellation_stub",
+            reason="other_or_unknown_stub",
             claim=state.get("claim_id"),
             next_step=str(END),
         )
@@ -192,6 +227,36 @@ class ClaimPipeline:
             branch="classify_cancel_document",
             outcome="CLASSIFIED",
             reason="cancellation_document_stage",
+            claim=state.get("claim_id"),
+        )
+        return {"document_labels": list(result.labels)}
+
+    def _classify_pe_document_node(
+        self, state: ClaimAnalysisState
+    ) -> dict[str, object]:
+        result = self._personal_effects_document_classification(
+            state["supporting_document_text"]
+        )
+        log_branch_decision(
+            logger,
+            branch="classify_pe_document",
+            outcome="CLASSIFIED",
+            reason="personal_effects_document_stage",
+            claim=state.get("claim_id"),
+        )
+        return {"document_labels": list(result.labels)}
+
+    def _classify_missed_document_node(
+        self, state: ClaimAnalysisState
+    ) -> dict[str, object]:
+        result = self._missed_departure_document_classification(
+            state["supporting_document_text"]
+        )
+        log_branch_decision(
+            logger,
+            branch="classify_missed_document",
+            outcome="CLASSIFIED",
+            reason="missed_departure_document_stage",
             claim=state.get("claim_id"),
         )
         return {"document_labels": list(result.labels)}
@@ -267,6 +332,20 @@ class ClaimPipeline:
     ) -> ClassificationResult:
         return self._stage_classifier(
             self._config.analysis.cancellation_document
+        ).classify(supporting_document_text)
+
+    def _personal_effects_document_classification(
+        self, supporting_document_text: str
+    ) -> ClassificationResult:
+        return self._stage_classifier(
+            self._config.analysis.personal_effects_document
+        ).classify(supporting_document_text)
+
+    def _missed_departure_document_classification(
+        self, supporting_document_text: str
+    ) -> ClassificationResult:
+        return self._stage_classifier(
+            self._config.analysis.missed_departure_document
         ).classify(supporting_document_text)
 
     def _checker_results(

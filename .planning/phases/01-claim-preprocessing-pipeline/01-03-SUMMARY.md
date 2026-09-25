@@ -134,7 +134,7 @@ Each task was committed atomically:
 4. **Task 4: Implement pipeline orchestrator** - `1a259a1` (feat)
 5. **Task 5: Write unit + integration tests** - `dffe03f` (test)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `694584a` (docs: complete plan)
 
 ## Files Created/Modified
 - `src/compliance/preprocessing/document.py` — DocumentReader + DocumentPreprocessor

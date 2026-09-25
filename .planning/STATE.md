@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 05
 current_phase_name: FastAPI Claims API
-current_plan: 2
+current_plan: 3
 status: executing
-stopped_at: Completed 05-00-PLAN.md
-last_updated: "2026-09-25T16:28:43.040Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-09-25T16:36:39.500Z"
 last_activity: 2026-09-25
 last_activity_desc: Completed 05-00 Wave 0 FastAPI foundation
-state_head: a1491b1b4b68b00214e8b5ec32b095c5b9d2a19c
+state_head: 08f31dd5384ce9815daee27934e4f62e33f8180c
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 16
-  completed_plans: 13
+  completed_plans: 14
 milestone_name: Claim Preprocessing
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 05 — FastAPI Claims API
-Current Plan: 2
+Current Plan: 3
 Total Plans in Phase: 4
-Status: In Progress
+Status: Ready to execute
 Last activity: 2026-09-25 — Completed 05-00 Wave 0 FastAPI foundation
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 1/4)
@@ -89,6 +89,9 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 06]: Public batch API named evaluate(); soft-skip unsafe/missing pairs; always write metrics JSON including empty batch
 - [Phase 05]: User approved FastAPI stack legitimacy (fastapi/uvicorn/python-multipart/httpx) despite SUS downloads-metadata seam
 - [Phase 05]: Kept src/evaluation in hatch packages and added src/api alongside it
+- [Phase 05]: Probe lifespan tests call deps with Request (Annotated Depends breaks under future annotations in nested test fns)
+- [Phase 05]: 409 conflict test patches _next_claim_id to simulate TOCTOU against max+1 id scheme
+- [Phase 05]: Image path hardened with resolve().is_relative_to(claim_dir) after basename coerce
 
 ### Blockers/Concerns
 
@@ -103,8 +106,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:28:43.021Z
-Stopped at: Completed 05-00-PLAN.md
+Last session: 2026-09-25T16:36:39.478Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -124,3 +127,4 @@ Resume file: None
 | Phase 06 P01 | 5 min | 2 tasks | 15 files |
 | Phase 06 P02 | 2 min | 2 tasks | 6 files |
 | Phase 05 P00 | 1min | 3 tasks | 8 files |
+| Phase 05 P01 | 5min | 3 tasks | 7 files |

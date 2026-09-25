@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from compliance.config import CheckingConfig, ClassificationConfig, load_config
-from compliance.models import CaseClassifier, ClassificationResult, Classifier
+from compliance.llm import CaseClassifier, ClassificationResult, Classifier
 
 _MINIMAL_CHECKING_YAML = """
 checking:
@@ -15,6 +15,40 @@ checking:
     check containment
   contradicts_prompt: |
     check contradicts
+"""
+
+_MINIMAL_ANALYSIS_YAML = """
+analysis:
+  coverage:
+    labels: [Trip cancellation or rescheduling, Personal Effects, Missed Departure or Missed Connection]
+    other_label: "None"
+    model: test-model
+    prompt: |
+      classify coverage
+  cancellation_reason:
+    labels: [Jury duty, Medical emergency]
+    other_label: "None"
+    model: test-model
+    prompt: |
+      classify reason
+  cancellation_document:
+    labels: [medical certificate]
+    other_label: "None"
+    model: test-model
+    prompt: |
+      classify cancel doc
+  personal_effects_document:
+    labels: [Proof of theft, loss, or damage]
+    other_label: "None"
+    model: test-model
+    prompt: |
+      classify pe doc
+  missed_departure_document:
+    labels: [Proof of booking]
+    other_label: "None"
+    model: test-model
+    prompt: |
+      classify missed doc
 """
 
 
@@ -44,7 +78,8 @@ checking:
     check containment
   contradicts_prompt: |
     check contradicts
-""",
+"""
+        + _MINIMAL_ANALYSIS_YAML,
         encoding="utf-8",
     )
     config = load_config(config_path)
@@ -100,6 +135,34 @@ def test_load_config_reads_checking_section() -> None:
     assert config.checking.contradicts_prompt.strip()
 
 
+def test_load_config_reads_analysis_section() -> None:
+    config = load_config("config.yaml")
+    stages = (
+        config.analysis.coverage,
+        config.analysis.cancellation_reason,
+        config.analysis.cancellation_document,
+        config.analysis.personal_effects_document,
+        config.analysis.missed_departure_document,
+    )
+    for stage in stages:
+        assert len(stage.labels) >= 1
+        assert stage.other_label
+        assert stage.model
+        assert stage.prompt.strip()
+    assert "Trip cancellation or rescheduling" in config.analysis.coverage.labels
+
+
+def test_analysis_coverage_other_label_is_none() -> None:
+    config = load_config("config.yaml")
+    assert config.analysis.coverage.other_label == "None"
+    assert config.classification.other_label == "Other"
+
+
+def test_analysis_result_artifact_name_externalized() -> None:
+    config = load_config("config.yaml")
+    assert config.preprocessing.artifacts.analysis_result == "analysis_result.json"
+
+
 def test_load_config_reads_ocr_retry_section() -> None:
     config = load_config("config.yaml")
     assert config.ocr_retry.enabled is True
@@ -138,11 +201,15 @@ extraction:
 
 
 def test_public_exports_include_classifier_and_classification_config() -> None:
+    from compliance import config as config_pkg
+
     assert issubclass(Classifier, object)
     assert issubclass(CaseClassifier, Classifier)
     assert ClassificationResult is not None
     assert ClassificationConfig is not None
     assert CheckingConfig is not None
+    assert hasattr(config_pkg, "AnalysisConfig")
+    assert config_pkg.AnalysisConfig is not None
 
 
 def test_load_config_missing_file_raises(tmp_path: Path) -> None:

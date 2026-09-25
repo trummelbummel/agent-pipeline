@@ -1,0 +1,17 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+E   AttributeError: 'AppConfig' object has no attribute 'analysis'
+/Users/theresa/Desktop/projects/compliance/.venv/lib/python3.12/site-packages/pydantic/main.py:1042: AttributeError: 'AppConfig' object has no attribute 'analysis'
+E   AttributeError: 'AppConfig' object has no attribute 'analysis'
+/Users/theresa/Desktop/projects/compliance/.venv/lib/python3.12/site-packages/pydantic/main.py:1042: AttributeError: 'AppConfig' object has no attribute 'analysis'
+E   AttributeError: 'PreprocessedArtifactNames' object has no attribute 'analysis_result'
+/Users/theresa/Desktop/projects/compliance/.venv/lib/python3.12/site-packages/pydantic/main.py:1042: AttributeError: 'PreprocessedArtifactNames' object has no attribute 'analysis_result'
+E   AssertionError: assert False
+     +  where False = hasattr(<module 'compliance.config' from '/Users/theresa/Desktop/projects/compliance/src/compliance/config/__init__.py'>, 'AnalysisConfig')
+/Users/theresa/Desktop/projects/compliance/tests/test_config/test_settings.py:211: AssertionError: assert False
+=========================== short test summary info ============================
+FAILED tests/test_config/test_settings.py::test_load_config_reads_analysis_section
+FAILED tests/test_config/test_settings.py::test_analysis_coverage_other_label_is_none
+FAILED tests/test_config/test_settings.py::test_analysis_result_artifact_name_externalized
+FAILED tests/test_config/test_settings.py::test_public_exports_include_classifier_and_classification_config
+4 failed in 0.09s

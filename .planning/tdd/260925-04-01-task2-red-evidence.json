@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_config/test_settings.py::test_load_config_reads_analysis_section tests/test_config/test_settings.py::test_analysis_coverage_other_label_is_none tests/test_config/test_settings.py::test_analysis_result_artifact_name_externalized tests/test_config/test_settings.py::test_public_exports_include_classifier_and_classification_config -q --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_load_config_reads_analysis_section\nnot ok 2 - test_analysis_coverage_other_label_is_none\nnot ok 3 - test_analysis_result_artifact_name_externalized\nnot ok 4 - test_public_exports_include_classifier_and_classification_config\n# tests 4\n# pass 0\n# fail 4\n",
+  "targetTest": "test_load_config_reads_analysis_section",
+  "targetFile": "tests/test_config/test_settings.py",
+  "expected": "load_config exposes analysis.coverage and sibling stages with labels/other_label/model/prompt; analysis_result artifact name; AnalysisConfig export",
+  "actual": "AttributeError: 'AppConfig' object has no attribute 'analysis'"
+}

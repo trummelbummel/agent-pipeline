@@ -58,7 +58,7 @@
   - mypy + pytest pass
 
 - [ ] **Phase 06: Prediction Evaluation** `profiles: []`
-  Plans: TBD
+  Plans: 06-01, 06-02
   Goal: Add `src/evaluation` with an `Evaluator` that compares pipeline predictions to ground-truth `answer.json`, builds a confusion matrix, and reports accuracy and F1
   Success criteria:
   - `src/evaluation/` package with public `Evaluator` class
@@ -76,7 +76,7 @@
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
 | 05 | 0/4 | Not started |  |
-| 06 | 0/? | Not started |  |
+| 06 | 0/2 | Not started |  |
 
 ### Phase 2: Case Classifier Models
 
@@ -170,8 +170,14 @@ Plans:
 **Goal:** Add `src/evaluation` with an `Evaluator` that loads pipeline prediction results and ground-truth `answer.json`, compares decisions, builds a confusion matrix, and calculates accuracy and F1 score.
 **Requirements**: TBD
 **Depends on:** Phase 4 (predicted results + ground-truth answers)
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 6 to break down)
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — Tracer: hatch `src/evaluation` + EvaluationConfig + single-claim Evaluator (confusion matrix, accuracy, macro F1)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 06-02-PLAN.md — Batch soft-skip evaluate + `python -m evaluation` metrics artifact + phase gate

@@ -1,0 +1,1 @@
+No external API integration: Phase 06 reads local `predicted_answer.json` and ground-truth `answer.json` from config filesystem roots and computes offline metrics — no HTTP client, SDK, or third-party service calls.

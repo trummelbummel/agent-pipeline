@@ -119,17 +119,16 @@ class ClaimPipeline:
 
     def _route_after_coverage(
         self, state: ClaimAnalysisState
-    ) -> (
-        Literal[
-            "classify_reason",
-            "classify_pe_document",
-            "classify_missed_document",
-        ]
-        | object
-    ):
+    ) -> Literal[
+        "classify_reason",
+        "classify_pe_document",
+        "classify_missed_document",
+        "persist",
+    ]:
         """Route by exact config.analysis.coverage label strings (not ROADMAP Title Case).
 
-        other_label still stubs to END until Task 2 wires persist-only.
+        other_label (and unknown labels after CaseClassifier allow-list) go to persist
+        without reason, document classifiers, or Checker.
         """
         labels = state.get("coverage_labels") or []
         primary = labels[0] if labels else None
@@ -137,6 +136,7 @@ class ClaimPipeline:
         cancellation_label = coverage.labels[0]
         pe_label = coverage.labels[1]
         missed_label = coverage.labels[2]
+        other_label = coverage.other_label
         if primary == cancellation_label:
             log_branch_decision(
                 logger,
@@ -167,15 +167,16 @@ class ClaimPipeline:
                 next_step="classify_missed_document",
             )
             return "classify_missed_document"
+        # other_label or unknown → persist-only (T-04-03 / A7)
         log_branch_decision(
             logger,
             branch="coverage_route",
-            outcome="END",
-            reason="other_or_unknown_stub",
+            outcome="ROUTE",
+            reason="other_label" if primary == other_label else "unknown_as_other",
             claim=state.get("claim_id"),
-            next_step=str(END),
+            next_step="persist",
         )
-        return END
+        return "persist"
 
     def _load_artifacts_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         claim_id = state["claim_id"]
@@ -376,17 +377,21 @@ class ClaimPipeline:
     def _analysis_result_payload(self, state: ClaimAnalysisState) -> dict[str, object]:
         """Build the structured analysis_result.json body from graph state.
 
-        :param state: Final ClaimAnalysisState after checker.
-        :return: JSON-serializable analysis payload.
+        :param state: Final ClaimAnalysisState after checker (or coverage-only).
+        :return: JSON-serializable analysis payload. Checker keys are omitted when
+            the Checker node did not run (coverage other_label path).
         """
-        return {
+        payload: dict[str, object] = {
             "claim_id": state["claim_id"],
             "coverage_labels": list(state.get("coverage_labels") or []),
             "reason_labels": list(state.get("reason_labels") or []),
             "document_labels": list(state.get("document_labels") or []),
-            "checker_containment": bool(state.get("checker_containment", False)),
-            "checker_contradicts": bool(state.get("checker_contradicts", False)),
         }
+        if "checker_containment" in state:
+            payload["checker_containment"] = bool(state["checker_containment"])
+        if "checker_contradicts" in state:
+            payload["checker_contradicts"] = bool(state["checker_contradicts"])
+        return payload
 
     def _written_analysis_result(self, state: ClaimAnalysisState) -> Path:
         """Persist analysis_result.json under results_dir/{claim_id}/.

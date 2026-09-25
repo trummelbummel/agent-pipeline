@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 05
 current_phase_name: FastAPI Claims API
-current_plan: Not started
-status: planning
-stopped_at: Phase 6 complete, ready to plan Phase 05
-last_updated: "2026-09-25T16:26:29.871Z"
+current_plan: 2
+status: executing
+stopped_at: Completed 05-00-PLAN.md
+last_updated: "2026-09-25T16:28:43.040Z"
 last_activity: 2026-09-25
-last_activity_desc: Phase 6 complete, transitioned to Phase 05
-state_head: 24122386160dfcb034ccc14fe154ec1a0cb00581
+last_activity_desc: Completed 05-00 Wave 0 FastAPI foundation
+state_head: a1491b1b4b68b00214e8b5ec32b095c5b9d2a19c
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 16
-  completed_plans: 12
+  completed_plans: 13
 milestone_name: Claim Preprocessing
 ---
 
@@ -24,22 +24,23 @@ milestone_name: Claim Preprocessing
 
 See: .planning/PROJECT.md
 
-**Current focus:** Phase 06 — Prediction Evaluation
+**Current focus:** Phase 05 — FastAPI Claims API
 
 ## Current Position
 
 Phase: 05 — FastAPI Claims API
-Current Plan: Not started
-Total Plans in Phase: 2
-Status: Ready to plan
-Last activity: 2026-09-25 — Phase 6 complete, transitioned to Phase 05
+Current Plan: 2
+Total Plans in Phase: 4
+Status: In Progress
+Last activity: 2026-09-25 — Completed 05-00 Wave 0 FastAPI foundation
 
-Progress: [████████░░] 80% (4/5 phases complete)
+Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 1/4)
 
 ## Accumulated Context
 
 ### Roadmap Evolution
 
+- Phase 7 added: Denial-rule checkers in analysis pipeline — extend ClaimPipeline Checker steps for LOGIC.md deny rules not covered by containment/contradicts (missing doc, healthy cert, identity, authenticity, incomplete, suspicious dating)
 - Phase 6 added: Prediction Evaluation — `src/evaluation` Evaluator compares predictions vs answer.json; confusion matrix, accuracy, F1
 - Phase 5 added: FastAPI Claims API — `src/api` with POST/GET /claims; single-claim + batch pipeline refactor; pipelines as FastAPI resources
 - Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)
@@ -86,6 +87,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 06]: Unknown pred/gt decisions raise ValueError at evaluate_claim boundary
 - [Phase 06]: evaluation package at src/evaluation (hatch); scores predicted_answer vs answer.json only
 - [Phase 06]: Public batch API named evaluate(); soft-skip unsafe/missing pairs; always write metrics JSON including empty batch
+- [Phase 05]: User approved FastAPI stack legitimacy (fastapi/uvicorn/python-multipart/httpx) despite SUS downloads-metadata seam
+- [Phase 05]: Kept src/evaluation in hatch packages and added src/api alongside it
 
 ### Blockers/Concerns
 
@@ -100,8 +103,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:18:58.903Z
-Stopped at: Phase 6 complete, ready to plan Phase 05
+Last session: 2026-09-25T16:28:43.021Z
+Stopped at: Completed 05-00-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -120,3 +123,4 @@ Resume file: None
 | Phase 04 P04 | 3min | 2 tasks | 6 files |
 | Phase 06 P01 | 5 min | 2 tasks | 15 files |
 | Phase 06 P02 | 2 min | 2 tasks | 6 files |
+| Phase 05 P00 | 1min | 3 tasks | 8 files |

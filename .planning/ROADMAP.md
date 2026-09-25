@@ -67,6 +67,15 @@
   - Reports accuracy and F1 score
   - Paths/labels from config where applicable; mypy + pytest pass
 
+- [ ] **Phase 07: Denial-rule checkers in analysis pipeline** `profiles: []`
+  Plans: TBD
+  Goal: Extend ClaimPipeline Checker steps so every LOGIC.md denial rule is covered by an explicit check (beyond containment/contradicts)
+  Success criteria:
+  - Checker modes (or nodes) cover: missing medical/supporting doc; document contradicts claim (healthy cert); identity unverifiable; document not authentic / wrong format; incomplete document; suspicious dating
+  - Each check is config-driven (prompt/model) and persisted in `analysis_result.json`
+  - Existing containment + contradicts retained; healthy-contradiction specialized where generic contradicts is insufficient
+  - Injectable chat_fn tests; mypy + pytest pass
+
 ## Progress
 
 | Phase | Plans | Status | Completed |
@@ -75,8 +84,9 @@
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
 | 04 | 0/4 | Complete    | 2026-09-25 |
-| 05 | 0/4 | Not started |  |
+| 05 | 0/4 | In Progress|  |
 | 06 | 1/2 | Complete    | 2026-09-25 |
+| 07 | 0/0 | Not started |  |
 
 ### Phase 2: Case Classifier Models
 
@@ -145,13 +155,13 @@ Plans:
 **Goal:** Add FastAPI under `src/api` with three endpoints: `POST /claims` (multipart: description.txt, supporting_documents.md, image in config `document_formats`) writes a new folder under config `data_dir/{claim_id}/`; `GET /claims/{claim_id}` runs PreprocessingPipeline + ClaimPipeline for that claim (same orchestration as `main`) and returns the decision; `GET /claims` lists all processed claim answers from `results_dir`. Refactor pipelines so they accept a single claim folder as well as a full directory. Inject pipelines as FastAPI app resources/dependencies (lifespan fixture).
 **Requirements**: R017, R018, R019, R020, R021, R022
 **Depends on:** Phase 4
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 
 **Wave 0**
 
-- [ ] 05-00-PLAN.md — Wave 0: human-verify FastAPI stack + uv add + hatch `src/api` + Nyquist stubs (R022)
+- [x] 05-00-PLAN.md — Wave 0: human-verify FastAPI stack + uv add + hatch `src/api` + Nyquist stubs (R022)
 
 **Wave 1** *(blocked on Wave 0)*
 
@@ -184,9 +194,21 @@ Plans:
 
 ### Phase 7: Denial-rule checkers in analysis pipeline
 
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 6
+**Goal:** Extend `ClaimPipeline` with Checker steps that verify the denial rules from LOGIC.md that are not yet covered by the existing containment / contradicts modes. Wire each rule as a config-driven check (reuse/extend `Checker`) over preprocessed description + supporting document text (and metadata where needed), and persist boolean (or structured) outcomes in `analysis_result.json`.
+
+Denial rules to cover:
+
+1. **Missing documentation** (claims 1, 2, 21, 25) — no medical certificate or supporting evidence attached
+2. **Document contradicts claim** (claims 10, 14, 22) — medical certificate states the patient is healthy (specialize beyond generic contradicts if needed)
+3. **Identity unverifiable** (claims 4, 15) — name redacted, obscured, or does not match the claimant
+4. **Document not authentic** (claims 7, 8, 18) — tampering / photoshopped elements, wrong format (text-only, photo instead of certificate)
+5. **Incomplete document** (claim 17) — missing required fields (signature, discharge date, diagnosis)
+6. **Suspicious dating** (claims 13, 20, 23) — inconsistent or implausible timestamps (may map to UNCERTAIN later)
+
+Existing Checker containment + contradicts remain. Benford authenticity stays optional in preprocessing (off for synthetic data); analysis-time authenticity check uses OCR text / format signals.
+
+**Requirements**: R023, R024, R025, R026, R027, R028, R029
+**Depends on:** Phase 4 (ClaimPipeline + Checker)
 **Plans:** 0 plans
 
 Plans:

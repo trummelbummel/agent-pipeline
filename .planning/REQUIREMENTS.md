@@ -180,6 +180,62 @@ This file is the explicit capability and coverage contract for the project.
 - Source: ROADMAP Phase 05; 05-VALIDATION.md
 - Validation: Phase gate `pytest tests/test_api tests/test_workflows ... && mypy src/api ...` green
 
+### R023 — Denial-rule Checker steps in ClaimPipeline
+- Class: core-capability
+- Status: active
+- Description: Extend ClaimPipeline so denial rules from LOGIC.md that are not covered by containment/contradicts each have an explicit Checker mode or graph node; outcomes persist in `analysis_result.json`; prompts/models externalized in `config.yaml`
+- Why it matters: Classification alone does not encode deny reasons; rules need auditable boolean checks before APPROVE/DENY
+- Source: ROADMAP Phase 07; LOGIC.md Summary of Denial Rules
+- Validation: Each denial rule maps to a named check field in analysis_result; injectable chat_fn tests; coverage for missing-doc, healthy-contradiction, identity, authenticity, incomplete, suspicious-dating
+
+### R024 — Missing documentation check
+- Class: core-capability
+- Status: active
+- Description: Detect when the claim has no usable medical certificate or supporting evidence (empty/faulty OCR, absent supporting_document) — targets claims 1, 2, 21, 25
+- Why it matters: Primary deny path when no evidence is attached
+- Source: LOGIC.md denial category 1; Phase 07
+- Validation: Injectable/unit cases with empty or missing supporting_document → check true; substantive medical text → false
+
+### R025 — Document-contradicts-claim (healthy certificate) check
+- Class: core-capability
+- Status: active
+- Description: Detect when the medical certificate states the patient is healthy / fit, contradicting an illness-based claim (claims 10, 14, 22). May specialize or complement existing contradicts mode
+- Why it matters: Generic contradicts may miss “healthy” certificates; this is an explicit deny rule in the dataset
+- Source: LOGIC.md denial category 2; Phase 07
+- Validation: Healthy-certificate fixture → check true; illness-supporting cert → false; existing containment/contradicts still present
+
+### R026 — Identity unverifiable check
+- Class: core-capability
+- Status: active
+- Description: Detect redacted, obscured, or claimant-mismatched names on the medical/supporting document (claims 4, 15)
+- Why it matters: Identity mismatch is a standalone deny reason independent of coverage classification
+- Source: LOGIC.md denial category 3; Phase 07
+- Validation: Redacted/mismatched name fixtures → true; matching name → false
+
+### R027 — Document authenticity / format check
+- Class: core-capability
+- Status: active
+- Description: Detect wrong format or authenticity concerns from document text/signals — text-only medical doc, photo instead of certificate, photoshopped stamp/signature cues (claims 7, 8, 18). Complements optional Benford (preprocess; off for synthetic data)
+- Why it matters: Format/authenticity failures must be catchable in analysis without relying on Benford
+- Source: LOGIC.md denial category 4; Phase 07
+- Validation: Text-only / photo-instead-of-cert fixtures → true; normal certificate OCR → false
+
+### R028 — Incomplete document check
+- Class: core-capability
+- Status: active
+- Description: Detect missing required fields on medical certificates (signature, discharge date, diagnosis/condition) — claim 17 pattern
+- Why it matters: Incomplete certificates are deny/UNCERTAIN drivers even when a document is present
+- Source: LOGIC.md denial category 5; Phase 07
+- Validation: Missing-signature / missing-date fixtures → true; complete cert → false
+
+### R029 — Suspicious dating check
+- Class: core-capability
+- Status: active
+- Description: Detect inconsistent or implausible document timestamps (claims 13, 20, 23); outcome may later map to UNCERTAIN rather than hard DENY
+- Why it matters: Dating anomalies are a documented uncertainty/deny signal in the dataset
+- Source: LOGIC.md denial category 6; Phase 07
+- Validation: Implausible/inconsistent date fixtures → true; coherent dates → false
+
 ## Validated
 
 - R001, R002, R003, R004, R005, R006 — completed in phase 01 plans 01-01 through 01-03
@@ -216,10 +272,17 @@ This file is the explicit capability and coverage contract for the project.
 | R020 | core-capability | active | 05-03 | 05-02 | run(source): one claim folder or claims directory from outside |
 | R021 | core-capability | active | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
 | R022 | quality-attribute | active | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
+| R023 | core-capability | active | 07 | none | Denial-rule Checker steps in ClaimPipeline + analysis_result fields |
+| R024 | core-capability | active | 07 | none | Missing documentation check (claims 1, 2, 21, 25) |
+| R025 | core-capability | active | 07 | none | Healthy-certificate / contradicts-claim check (claims 10, 14, 22) |
+| R026 | core-capability | active | 07 | none | Identity unverifiable check (claims 4, 15) |
+| R027 | core-capability | active | 07 | none | Document authenticity / format check (claims 7, 8, 18) |
+| R028 | core-capability | active | 07 | none | Incomplete document check (claim 17) |
+| R029 | core-capability | active | 07 | none | Suspicious dating check (claims 13, 20, 23) |
 
 ## Coverage Summary
 
-- Active requirements: 6
-- Mapped to slices: 22
+- Active requirements: 13
+- Mapped to slices: 29
 - Validated: 16
 - Unmapped active requirements: 0

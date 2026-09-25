@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -62,7 +63,9 @@ class FormatConverter:
 
         with Image.open(path) as image:
             rgb = self._to_rgb(image)
-            out_path = Path(tempfile.mkstemp(suffix=".png", prefix=f"{path.stem}_")[1])
+            fd, name = tempfile.mkstemp(suffix=".png", prefix=f"{path.stem}_")
+            os.close(fd)
+            out_path = Path(name)
             rgb.save(out_path, format="PNG")
 
         logger.info("Converted %s (.%s) → PNG (%s)", path.name, suffix, out_path.name)

@@ -27,9 +27,9 @@ class EvaluationResult:
     :param matches: Per-claim match booleans (A4).
     :param confusion_matrix: Rows=true labels, cols=predicted; axis order = labels.
     :param labels: Decision vocabulary used for the matrix axes.
-    :param accuracy: Mean of matches.
-    :param f1_macro: Macro-averaged F1 over all labels.
-    :param n_evaluated: Number of claims scored.
+    :param accuracy: Mean of matches over all GT-backed samples (failed preds count as wrong).
+    :param f1_macro: Macro-averaged F1 over all labels (scored pairs only).
+    :param n_evaluated: Number of GT-backed samples in the accuracy denominator.
     """
 
     claim_ids: list[str]
@@ -101,21 +101,38 @@ class Evaluator:
     def evaluate(self) -> EvaluationResult:
         """Evaluate all discoverable claim pairs under results_dir × data_dir.
 
-        Soft-skips unsafe names and missing/invalid pairs (A11). Empty set
-        yields n_evaluated=0 with accuracy/f1 0.0.
+        Soft-skips still log and omit incomplete pairs from the confusion
+        matrix / F1, but accuracy is always mean(matches) over every sample
+        that has ground truth — a missing/invalid prediction counts as wrong.
 
-        :return: Aggregate EvaluationResult over successfully scored claims.
+        Empty set yields n_evaluated=0 with accuracy/f1 0.0.
+
+        :return: Aggregate EvaluationResult; accuracy over all GT-backed samples.
         """
         labels = list(self._config.evaluation.labels)
         claim_ids: list[str] = []
         y_true: list[str] = []
         y_pred: list[str] = []
-        matches: list[bool] = []
+        scored_matches: list[bool] = []
+        all_matches: list[bool] = []
         for claim_id in self._discover_claim_ids():
             try:
                 _validate_claim_dir_name(claim_id)
+            except ValueError as exc:
+                log_branch_decision(
+                    logger,
+                    branch="evaluation_batch",
+                    outcome="SKIP",
+                    reason="unsafe_claim_id",
+                    level=logging.WARNING,
+                    claim=claim_id,
+                    error=type(exc).__name__,
+                )
+                continue
+            try:
                 single = self.evaluate_claim(claim_id)
             except Exception as exc:
+                counted = self._count_failed_claim(claim_id, all_matches, claim_ids)
                 log_branch_decision(
                     logger,
                     branch="evaluation_batch",
@@ -124,13 +141,46 @@ class Evaluator:
                     level=logging.WARNING,
                     claim=claim_id,
                     error=type(exc).__name__,
+                    counted_as_incorrect=counted,
                 )
                 continue
             claim_ids.extend(single.claim_ids)
             y_true.extend(single.y_true)
             y_pred.extend(single.y_pred)
-            matches.extend(single.matches)
-        return self._aggregate_scores(claim_ids, y_true, y_pred, matches, labels)
+            scored_matches.extend(single.matches)
+            all_matches.extend(single.matches)
+        return self._aggregate_scores(
+            claim_ids,
+            y_true,
+            y_pred,
+            scored_matches,
+            all_matches,
+            labels,
+        )
+
+    def _count_failed_claim(
+        self,
+        claim_id: str,
+        all_matches: list[bool],
+        claim_ids: list[str],
+    ) -> bool:
+        """Count a failed claim as incorrect when ground truth is readable.
+
+        Incomplete pairs stay out of the confusion matrix / F1 vectors, but
+        still enlarge the accuracy denominator so metrics cover all samples.
+
+        :param claim_id: Claim folder under results_dir.
+        :param all_matches: Accumulators of per-sample match flags (accuracy).
+        :param claim_ids: Accumulators of claim identifiers in sample order.
+        :return: True when the claim was counted as an incorrect sample.
+        """
+        try:
+            self._read_ground_truth(claim_id)
+        except Exception:
+            return False
+        claim_ids.append(claim_id)
+        all_matches.append(False)
+        return True
 
     def _discover_claim_ids(self) -> list[str]:
         """List claim folder names under results_dir (A11 discovery).
@@ -162,20 +212,25 @@ class Evaluator:
         claim_ids: list[str],
         y_true: list[str],
         y_pred: list[str],
-        matches: list[bool],
+        scored_matches: list[bool],
+        all_matches: list[bool],
         labels: list[str],
     ) -> EvaluationResult:
         """Build EvaluationResult from collected per-claim vectors via A4/A5 helpers.
 
-        :param claim_ids: Successfully scored claim folder names.
-        :param y_true: Ground-truth decisions in claim order.
-        :param y_pred: Raw predicted decisions in claim order.
-        :param matches: Per-claim A4 match booleans.
+        Accuracy uses ``all_matches`` (every GT-backed sample). Confusion matrix
+        and macro F1 use only fully scored prediction/label pairs.
+
+        :param claim_ids: Claim folder names in sample order (scored + incorrect).
+        :param y_true: Ground-truth decisions for fully scored pairs.
+        :param y_pred: Raw predicted decisions for fully scored pairs.
+        :param scored_matches: A4 match flags aligned with ``y_true`` / ``y_pred``.
+        :param all_matches: Match flags for accuracy (includes failed-as-incorrect).
         :param labels: Config evaluation label vocabulary.
         :return: Aggregate metrics with shared confusion/F1 math.
         """
-        n = len(matches)
-        if n == 0:
+        n_samples = len(all_matches)
+        if n_samples == 0:
             empty_matrix = [[0 for _ in labels] for _ in labels]
             result = EvaluationResult(
                 claim_ids=[],
@@ -191,18 +246,26 @@ class Evaluator:
         else:
             effective = [
                 self._effective_pred_label(pred, true, matched)
-                for pred, true, matched in zip(y_pred, y_true, matches, strict=True)
+                for pred, true, matched in zip(
+                    y_pred, y_true, scored_matches, strict=True
+                )
             ]
             result = EvaluationResult(
                 claim_ids=claim_ids,
                 y_true=y_true,
                 y_pred=y_pred,
-                matches=matches,
-                confusion_matrix=self._confusion_matrix(y_true, effective, labels),
+                matches=all_matches,
+                confusion_matrix=(
+                    self._confusion_matrix(y_true, effective, labels)
+                    if y_true
+                    else [[0 for _ in labels] for _ in labels]
+                ),
                 labels=labels,
-                accuracy=sum(matches) / n,
-                f1_macro=self._macro_f1(y_true, effective, labels),
-                n_evaluated=n,
+                accuracy=sum(all_matches) / n_samples,
+                f1_macro=(
+                    self._macro_f1(y_true, effective, labels) if y_true else 0.0
+                ),
+                n_evaluated=n_samples,
             )
         logger.info(
             "batch evaluated n=%d accuracy=%.4f f1_macro=%.4f",

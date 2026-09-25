@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from compliance.config.settings import AppConfig, load_config
 from evaluation.evaluator import EvaluationResult, Evaluator
+from evaluation.visualization import write_confusion_matrix_png
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class CliArgs(BaseModel):
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Load config, run batch evaluation, and write metrics JSON.
+    """Load config, run batch evaluation, and write metrics JSON + visualization PNG.
 
     :param argv: Optional CLI arguments; defaults to ``sys.argv[1:]``.
     :return: ``0`` on success; ``2`` when the config file is missing.
@@ -39,13 +40,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _configure_logging(config)
     result = Evaluator(config).evaluate()
-    metrics_path = _write_metrics(config, result)
+    metrics_path, matrix_path, viz_path = _write_artifacts(config, result)
     logger.info(
-        "evaluation complete n_evaluated=%d accuracy=%.4f f1_macro=%.4f path=%s",
+        "evaluation complete n_evaluated=%d accuracy=%.4f f1_macro=%.4f "
+        "metrics=%s confusion_matrix=%s visualization=%s",
         result.n_evaluated,
         result.accuracy,
         result.f1_macro,
         metrics_path,
+        matrix_path,
+        viz_path,
     )
     return 0
 
@@ -66,26 +70,62 @@ def _configure_logging(config: AppConfig) -> None:
     logging.basicConfig(level=level, format=config.logging.format)
 
 
-def _write_metrics(config: AppConfig, result: EvaluationResult) -> Path:
-    """Serialize aggregate metrics under results_dir (A13).
+def _labeled_confusion_matrix(result: EvaluationResult) -> dict[str, dict[str, int]]:
+    """Map nested matrix counts onto true×predicted label keys.
 
-    :param config: Application config with results_dir and metrics_artifact.
+    :param result: Aggregate evaluation with ``labels`` and ``confusion_matrix``.
+    :return: ``{true_label: {pred_label: count}}`` in config label order.
+    """
+    labels = result.labels
+    return {
+        true_label: {
+            pred_label: result.confusion_matrix[i][j]
+            for j, pred_label in enumerate(labels)
+        }
+        for i, true_label in enumerate(labels)
+    }
+
+
+def _write_artifacts(
+    config: AppConfig, result: EvaluationResult
+) -> tuple[Path, Path, Path]:
+    """Serialize metrics JSON, labeled matrix JSON, and confusion-matrix PNG.
+
+    :param config: Application config with results_dir and evaluation artifact names.
     :param result: Aggregate EvaluationResult from batch evaluate.
-    :return: Path of the written metrics JSON file.
+    :return: ``(metrics_path, confusion_matrix_path, visualization_path)``.
     """
     results_dir = Path(config.preprocessing.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
-    path = results_dir / config.evaluation.metrics_artifact
-    payload = {
+    labeled = _labeled_confusion_matrix(result)
+    metrics_path = results_dir / config.evaluation.metrics_artifact
+    metrics_payload = {
         "claim_ids": result.claim_ids,
         "labels": result.labels,
         "confusion_matrix": result.confusion_matrix,
+        "confusion_matrix_labeled": labeled,
         "accuracy": result.accuracy,
         "f1_macro": result.f1_macro,
         "n_evaluated": result.n_evaluated,
     }
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    return path
+    metrics_path.write_text(
+        json.dumps(metrics_payload, indent=2) + "\n", encoding="utf-8"
+    )
+    matrix_path = results_dir / config.evaluation.confusion_matrix_artifact
+    matrix_payload = {
+        "labels": result.labels,
+        "rows": "true_label",
+        "cols": "predicted_label",
+        "matrix": result.confusion_matrix,
+        "labeled": labeled,
+    }
+    matrix_path.write_text(
+        json.dumps(matrix_payload, indent=2) + "\n", encoding="utf-8"
+    )
+    viz_path = write_confusion_matrix_png(
+        result, results_dir / config.evaluation.visualization_artifact
+    )
+    return metrics_path, matrix_path, viz_path
 
 
 if __name__ == "__main__":

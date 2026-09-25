@@ -17,6 +17,13 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+dependencies = [
+    "mcp>=2.0.0",
+    "numpy>=2.2.6",
+    "ollama>=0.6.2",
+    "pydantic-ai>=2.49.0",
+    "pyyaml>=6.0.3",
+]
 
 [project.urls]
 Homepage = "https://theresaf.github.io/compliance/"
@@ -42,6 +49,8 @@ build-backend = "hatchling.build"
 packages = ["src/compliance"]
 
 [tool.mypy]
+mypy_path = "src"
+explicit_package_bases = true
 files = ["src"]
 disallow_untyped_defs = true
 disallow_any_unimported = true

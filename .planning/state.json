@@ -26,13 +26,13 @@
     {
       "number": "05",
       "name": "FastAPI Claims API",
-      "status": "in_progress"
+      "status": "pending"
     }
   ],
   "next": {
-    "command": "/gsd:progress --next",
-    "label": "Advance to the next step (plan phase 05)",
-    "reason": "Phase 05 of 5 — needs a plan"
+    "command": "/gsd:discuss-phase 5",
+    "label": "Discuss Phase 05 before planning",
+    "reason": "Phase 04 complete — next is FastAPI Claims API"
   },
-  "updated_at": "2026-09-25T15:40:10.407Z"
+  "updated_at": "2026-09-25T15:40:00.000Z"
 }

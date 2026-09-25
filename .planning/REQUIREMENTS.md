@@ -78,7 +78,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R010 — ClaimPipeline LangGraph over preprocessed artifacts
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: `ClaimPipeline` is a LangGraph `StateGraph` that loads Phase 03 preprocessed claim artifacts and runs coverage → reason/doc routing with Checker steps
 - Why it matters: Orchestrates analysis over structured preprocessed data with explicit conditional branches matching policy coverage types
 - Source: ROADMAP Phase 04; 04-RESEARCH.md
@@ -86,7 +86,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R011 — Coverage classifier on description.txt
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: Coverage classifier maps description.txt to Trip Cancellation or Rescheduling | Personal Effects | Missed Departure or Missed Connection | None (or config other_label), via CaseClassifier + local LLM from config
 - Why it matters: Coverage type gates which reason/document classifiers and policy rules apply
 - Source: ROADMAP Phase 04 classification graph step 1
@@ -94,7 +94,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R012 — Conditional cancellation-reason classifier
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: When coverage is Trip Cancellation or Rescheduling, classify description.txt into Jury duty | Medical emergency | Theft or criminal incident | Other specified personal emergencies | None; skip reason node on other coverage paths
 - Why it matters: Cancellation reasons determine required supporting documentation
 - Source: ROADMAP Phase 04 classification graph step 2
@@ -102,7 +102,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R013 — Path-specific supporting-document classifiers
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: Supporting docs classified by coverage branch — cancellation: medical certificate | police report | jury summon letter | None; Personal Effects: Proof of theft, loss, or damage | None; Missed Departure/Connection: Incident report or delay documentation | Proof of booking | None
 - Why it matters: Document type must match policy requirements for the selected coverage
 - Source: ROADMAP Phase 04 classification graph steps 3–5
@@ -110,7 +110,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R014 — Checker wired as graph node(s)
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: Existing `Checker` (containment / contradicts) wired as LangGraph node(s) after document classification, using `checking` config
 - Why it matters: Validates claim narrative against supporting document text before downstream deny/approve logic
 - Source: ROADMAP Phase 04; existing Checker quick task
@@ -118,7 +118,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R015 — Analysis labels/models/prompts externalized
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: Multi-stage analysis taxonomy (coverage, reason, doc stages), models, and prompts live in `config.yaml` via typed AnalysisConfig; no hardcoded taxonomy or model strings in source
 - Why it matters: CLAUDE.md; taxonomies change without code edits
 - Source: ROADMAP Phase 04; extends R005/R009
@@ -126,7 +126,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R016 — Injectable chat_fn tests; mypy + pytest pass
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: Unit tests inject MagicMock chat_fn (no live Ollama required); mypy and pytest pass for Phase 04 modules
 - Why it matters: Deterministic CI without local LLM; mirrors Phase 02/Checker seams
 - Source: 04-RESEARCH.md; Phase 02 pattern
@@ -136,6 +136,7 @@ This file is the explicit capability and coverage contract for the project.
 
 - R001, R002, R003, R004, R005, R006 — completed in phase 01 plans 01-01 through 01-03
 - R007, R008, R009 — completed in phase 02 plan 02-01
+- R010, R011, R012, R013, R014, R015, R016 — completed in phase 04 plans 04-01 through 04-04
 
 ## Deferred
 
@@ -154,17 +155,17 @@ This file is the explicit capability and coverage contract for the project.
 | R007 | core-capability | validated | 02-01 | none | Classifier ABC + ClassificationResult with labels and probabilities |
 | R008 | core-capability | validated | 02-01 | none | CaseClassifier classifies description text into config-driven coverage labels |
 | R009 | quality-attribute | validated | 02-01 | none | classification section in config.yaml via load_config / ClassificationConfig |
-| R010 | core-capability | active | 04-02 | 04-04 | ClaimPipeline LangGraph loads preprocessed artifacts and routes classifiers |
-| R011 | core-capability | active | 04-02 | none | Coverage classifier on description.txt |
-| R012 | core-capability | active | 04-02 | 04-03 | Conditional cancellation-reason classifier |
-| R013 | core-capability | active | 04-02 | 04-03 | Path-specific supporting-document classifiers |
-| R014 | core-capability | active | 04-02 | none | Checker wired as graph node(s) |
-| R015 | quality-attribute | active | 04-01 | none | analysis section externalized in config.yaml |
-| R016 | quality-attribute | active | 04-01 | 04-02, 04-04 | Injectable chat_fn tests; mypy + pytest pass |
+| R010 | core-capability | validated | 04-02 | 04-04 | ClaimPipeline LangGraph loads preprocessed artifacts and routes classifiers |
+| R011 | core-capability | validated | 04-02 | none | Coverage classifier on description.txt |
+| R012 | core-capability | validated | 04-02 | 04-03 | Conditional cancellation-reason classifier |
+| R013 | core-capability | validated | 04-02 | 04-03 | Path-specific supporting-document classifiers |
+| R014 | core-capability | validated | 04-02 | none | Checker wired as graph node(s) |
+| R015 | quality-attribute | validated | 04-01 | none | analysis section externalized in config.yaml |
+| R016 | quality-attribute | validated | 04-01 | 04-02, 04-04 | Injectable chat_fn tests; mypy + pytest pass |
 
 ## Coverage Summary
 
-- Active requirements: 7 (R010–R016)
+- Active requirements: 0
 - Mapped to slices: 16
-- Validated: 9
+- Validated: 16
 - Unmapped active requirements: 0

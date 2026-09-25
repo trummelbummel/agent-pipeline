@@ -39,7 +39,7 @@
 |-------|-------|--------|-----------|
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
-| 03 | 0/2 | In Progress|  |
+| 03 | 1/2 | In Progress|  |
 
 ### Phase 2: Case Classifier Models
 

@@ -501,3 +501,104 @@ def test_run_batch_soft_fails_one_claim(tmp_path: Path) -> None:
     assert good_path.is_file()
     assert not bad_path.exists()
 
+
+def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
+    """Write a load_config-valid YAML pointing at tmp dirs (includes analysis)."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    preprocessed = tmp_path / "preprocessed"
+    results = tmp_path / "results"
+    cfg_path = tmp_path / "config.yaml"
+    stage = "\n".join(
+        [
+            "    labels: [Trip cancellation or rescheduling]",
+            "    other_label: None",
+            "    model: test-model",
+            "    prompt: classify",
+        ]
+    )
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "preprocessing:",
+                f"  data_dir: {data_dir}",
+                "  document_formats: [webp, jpg, jpeg, png, pdf]",
+                "  confidence_threshold: 0.7",
+                f"  preprocessed_dir: {preprocessed}",
+                f"  results_dir: {results}",
+                "extraction:",
+                "  model: test-model",
+                "  prompt: extract",
+                "classification:",
+                "  labels: [Trip cancellation or rescheduling]",
+                "  other_label: Other",
+                "  model: test-model",
+                "  prompt: classify",
+                "checking:",
+                "  model: test-model",
+                "  containment_prompt: containment",
+                "  contradicts_prompt: contradicts",
+                "analysis:",
+                "  coverage:",
+                stage,
+                "  cancellation_reason:",
+                stage,
+                "  cancellation_document:",
+                stage,
+                "  personal_effects_document:",
+                stage,
+                "  missed_departure_document:",
+                stage,
+                "ocr_retry:",
+                "  enabled: false",
+                "  model: test-vision",
+                "  prompt: ocr",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return cfg_path
+
+
+def test_main_analyze_mode_invokes_claim_pipeline_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R010/R016: --mode analyze loads config and calls ClaimPipeline.run once."""
+    from compliance.workflows.claim_pipeline import ClaimPipeline
+    from main import main
+
+    cfg_path = _minimal_cli_config_yaml(tmp_path)
+    calls: list[object] = []
+
+    def _fake_run(self: ClaimPipeline) -> list[Path]:
+        calls.append(self)
+        return []
+
+    monkeypatch.setattr(ClaimPipeline, "run", _fake_run)
+
+    assert main(["--mode", "analyze", "--config", str(cfg_path)]) == 0
+    assert len(calls) == 1
+
+
+def test_main_default_still_preprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R016: default argv still runs PreprocessingPipeline (preprocess unbroken)."""
+    from compliance.workflows.pipeline import PreprocessingPipeline
+    from main import main
+
+    cfg_path = _minimal_cli_config_yaml(tmp_path)
+    calls: list[str] = []
+
+    def _fake_preprocess(self: PreprocessingPipeline) -> list[Path]:
+        calls.append("preprocess")
+        return []
+
+    monkeypatch.setattr(PreprocessingPipeline, "run", _fake_preprocess)
+
+    assert main(["--config", str(cfg_path)]) == 0
+    assert calls == ["preprocess"]
+

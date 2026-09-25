@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_main_analyze_mode_invokes_claim_pipeline_run -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_main_analyze_mode_invokes_claim_pipeline_run\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_main_analyze_mode_invokes_claim_pipeline_run",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "main(['--mode', 'analyze', '--config', ...]) returns 0 and calls ClaimPipeline.run once",
+  "actual": "SystemExit: 2 — argparse unrecognized arguments: --mode analyze"
+}

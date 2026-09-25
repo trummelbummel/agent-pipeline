@@ -60,6 +60,10 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 03-01-PLAN.md — Tracer: one claim → four preprocessed/ artifacts via Phase 1 ClaimBundle composition + preprocessed_dir config
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 03-02-PLAN.md — Batch all claims with soft-fail + `python -m compliance.workflows` main entrypoint

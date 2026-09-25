@@ -40,13 +40,14 @@ created: "2026-09-25"
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 04-*-* | TBD | 0–2 | R010 | T-04-01 | claim dir name validated before read | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -q` | ❌ W0 | ⬜ pending |
-| 04-*-* | TBD | 1 | R011 | — | N/A | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py::test_coverage_node -q` | ❌ W0 | ⬜ pending |
-| 04-*-* | TBD | 1 | R012 | — | N/A | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py::test_routes_cancellation_to_reason -q` | ❌ W0 | ⬜ pending |
-| 04-*-* | TBD | 1 | R013 | — | N/A | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py::test_routes_personal_effects -q` | ❌ W0 | ⬜ pending |
-| 04-*-* | TBD | 2 | R014 | — | N/A | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py::test_checker_node -q` | ❌ W0 | ⬜ pending |
-| 04-*-* | TBD | 0 | R015 | — | N/A | unit | `uv run pytest tests/test_config/test_settings.py -k analysis -q` | ❌ W0 | ⬜ pending |
-| 04-*-* | TBD | 1 | R016 | T-04-03 | injectable chat_fn; no live Ollama in unit tests | unit | MagicMock chat_fn only | ❌ W0 | ⬜ pending |
+| 04-01-T2 | 04-01 | 0 | R015 | T-04-SC | analysis taxonomy from config only | unit | `uv run pytest tests/test_config/test_settings.py -k analysis -q` | ❌ W0 | ⬜ pending |
+| 04-01-T3 | 04-01 | 0 | R016 | — | Nyquist stubs collect without Ollama | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -q` | ❌ W0 | ⬜ pending |
+| 04-02-T1 | 04-02 | 1 | R010–R014, R016 | T-04-03 | injectable chat_fn; allow-listed labels | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -q` | ❌ W0 | ⬜ pending |
+| 04-02-T2 | 04-02 | 1 | R010 | T-04-01 | claim dir name validated before read/write | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -k unsafe -q` | ❌ W0 | ⬜ pending |
+| 04-03-T1 | 04-03 | 2 | R013 | — | PE/missed routing | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -k "personal_effects or missed" -q` | ❌ W0 | ⬜ pending |
+| 04-03-T2 | 04-03 | 2 | R012 | — | other_label skips reason/doc/checker | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -k other -q` | ❌ W0 | ⬜ pending |
+| 04-04-T1 | 04-04 | 3 | R010 | T-04-07 | soft-fail batch | unit | `uv run pytest tests/test_workflows/test_claim_pipeline.py -k batch -q` | ❌ W0 | ⬜ pending |
+| 04-04-T2 | 04-04 | 3 | R016 | T-04-02 | CLI analyze; no PII in logs | unit | `uv run pytest tests/test_workflows/ -q && uv run mypy src/compliance/workflows/ src/compliance/config/` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

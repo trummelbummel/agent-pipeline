@@ -34,7 +34,7 @@
   - mypy + pytest pass
 
 - [ ] **Phase 04: Claim Analysis Pipeline** `profiles: []`
-  Plans: TBD
+  Plans: 04-01, 04-02, 04-03, 04-04
   Goal: ClaimPipeline LangGraph over preprocessed claims — coverage/reason/document classifiers + Checker, local LLM
   Success criteria:
   - ClaimPipeline is a LangGraph that loads preprocessed claim artifacts and routes through classifiers and Checker steps
@@ -53,7 +53,7 @@
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
 | 03 | 2/2 | Complete   | 2026-09-25 |
-| 04 | 0/0 | Not started | — |
+| 04 | 0/4 | Planned     | — |
 
 ### Phase 2: Case Classifier Models
 
@@ -96,8 +96,22 @@ Classification graph:
 Reuse/extend Phase 02 `Classifier`/`CaseClassifier` and existing `Checker`; wire them as graph nodes over Phase 03 preprocessed artifacts.
 **Requirements**: R010, R011, R012, R013, R014, R015, R016
 **Depends on:** Phase 2 (classifiers), Phase 3 (preprocessed data)
-**Plans:** 0 plans
+**Plans:** 0/4 plans complete
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 4 to break down)
+**Wave 0**
+
+- [ ] 04-01-PLAN.md — Wave 0: human-verify langgraph + AnalysisConfig taxonomy + Nyquist stubs (R015, R016)
+
+**Wave 1** *(blocked on Wave 0)*
+
+- [ ] 04-02-PLAN.md — Tracer: cancellation path load → coverage → reason → cancel-doc → Checker → analysis_result.json (R010–R014, R016)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 04-03-PLAN.md — Expand PE / missed-departure document branches + other_label skip (R012, R013)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 04-04-PLAN.md — Soft-fail batch over preprocessed_dir + `--mode analyze` CLI (R010, R016)

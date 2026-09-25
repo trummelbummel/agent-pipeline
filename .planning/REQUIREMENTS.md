@@ -154,13 +154,13 @@ This file is the explicit capability and coverage contract for the project.
 | R007 | core-capability | validated | 02-01 | none | Classifier ABC + ClassificationResult with labels and probabilities |
 | R008 | core-capability | validated | 02-01 | none | CaseClassifier classifies description text into config-driven coverage labels |
 | R009 | quality-attribute | validated | 02-01 | none | classification section in config.yaml via load_config / ClassificationConfig |
-| R010 | core-capability | active | 04 | none | ClaimPipeline LangGraph loads preprocessed artifacts and routes classifiers |
-| R011 | core-capability | active | 04 | none | Coverage classifier on description.txt |
-| R012 | core-capability | active | 04 | none | Conditional cancellation-reason classifier |
-| R013 | core-capability | active | 04 | none | Path-specific supporting-document classifiers |
-| R014 | core-capability | active | 04 | none | Checker wired as graph node(s) |
-| R015 | quality-attribute | active | 04 | none | analysis section externalized in config.yaml |
-| R016 | quality-attribute | active | 04 | none | Injectable chat_fn tests; mypy + pytest pass |
+| R010 | core-capability | active | 04-02 | 04-04 | ClaimPipeline LangGraph loads preprocessed artifacts and routes classifiers |
+| R011 | core-capability | active | 04-02 | none | Coverage classifier on description.txt |
+| R012 | core-capability | active | 04-02 | 04-03 | Conditional cancellation-reason classifier |
+| R013 | core-capability | active | 04-02 | 04-03 | Path-specific supporting-document classifiers |
+| R014 | core-capability | active | 04-02 | none | Checker wired as graph node(s) |
+| R015 | quality-attribute | active | 04-01 | none | analysis section externalized in config.yaml |
+| R016 | quality-attribute | active | 04-01 | 04-02, 04-04 | Injectable chat_fn tests; mypy + pytest pass |
 
 ## Coverage Summary
 

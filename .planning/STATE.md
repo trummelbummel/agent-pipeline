@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 05
+current_phase: 5
 current_phase_name: FastAPI Claims API
 current_plan: Not started
-status: planning
+status: executing
 stopped_at: Phase 4 complete, ready to plan Phase 05
-last_updated: "2026-09-25T15:40:10.392Z"
+last_updated: "2026-09-25T15:57:29.652Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 4 complete, transitioned to Phase 05
-state_head: 6eb7baa8764388839c92655c3857efbd2dfcda4a
+state_head: ecd23ad5655c92fffa00e42279f2e9189a96317d
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 4
-  total_plans: 10
+  total_plans: 14
   completed_plans: 10
 milestone_name: Claim Preprocessing
 ---
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 05 — FastAPI Claims API
+Phase: 5 (FastAPI Claims API) — READY TO EXECUTE
 Current Plan: Not started
-Total Plans in Phase: 0
-Status: Ready to plan
+Total Plans in Phase: 4
+Status: Ready to execute
 Last activity: 2026-09-25 — Phase 4 complete (verified 9/9), transitioned to Phase 05
 
 Progress: [████████░░] 80% (4/5 phases complete)
@@ -40,6 +40,7 @@ Progress: [████████░░] 80% (4/5 phases complete)
 
 ### Roadmap Evolution
 
+- Phase 6 added: Prediction Evaluation — `src/evaluation` Evaluator compares predictions vs answer.json; confusion matrix, accuracy, F1
 - Phase 5 added: FastAPI Claims API — `src/api` with POST/GET /claims; single-claim + batch pipeline refactor; pipelines as FastAPI resources
 - Phase 2 added: Case Classifier Models — Classifier ABC + CaseClassifier for description.txt → config-driven coverage labels with probabilities (Trip cancellation/rescheduling, Personal Effects, Missed Departure/Connection, Other)
 - Phase 3 added: Preprocessing Pipeline Orchestration — workflows/pipeline.py + main entrypoint writing mirrored preprocessed/ (description.txt, answer.json, supporting_document.json, supporting_documents.md)

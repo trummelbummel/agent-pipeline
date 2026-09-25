@@ -10,7 +10,7 @@ import numpy as np
 
 from compliance.config.settings import AppConfig
 from compliance.models.claim import BookingData, ClaimBundle, DocumentData
-from compliance.preprocessing.pipeline import _process_single_claim
+from compliance.preprocessing.pipeline import _discover_claim_folders, _process_single_claim
 
 logger = logging.getLogger(__name__)
 
@@ -202,8 +202,32 @@ def run_preprocessing_workflow(
 ) -> list[Path]:
     """Discover all claims and write mirrored preprocessed artifacts (batch).
 
+    Per-claim failures are logged and skipped so the full run continues.
+
     :param config: Loaded application configuration.
     :param reader_overrides: Optional injected readers for tests.
     :return: Paths to successfully written claim output directories.
     """
-    return []
+    data_dir = Path(config.preprocessing.data_dir)
+    folders = _discover_claim_folders(data_dir)
+    logger.info("Discovered %d claim folders under %s", len(folders), data_dir)
+
+    output_root = output_root_from_config(config)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    written: list[Path] = []
+    for claim_dir in folders:
+        logger.info("Processing %s", claim_dir.name)
+        try:
+            claim_out = process_claim_to_preprocessed(
+                claim_dir,
+                output_root,
+                config,
+                **reader_overrides,
+            )
+            written.append(claim_out)
+        except Exception as exc:
+            logger.exception("Failed to process %s: %s", claim_dir.name, exc)
+
+    logger.info("Wrote preprocessed artifacts for %d of %d claims", len(written), len(folders))
+    return written

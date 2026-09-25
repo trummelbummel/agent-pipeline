@@ -15,7 +15,7 @@ from compliance.config.settings import (
     ExtractionConfig,
     PreprocessingConfig,
 )
-from compliance.models.claim import BookingData, DocumentData
+from compliance.models.claim import BookingData, DocumentData, GroundTruth
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.workflows import (
@@ -200,23 +200,24 @@ def test_run_preprocessing_workflow_soft_fails_one_claim(tmp_path: Path) -> None
     data_dir = tmp_path / "data"
     output_root = tmp_path / "preprocessed_out"
     _seed_minimal_claim(data_dir / "claim 1")
-    claim2 = data_dir / "claim 2"
-    _seed_minimal_claim(claim2, decision="DENY")
-    (claim2 / "scan.png").write_bytes(b"png")
+    _seed_minimal_claim(data_dir / "claim 2", decision="DENY")
 
-    base_reader = _mock_document_reader()
+    # Phase 1 soft-catches document/description reader errors; raise via answer_reader
+    # so the exception escapes process_claim_to_preprocessed into the batch loop.
+    answer_reader = MagicMock()
 
-    def _read_or_raise(path: Path) -> DocumentData:
+    def _read_answer(path: Path) -> GroundTruth:
         if path.parent.name == "claim 2":
-            raise RuntimeError("simulated document failure")
-        return DocumentData(raw_text="x", confidence=0.9, human_in_the_loop=False)
+            raise RuntimeError("simulated claim failure")
+        return GroundTruth(decision="APPROVE")
 
-    base_reader.read.side_effect = _read_or_raise
+    answer_reader.read.side_effect = _read_answer
 
     written = run_preprocessing_workflow(
         _config(data_dir, preprocessed_dir=output_root),
+        answer_reader=answer_reader,
         description_reader=_mock_description_reader(),
-        document_reader=base_reader,
+        document_reader=_mock_document_reader(),
     )
 
     assert any(p.name == "claim 1" for p in written)

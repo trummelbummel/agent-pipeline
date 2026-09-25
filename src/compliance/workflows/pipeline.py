@@ -166,7 +166,7 @@ def process_claim_to_preprocessed(
 ) -> Path:
     """Project one claim folder into a mirrored preprocessed artifact tree.
 
-    Composes Phase 1 ``_process_single_claim``; does not write ``processed.json``.
+    Composes Phase 1 ``_process_single_claim``; does not rewrite the Phase 1 bundle output path.
 
     :param claim_dir: Source claim folder path.
     :param output_root: Root directory for mirrored claim outputs.

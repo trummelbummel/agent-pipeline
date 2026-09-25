@@ -95,8 +95,8 @@ This file is the explicit capability and coverage contract for the project.
 | R005 | quality-attribute | validated | 01-01 | none | Formats, model, prompt, paths come from config.yaml only |
 | R006 | core-capability | validated | 01-03 | 01-02 | Reader/Preprocessor ABCs + InformationExtractor produce BookingData from description.txt |
 | R007 | core-capability | active | 02-01 | none | Classifier ABC + ClassificationResult with labels and probabilities |
-| R008 | core-capability | active | 02-01 | 02-02 | CaseClassifier classifies description text into config-driven coverage labels |
-| R009 | quality-attribute | active | 02-01 | 02-02 | classification section in config.yaml via load_config / ClassificationConfig |
+| R008 | core-capability | active | 02-01 | none | CaseClassifier classifies description text into config-driven coverage labels |
+| R009 | quality-attribute | active | 02-01 | none | classification section in config.yaml via load_config / ClassificationConfig |
 
 ## Coverage Summary
 

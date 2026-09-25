@@ -108,7 +108,7 @@ Each task was committed atomically:
 3. **Task 2 RED: Main entrypoint tests** - `87fcf5f` (test)
 4. **Task 2 GREEN: main + __main__.py** - `5024263` (feat)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `cbb2140` (docs: complete plan)
 
 _Note: TDD tasks produced RED → GREEN commits; measured `commits: 4` from plan_head_before._
 

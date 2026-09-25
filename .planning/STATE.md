@@ -4,17 +4,17 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: FastAPI Claims API
 current_plan: 4
-status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-09-25T16:43:33.070Z"
+status: verifying
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-09-25T16:51:52.264Z"
 last_activity: 2026-09-25
 last_activity_desc: Completed 05-00 Wave 0 FastAPI foundation
-state_head: 17bd40f5611f409b4d71422cb669d808031910dd
+state_head: babce52e9f997a6c472e71bb719150548ee92b00
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 16
-  completed_plans: 15
+  completed_plans: 16
 milestone_name: Claim Preprocessing
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md
 Phase: 05 — FastAPI Claims API
 Current Plan: 4
 Total Plans in Phase: 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-25 — Completed 05-01 create_app + POST /claims
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
@@ -95,6 +95,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 05]: List response is a bare list[ClaimListItem] array (not a wrapper model)
 - [Phase 05]: Absent optional artifacts serialize as null on ClaimListItem / ClaimDecision.predicted_answer
 - [Phase 05]: Unsafe claim_id tested via percent-encoded %2E%2E so the segment reaches the handler
+- [Phase 05]: CLI --claim-id always runs process_then_analyze (same as GET); mode only applies to batch run(None)
+- [Phase 05]: ClaimPipeline loads from claim_dir when supporting_document artifact present; else preprocessed_root/name
 
 ### Blockers/Concerns
 
@@ -109,8 +111,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:43:33.048Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-09-25T16:51:52.244Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -132,3 +134,4 @@ Resume file: None
 | Phase 05 P00 | 1min | 3 tasks | 8 files |
 | Phase 05 P01 | 5min | 3 tasks | 7 files |
 | Phase 05 P02 | 6min | 3 tasks | 7 files |
+| Phase 05 P03 | 7min | 2 tasks | 7 files |

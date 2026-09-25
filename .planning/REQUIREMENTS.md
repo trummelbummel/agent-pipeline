@@ -158,7 +158,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R020 — Pipelines accept single claim folder and full directory
 - Class: core-capability
-- Status: active
+- Status: validated
 - Description: PreprocessingPipeline / ClaimPipeline / main accept a caller-supplied `Path` that is either one claim folder or a directory of claims (batch). Scope is configured from outside the pipeline (API/CLI/caller); `None` uses config roots (`data_dir` / `preprocessed_dir`). Shared orchestrator for end-to-end single-claim.
 - Why it matters: API GET and CLI must reuse the same process_claim → analyze_claim path without hardcoded roots or internal scope invention
 - Source: ROADMAP Phase 05 locked decisions; user refinement 2026-09-25
@@ -174,7 +174,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ### R022 — mypy + pytest pass for API + pipeline refactor
 - Class: quality-attribute
-- Status: active
+- Status: validated
 - Description: mypy and pytest pass for `src/api`, workflow orchestration changes, and related tests (TestClient + httpx)
 - Why it matters: Phase quality gate; hatch must package `src/api`
 - Source: ROADMAP Phase 05; 05-VALIDATION.md
@@ -269,9 +269,9 @@ This file is the explicit capability and coverage contract for the project.
 | R017 | core-capability | validated | 05-01 | 05-00 | POST /claims multipart writes under config data_dir/{claim_id}/ |
 | R018 | core-capability | validated | 05-02 | none | GET /claims/{id} process_then_analyze → decision JSON |
 | R019 | core-capability | validated | 05-02 | none | GET /claims lists results_dir answers |
-| R020 | core-capability | active | 05-03 | 05-02 | run(source): one claim folder or claims directory from outside |
+| R020 | core-capability | validated | 05-03 | 05-02 | run(source): one claim folder or claims directory from outside |
 | R021 | core-capability | validated | 05-01 | 05-00 | Lifespan DI pipelines via create_app |
-| R022 | quality-attribute | active | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
+| R022 | quality-attribute | validated | 05-03 | 05-00 | mypy + pytest pass for api + workflows |
 | R023 | core-capability | active | 07 | none | Denial-rule Checker steps in ClaimPipeline + analysis_result fields |
 | R024 | core-capability | active | 07 | none | Missing documentation check (claims 1, 2, 21, 25) |
 | R025 | core-capability | active | 07 | none | Healthy-certificate / contradicts-claim check (claims 10, 14, 22) |
@@ -282,7 +282,7 @@ This file is the explicit capability and coverage contract for the project.
 
 ## Coverage Summary
 
-- Active requirements: 11
+- Active requirements: 9
 - Mapped to slices: 29
-- Validated: 18
+- Validated: 20
 - Unmapped active requirements: 0

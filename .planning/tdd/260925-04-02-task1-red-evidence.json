@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_analyze_claim_cancellation_path_writes_analysis_result -q --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_analyze_claim_cancellation_path_writes_analysis_result\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_analyze_claim_cancellation_path_writes_analysis_result",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "ClaimPipeline.analyze_claim writes results_dir/claim/analysis_result.json with coverage/reason/document labels and checker bools via injectable chat_fn",
+  "actual": "Failed: ClaimPipeline not implemented: No module named 'compliance.workflows.claim_pipeline'"
+}

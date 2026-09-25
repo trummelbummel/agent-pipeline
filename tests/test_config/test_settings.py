@@ -18,6 +18,7 @@ preprocessing:
   output_filename: processed.json
   document_formats: [webp, jpg, png]
   confidence_threshold: 0.7
+  preprocessed_dir: preprocessed
 extraction:
   model: test-model
   prompt: |
@@ -75,6 +76,7 @@ preprocessing:
   output_filename: processed.json
   document_formats: [webp]
   confidence_threshold: 0.7
+  preprocessed_dir: preprocessed
 extraction:
   model: test-model
   prompt: extract

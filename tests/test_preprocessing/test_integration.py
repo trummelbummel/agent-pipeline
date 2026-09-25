@@ -151,6 +151,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             output_filename="processed.json",
             document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
             confidence_threshold=0.7,
+            preprocessed_dir="preprocessed",
         ),
         extraction=ExtractionConfig(model="unused", prompt="unused"),
         classification=ClassificationConfig(

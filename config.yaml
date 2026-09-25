@@ -4,6 +4,7 @@
 preprocessing:
   data_dir: data
   output_filename: processed.json
+  preprocessed_dir: preprocessed
   document_formats:
     - webp
     - jpg

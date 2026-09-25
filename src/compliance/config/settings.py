@@ -14,12 +14,14 @@ class PreprocessingConfig(BaseModel):
     :param output_filename: Filename written per claim after processing.
     :param document_formats: File extensions routed through FormatConverter/Docling.
     :param confidence_threshold: Below this OCR confidence, flag human_in_the_loop.
+    :param preprocessed_dir: Workflows output root for the mirrored claim tree.
     """
 
     data_dir: str
     output_filename: str
     document_formats: list[str]
     confidence_threshold: float
+    preprocessed_dir: str
 
 
 class ExtractionConfig(BaseModel):

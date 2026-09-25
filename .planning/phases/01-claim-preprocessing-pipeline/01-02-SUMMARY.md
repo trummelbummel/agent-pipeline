@@ -121,7 +121,7 @@ Each task was committed atomically:
 3. **Task 3: Implement MarkdownReader + MarkdownPreprocessor with key translation** - `f8519bf` (feat)
 4. **Task 4: Write FormatConverter + Answer + Markdown tests** - `8a9f233` (test)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `8c16222` (docs: complete plan)
 
 ## Files Created/Modified
 - `src/compliance/preprocessing/reader.py` — Reader ABC (load → preprocess → to_model)

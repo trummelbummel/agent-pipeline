@@ -39,7 +39,7 @@
 |-------|-------|--------|-----------|
 | 01 | 3/3 | Complete    | 2026-09-25 |
 | 02 | 1/1 | Complete    | 2026-09-25 |
-| 03 | 0/2 | Planned     | — |
+| 03 | 0/2 | In Progress|  |
 
 ### Phase 2: Case Classifier Models
 
@@ -57,12 +57,12 @@ Plans:
 **Goal:** Add `src/compliance/workflows/pipeline.py` that reads all claim files via the Reader, runs Preprocessor steps, and stores results under `preprocessed/` using the same folder structure as `data/claim N/`. Each claim folder emits `description.txt`, `answer.json`, `supporting_document.json`, and `supporting_documents.md` — this is the dataset used downstream. Provide a main entrypoint that runs the full preprocessing pipeline end-to-end.
 **Requirements**: TBD
 **Depends on:** Phase 1
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Tracer: one claim → four preprocessed/ artifacts via Phase 1 ClaimBundle composition + preprocessed_dir config
+- [x] 03-01-PLAN.md — Tracer: one claim → four preprocessed/ artifacts via Phase 1 ClaimBundle composition + preprocessed_dir config
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

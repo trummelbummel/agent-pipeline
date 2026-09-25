@@ -5,16 +5,16 @@ current_phase: 03
 current_phase_name: Preprocessing Pipeline Orchestration
 current_plan: Not started
 status: planning
-stopped_at: Phase 02 complete, ready to plan Phase 03
-last_updated: "2026-09-25T12:07:04.557Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-09-25T12:09:26.035Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 02 complete, transitioned to Phase 03
-state_head: 9daf8dc89d4d38db3a6685dbc7f858b18fb6eda5
+state_head: dc082790a1dc22522ddb26cbd0e2d149d05a685b
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 6
-  completed_plans: 4
+  completed_plans: 5
 milestone_name: Claim Preprocessing
 ---
 
@@ -58,6 +58,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 02]: Mirror InformationExtractor injectable chat_fn for CaseClassifier — Same LLM seam as Phase 1; unit tests without live Ollama
 - [Phase 02]: Other is config other_label in same vocabulary — Not a second identity model; ROADMAP Other fallback
 - [Phase 02]: AppConfig requires classification section — R009 externalization; missing section raises ValidationError
+- [Phase 03]: Extend PreprocessingConfig.preprocessed_dir instead of a separate workflows AppConfig section
+- [Phase 03]: Refuse claim_dir.name with path separators or .. before any mkdir/write (T-03-03)
 
 ### Blockers/Concerns
 
@@ -65,8 +67,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T11:59:52.511Z
-Stopped at: Phase 02 complete, ready to plan Phase 03
+Last session: 2026-09-25T12:09:26.021Z
+Stopped at: Completed 03-01-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -77,3 +79,4 @@ Resume file: None
 | Phase 01 P02 | 3min | 4 tasks | 11 files |
 | Phase 01 P03 | 10min | 5 tasks | 13 files |
 | Phase 02 P01 | 4 min | 3 tasks | 9 files |
+| Phase 03 P01 | 4min | 3 tasks | 9 files |

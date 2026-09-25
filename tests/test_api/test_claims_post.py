@@ -19,11 +19,6 @@ from compliance.config.settings import (
     PreprocessingConfig,
 )
 
-_XFAIL_LATER = pytest.mark.xfail(
-    strict=False,
-    reason="Wave 0 stub — path-safety edges in Task 3 (05-01)",
-)
-
 
 def _analysis_config() -> AnalysisConfig:
     stage = ClassificationConfig(
@@ -171,7 +166,56 @@ def test_post_claims_conflict_when_folder_exists(tmp_path: Path) -> None:
     assert ((data_dir / "claim 1") / "keep.txt").read_text(encoding="utf-8") == "original"
     assert not ((data_dir / "claim 1") / "scan.png").exists()
 
-@_XFAIL_LATER
-def test_post_rejects_path_traversal_image_filename() -> None:
+def test_post_rejects_path_traversal_image_filename(tmp_path: Path) -> None:
     """POST stores only basename for traversal-like filenames (or 422)."""
-    raise NotImplementedError("Wave 0 stub — path-safety edges in Task 3")
+    import os
+
+    create_app = _create_app()
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    config = _config(data_dir)
+    app = create_app(config=config)
+    traversal_name = f"..{os.sep}..{os.sep}outside.png"
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/claims",
+            files=_multipart_files(image_name=traversal_name),
+        )
+
+    # Accept either basename-only write (201) or early rejection (422).
+    assert response.status_code in {201, 422}, response.text
+    if response.status_code == 201:
+        claim_id = response.json()["claim_id"]
+        claim_dir = Path(config.preprocessing.data_dir) / claim_id
+        written = list(claim_dir.iterdir())
+        assert all(path.parent == claim_dir for path in written)
+        assert (claim_dir / "outside.png").is_file()
+        assert not (tmp_path / "outside.png").exists()
+        assert b"png-bytes" == (claim_dir / "outside.png").read_bytes()
+
+
+def test_generated_claim_id_always_safe_single_segment(tmp_path: Path) -> None:
+    """Generated claim_id is a single safe path segment starting with claim."""
+    from compliance.workflows.pipeline import _validate_claim_dir_name
+
+    create_app = _create_app()
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    (data_dir / "claim 7").mkdir()
+    (data_dir / "claim 12").mkdir()
+    config = _config(data_dir)
+    app = create_app(config=config)
+
+    with TestClient(app) as client:
+        response = client.post("/claims", files=_multipart_files())
+
+    assert response.status_code == 201, response.text
+    claim_id = response.json()["claim_id"]
+    assert claim_id.lower().startswith("claim")
+    assert "/" not in claim_id
+    assert "\\" not in claim_id
+    _validate_claim_dir_name(claim_id)
+    claim_dir = Path(config.preprocessing.data_dir) / claim_id
+    assert claim_dir.parent == Path(config.preprocessing.data_dir)
+    assert claim_dir.is_dir()

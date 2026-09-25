@@ -125,6 +125,11 @@ def create_claim(
         raise HTTPException(status_code=409, detail="claim folder already exists") from exc
 
     artifacts = config.preprocessing.artifacts
+    image_path = claim_dir / image_basename
+    claim_root = claim_dir.resolve()
+    if not image_path.resolve().is_relative_to(claim_root):
+        raise HTTPException(status_code=422, detail="unsafe image filename")
+
     _write_claim_upload(
         claim_dir=claim_dir,
         artifacts_description=artifacts.description,

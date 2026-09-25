@@ -125,7 +125,7 @@ status: complete
 4. **Task 2 GREEN: POST /claims intake** - `03ad8e2` (feat)
 5. **Task 3: path-safety prove + harden** - `08f31dd` (feat)
 
-**Plan metadata:** (pending docs commit)
+**Plan metadata:** `f8406d6` (docs: complete plan); `242c669` (docs: R017/R021 + progress)
 
 ## Files Created/Modified
 

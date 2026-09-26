@@ -132,6 +132,9 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     assert stats["n_claims"] == 1
     assert stats["claim_ids"] == ["claim 1"]
     assert stats["decision_counts"]["DENY"] == 1
+    analysis_viz = results_dir / "analysis_stats_visualization.png"
+    assert analysis_viz.is_file()
+    assert analysis_viz.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
 
 
 def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
@@ -157,3 +160,6 @@ def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
     assert stats["n_claims"] == 0
     assert stats["claim_ids"] == []
     assert stats["decision_counts"] == {}
+    analysis_viz = results_dir / "analysis_stats_visualization.png"
+    assert analysis_viz.is_file()
+    assert analysis_viz.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_evaluation/test_analysis_stats.py::test_write_analysis_stats_png_writes_png_magic tests/test_evaluation/test_cli.py::test_cli_writes_metrics_json -x --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_write_analysis_stats_png_writes_png_magic\nnot ok 2 - test_cli_writes_metrics_json\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_write_analysis_stats_png_writes_png_magic",
+  "targetFile": "tests/test_evaluation/test_analysis_stats.py",
+  "expected": "write_analysis_stats_png creates parent dirs and writes a PNG with PNG signature bytes",
+  "actual": "AssertionError: assert False (stub returns path without writing a file)"
+}

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from evaluation.analysis_stats import AnalysisStats
 from evaluation.evaluator import EvaluationResult
 
 _CELL = 88
@@ -22,6 +23,16 @@ def write_confusion_matrix_png(result: EvaluationResult, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = _render_heatmap(result)
     image.save(path, format="PNG")
+    return path
+
+
+def write_analysis_stats_png(stats: AnalysisStats, path: Path) -> Path:
+    """Render a multi-panel bar chart PNG from AnalysisStats (stub for RED).
+
+    :param stats: Aggregated analysis_result statistics.
+    :param path: Destination path under ``results_dir`` for the PNG artifact.
+    :return: The written ``path`` (stub does not create the file yet).
+    """
     return path
 
 

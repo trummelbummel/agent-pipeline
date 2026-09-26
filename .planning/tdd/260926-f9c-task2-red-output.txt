@@ -1,0 +1,24 @@
+...FFFF                                                                  [100%]
+=================================== FAILURES ===================================
+E   AssertionError: assert False
+     +  where False = is_file()
+     +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-231/test_write_analysis_stats_png_0/out/analysis_stats_visualization.png').is_file
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_analysis_stats.py:179: AssertionError: assert False
+E   AssertionError: assert False
+     +  where False = is_file()
+     +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-231/test_write_analysis_stats_png_1/empty_stats.png').is_file
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_analysis_stats.py:188: AssertionError: assert False
+E   AssertionError: assert False
+     +  where False = is_file()
+     +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-231/test_cli_writes_metrics_json0/results/analysis_stats_visualization.png').is_file
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_cli.py:136: AssertionError: assert False
+E   AssertionError: assert False
+     +  where False = is_file()
+     +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-231/test_cli_exit_zero_on_empty_ba0/results/analysis_stats_visualization.png').is_file
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_cli.py:164: AssertionError: assert False
+=========================== short test summary info ============================
+FAILED tests/test_evaluation/test_analysis_stats.py::test_write_analysis_stats_png_writes_png_magic
+FAILED tests/test_evaluation/test_analysis_stats.py::test_write_analysis_stats_png_empty_stats
+FAILED tests/test_evaluation/test_cli.py::test_cli_writes_metrics_json - Asse...
+FAILED tests/test_evaluation/test_cli.py::test_cli_exit_zero_on_empty_batch
+4 failed, 3 passed in 2.02s

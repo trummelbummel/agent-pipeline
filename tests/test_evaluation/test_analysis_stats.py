@@ -13,6 +13,7 @@ from compliance.config.settings import (
     PreprocessingConfig,
 )
 from evaluation.analysis_stats import AnalysisStats, aggregate_analysis_stats
+from evaluation.visualization import write_analysis_stats_png
 
 
 def _analysis_config() -> AnalysisConfig:
@@ -157,3 +158,32 @@ def test_aggregate_empty_results_dir(tmp_path: Path) -> None:
     assert stats.document_label_counts == {}
     assert stats.decision_explanation_counts == {}
     assert isinstance(stats, AnalysisStats)
+
+
+def test_write_analysis_stats_png_writes_png_magic(tmp_path: Path) -> None:
+    stats = AnalysisStats(
+        claim_ids=["claim 1"],
+        n_claims=1,
+        decision_counts={"DENY": 1},
+        checker_true_counts={"checker_contradicts": 1},
+        checker_present_counts={"checker_contradicts": 1},
+        checker_true_rates={"checker_contradicts": 1.0},
+        coverage_label_counts={"Trip cancellation or rescheduling": 1},
+        reason_label_counts={"Medical emergency": 1},
+        document_label_counts={"False": 1},
+        decision_explanation_counts={"checker_contradicts": 1},
+    )
+    path = tmp_path / "out" / "analysis_stats_visualization.png"
+    written = write_analysis_stats_png(stats, path)
+    assert written == path
+    assert path.is_file()
+    assert path.stat().st_size > 0
+    assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_write_analysis_stats_png_empty_stats(tmp_path: Path) -> None:
+    path = tmp_path / "empty_stats.png"
+    written = write_analysis_stats_png(AnalysisStats(), path)
+    assert written == path
+    assert path.is_file()
+    assert path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

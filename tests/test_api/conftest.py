@@ -133,6 +133,8 @@ def api_config_factory(
                 contradicts_prompt="contradicts",
                 identity_prompt="identity",
                 healthy_prompt="healthy",
+                authenticity_prompt="authenticity",
+                incomplete_prompt="incomplete",
             ),
             analysis=analysis or compact_analysis_config,
             evaluation=EvaluationConfig(

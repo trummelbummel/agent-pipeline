@@ -9,9 +9,9 @@ import pytest
 
 from compliance.config.settings import load_config
 from compliance.models.claim import BookingData, ClaimBundle, DocumentData, is_nan_scalar
+from compliance.preprocessing.claim_batch import run_pipeline
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
-from compliance.preprocessing.claim_batch import run_pipeline
 
 DATA_DIR = Path("data/raw")
 
@@ -134,7 +134,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
 
     stage = ClassificationConfig(
         labels=["1"],
-        other_label="None",
+        other_label="False",
         model="unused",
         prompt="unused",
     )
@@ -149,7 +149,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
         extraction=ExtractionConfig(model="unused", prompt="unused"),
         classification=ClassificationConfig(
             labels=["1"],
-            other_label="Other",
+            other_label="False",
             model="unused",
             prompt="unused",
         ),
@@ -159,6 +159,8 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             contradicts_prompt="contradicts",
             identity_prompt="identity",
             healthy_prompt="healthy",
+            authenticity_prompt="authenticity",
+            incomplete_prompt="incomplete",
         ),
         analysis=AnalysisConfig(
             coverage=stage,

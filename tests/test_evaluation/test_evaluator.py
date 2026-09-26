@@ -20,7 +20,7 @@ from evaluation import Evaluator
 def _analysis_config() -> AnalysisConfig:
     stage = ClassificationConfig(
         labels=["1"],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify",
     )
@@ -46,7 +46,7 @@ def _config(data_dir: Path, results_dir: Path) -> AppConfig:
         extraction=ExtractionConfig(model="test-model", prompt="extract"),
         classification=ClassificationConfig(
             labels=["1"],
-            other_label="Other",
+            other_label="False",
             model="test-model",
             prompt="classify",
         ),
@@ -56,6 +56,8 @@ def _config(data_dir: Path, results_dir: Path) -> AppConfig:
             contradicts_prompt="contradicts",
             identity_prompt="identity",
             healthy_prompt="healthy",
+            authenticity_prompt="authenticity",
+            incomplete_prompt="incomplete",
         ),
         analysis=_analysis_config(),
         evaluation=EvaluationConfig(

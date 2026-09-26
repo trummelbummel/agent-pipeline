@@ -31,7 +31,7 @@ MEDICAL_CERTIFICATE = "1"
 def _analysis_config() -> AnalysisConfig:
     coverage = ClassificationConfig(
         labels=["1", "2", "3"],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify coverage",
         label_names={
@@ -42,7 +42,7 @@ def _analysis_config() -> AnalysisConfig:
     )
     cancellation_reason = ClassificationConfig(
         labels=["1", "2", "3", "4"],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify reason",
         label_names={
@@ -54,7 +54,7 @@ def _analysis_config() -> AnalysisConfig:
     )
     cancellation_document = ClassificationConfig(
         labels=["1", "2", "3"],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify cancel doc",
         label_names={
@@ -65,7 +65,7 @@ def _analysis_config() -> AnalysisConfig:
     )
     stage = ClassificationConfig(
         labels=["1"],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify",
         label_names={"1": "Proof of theft, loss, or damage"},
@@ -98,7 +98,7 @@ def _config(tmp_path: Path) -> AppConfig:
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
         classification=ClassificationConfig(
             labels=["1", "2", "3"],
-            other_label="Other",
+            other_label="False",
             model="test-model",
             prompt="classify",
         ),
@@ -108,6 +108,8 @@ def _config(tmp_path: Path) -> AppConfig:
             contradicts_prompt="contradicts",
             identity_prompt="identity",
             healthy_prompt="healthy",
+            authenticity_prompt="authenticity",
+            incomplete_prompt="incomplete",
         ),
         analysis=_analysis_config(),
         evaluation=EvaluationConfig(
@@ -126,19 +128,19 @@ def _cancellation_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": False})

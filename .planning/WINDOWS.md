@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 12
+open_count: 14
 waived_count: 0
 fixed_count: 0
-total_count: 12
-last_updated: 2026-09-26T10:58:24.814Z
+total_count: 14
+last_updated: 2026-09-26T11:01:24.385Z
 ---
 
 # Broken Windows Ledger
@@ -27,6 +27,8 @@ last_updated: 2026-09-26T10:58:24.814Z
 | 10 | 07 | stub | tests/test_config/test_settings.py |  | Wave 0 xfail stub for authenticity_prompt/incomplete_prompt — implemented in 07-01 | open |  | 2026-09-26T10:49:00.655Z |  |
 | 11 | 07 | unrun-verify | tests/test_config/test_settings.py | 196 | Deselected pre-existing other_label False vs None mismatch during 07-01 verify | open |  | 2026-09-26T10:58:24.614Z |  |
 | 12 | 07 | deviation | src/compliance/workflows/claim_pipeline.py |  | Pre-existing mypy errors in claim_pipeline/benford/document left untouched (out of scope) | open |  | 2026-09-26T10:58:24.814Z |  |
+| 13 | 07 | unmet-truth | tests/test_config/test_settings.py | 206 | test_analysis_coverage_other_label_is_false expects False; config.yaml has None (pre-existing) | open |  | 2026-09-26T11:01:24.251Z |  |
+| 14 | 07 | unrun-verify | src/compliance/ |  | mypy src/compliance reports 7 pre-existing errors; 07-01b made no production changes | open |  | 2026-09-26T11:01:24.385Z |  |
 
 ````json
 [
@@ -183,6 +185,32 @@ last_updated: 2026-09-26T10:58:24.814Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-26T10:58:24.814Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 13,
+    "kind": "unmet-truth",
+    "phase": "07",
+    "file": "tests/test_config/test_settings.py",
+    "line": 206,
+    "description": "test_analysis_coverage_other_label_is_false expects False; config.yaml has None (pre-existing)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T11:01:24.251Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 14,
+    "kind": "unrun-verify",
+    "phase": "07",
+    "file": "src/compliance/",
+    "line": null,
+    "description": "mypy src/compliance reports 7 pre-existing errors; 07-01b made no production changes",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T11:01:24.385Z",
     "resolved_at": null,
     "milestone": "v1.0"
   }

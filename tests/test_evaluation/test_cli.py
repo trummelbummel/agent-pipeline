@@ -33,6 +33,8 @@ checking:
   contradicts_prompt: contradicts
   identity_prompt: identity
   healthy_prompt: healthy
+  authenticity_prompt: authenticity
+  incomplete_prompt: incomplete
 analysis:
   coverage:
     labels: ["1"]

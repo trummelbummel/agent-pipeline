@@ -76,10 +76,9 @@ preprocess: ollama-pull-preprocess ## Pull preprocess models, then run preproces
 	@echo "🚀 Running preprocessing (--mode preprocess)"
 	@$(PYTHON) src/main.py --config "$(CONFIG)" --mode preprocess
 
-analyze: preprocess ollama-pull-analyze ## Preprocess, analyze, then evaluate predictions
-	@echo "🚀 Running claim analysis (--mode analyze; preprocess already ran)"
+analyze: ollama-pull-analyze ## Pull analysis models, then run ClaimPipeline over preprocessed/
+	@echo "🚀 Running claim analysis (--mode analyze)"
 	@$(PYTHON) src/main.py --config "$(CONFIG)" --mode analyze
-	@$(MAKE) evaluation
 
 evaluation: ## Score predictions vs answer.json; write metrics, confusion PNG, and analysis stats
 	@echo "🚀 Running prediction evaluation"

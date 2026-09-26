@@ -61,10 +61,8 @@ class ExtractionConfig(BaseModel):
 class ClassificationConfig(BaseModel):
     """LLM case-classification settings for CaseClassifier.
 
-    :param labels: Class codes the classifier may return (includes ``False`` when
-        none of the positive classes apply or the model abstains).
-    :param other_label: Abstain / none-of-the-above label (``False``); kept as a
-        config field for CaseClassifier fallbacks and prompt ``{other_label}``.
+    :param labels: Numeric (or other) class codes the classifier may return.
+    :param other_label: Fallback label when no coverage class fits.
     :param model: LLM model name used for classification.
     :param prompt: System/instruction prompt for classification.
     :param label_names: Map from code → semantic display name for analysis artifacts.
@@ -84,23 +82,7 @@ class ClassificationConfig(BaseModel):
         """
         names = dict(self.label_names)
         names.setdefault(self.other_label, self.other_label)
-        names.setdefault("False", "False")
         return [names.get(code, code) for code in codes]
-
-    def abstention_labels(self) -> set[str]:
-        """Labels that mean no positive class was chosen (``False`` abstention).
-
-        :return: Set containing ``other_label`` and ``False`` when either is used.
-        """
-        labels = {self.other_label, "False"}
-        return labels
-
-    def positive_labels(self) -> list[str]:
-        """Class codes excluding confident-negative ``False``.
-
-        :return: Labels used as real coverage/reason/document types.
-        """
-        return [label for label in self.labels if label != "False"]
 
 
 class CheckingConfig(BaseModel):
@@ -224,24 +206,21 @@ class EvaluationConfig(BaseModel):
 
 
 class OcrRetryConfig(BaseModel):
-    """Vision-model OCR retry and signature verify (preprocess only).
+    """Vision-model OCR retry after weak Docling extraction.
 
-    Retry triggers are independent flags. ``DocumentReader`` retries text once when
-    any enabled trigger matches the Docling ``DocumentMetaData``. When Docling
-    reports ``has_signature=false``, an optional second vision pass asks whether
-    a handwritten/ink signature is present and may set ``has_signature=true``.
-    Analysis never re-runs OCR — it reads preprocessed artifacts only.
+    Retry triggers are independent flags. Preprocessing retries when any enabled
+    trigger matches the Docling ``DocumentMetaData``. Analysis may retry once
+    more when identity returns ``unclear`` and preprocess did not already retry.
 
-    :param enabled: When False, DocumentReader skips vision retry and signature verify.
+    :param enabled: When False, DocumentReader and analysis skip vision retry.
     :param model: Ollama vision model name (config only — never hardcode in source).
     :param prompt: Instruction to transcribe the document image into clean text.
     :param on_faulty_extraction: Retry when ``ExtractionFailure`` flags unusable OCR.
     :param on_low_confidence: Retry when ``extraction_probability`` is below
         ``preprocessing.confidence_threshold``.
     :param on_human_in_the_loop: Retry when ``human_in_the_loop`` is true.
-    :param on_missing_signature: When Docling leaves ``has_signature`` false, run a
-        vision pass with ``signature_prompt`` to confirm or reject a signature.
-    :param signature_prompt: Instruction to answer whether the image shows a signature.
+    :param on_identity_unclear: During analysis, retry when identity returns
+        ``unclear`` and preprocess did not already run a vision retry.
     """
 
     enabled: bool = False
@@ -250,8 +229,7 @@ class OcrRetryConfig(BaseModel):
     on_faulty_extraction: bool = True
     on_low_confidence: bool = True
     on_human_in_the_loop: bool = True
-    on_missing_signature: bool = True
-    signature_prompt: str = ""
+    on_identity_unclear: bool = True
 
 
 class AppConfig(BaseModel):

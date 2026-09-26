@@ -14,8 +14,8 @@ from compliance.llm.checker import Checker
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
 from compliance.models.claim import GroundTruth
 from compliance.preprocessing.claim_batch import _discover_claim_folders
-from compliance.preprocessing.document import vision_ocr_text
 from compliance.workflows.pipeline import _is_claim_folder, _validate_claim_dir_name
+from compliance.workflows.predicted_answer_io import write_analysis_predicted_answer
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,8 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param document_has_signature: True when document_metadata reports has_signature.
     :param signature_check: True when signature requirement passes (or N/A).
     :param healthy_check: True when supporting_document asserts patient is healthy.
+    :param human_in_the_loop: True when OCR metadata already flagged review, or any
+        classifier returned ``False`` (confident none-of-the-above).
     """
 
     claim_id: str
@@ -60,6 +62,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     document_has_signature: bool
     signature_check: bool
     healthy_check: bool
+    human_in_the_loop: bool
 
 
 class ClaimPipeline:
@@ -226,16 +229,17 @@ class ClaimPipeline:
     ]:
         """Route by exact config.analysis.coverage label strings (not ROADMAP Title Case).
 
-        other_label (and unknown labels after CaseClassifier allow-list) go to persist
-        without reason, document classifiers, or Checker.
+        ``other_label`` / ``False`` (and unknown labels after CaseClassifier allow-list)
+        go to persist without reason, document classifiers, or Checker.
         """
         labels = state.get("coverage_labels") or []
         primary = labels[0] if labels else None
         coverage = self._config.analysis.coverage
-        cancellation_label = coverage.labels[0]
-        pe_label = coverage.labels[1]
-        missed_label = coverage.labels[2]
-        other_label = coverage.other_label
+        positive = coverage.positive_labels()
+        cancellation_label = positive[0]
+        pe_label = positive[1]
+        missed_label = positive[2]
+        abstention = coverage.abstention_labels()
         if primary == cancellation_label:
             log_branch_decision(
                 logger,
@@ -266,12 +270,12 @@ class ClaimPipeline:
                 next_step="classify_missed_document",
             )
             return "classify_missed_document"
-        # other_label or unknown → persist-only (T-04-03 / A7)
+        # abstention (None / False) or unknown → persist-only (T-04-03 / A7)
         log_branch_decision(
             logger,
             branch="coverage_route",
             outcome="ROUTE",
-            reason="other_label" if primary == other_label else "unknown_as_other",
+            reason="other_label" if primary in abstention else "unknown_as_other",
             claim=state.get("claim_id"),
             next_step="persist",
         )
@@ -287,6 +291,9 @@ class ClaimPipeline:
         )
         texts = self._loaded_claim_texts(claim_id, input_root=input_root)
         has_signature = self._document_has_signature(claim_id, input_root=input_root)
+        human_in_the_loop = self._document_human_in_the_loop(
+            claim_id, input_root=input_root
+        )
         log_branch_decision(
             logger,
             branch="load_artifacts",
@@ -294,12 +301,14 @@ class ClaimPipeline:
             reason="preprocessed_texts",
             claim=claim_id,
             document_has_signature=has_signature,
+            human_in_the_loop=human_in_the_loop,
         )
         return {
             "description_text": texts["description_text"],
             "supporting_document_text": texts["supporting_document_text"],
             "supporting_documents_text": texts["supporting_documents_text"],
             "document_has_signature": has_signature,
+            "human_in_the_loop": human_in_the_loop,
         }
 
     def _classify_coverage_node(self, state: ClaimAnalysisState) -> dict[str, object]:
@@ -377,17 +386,6 @@ class ClaimPipeline:
             state.get("supporting_documents_text") or "",
             run_identity=run_identity,
         )
-        updates: dict[str, object] = {}
-        if run_identity and results["identity_unclear"]:
-            refreshed = self._identity_after_ocr_retry(state)
-            if refreshed is not None:
-                supporting_text, identity_check, identity_unclear = refreshed
-                results = {
-                    **results,
-                    "identity_check": identity_check,
-                    "identity_unclear": identity_unclear,
-                }
-                updates["supporting_document_text"] = supporting_text
         signature_check = self._signature_check_result(state)
         log_branch_decision(
             logger,
@@ -401,7 +399,6 @@ class ClaimPipeline:
             healthy_check=results["healthy_check"],
         )
         return {
-            **updates,
             "checker_containment": results["checker_containment"],
             "checker_contradicts": results["checker_contradicts"],
             "identity_check": results["identity_check"],
@@ -411,6 +408,9 @@ class ClaimPipeline:
         }
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
+        hitl = self._resolved_human_in_the_loop(state)
+        if hitl and self._classifier_returned_false(state):
+            self._persist_human_in_the_loop_metadata(state)
         path = self._written_analysis_result(state)
         predicted_path = self._written_predicted_answer(state)
         log_branch_decision(
@@ -421,8 +421,9 @@ class ClaimPipeline:
             claim=state.get("claim_id"),
             path=str(path),
             predicted_answer=str(predicted_path),
+            human_in_the_loop=hitl,
         )
-        return {}
+        return {"human_in_the_loop": hitl}
 
     def _loaded_claim_texts(
         self, claim_id: str, *, input_root: Path | None = None
@@ -465,6 +466,70 @@ class ClaimPipeline:
         documents = self._document_metadata_entries(claim_id, input_root=input_root)
         return any(bool(entry.get("has_signature")) for entry in documents)
 
+    def _document_human_in_the_loop(
+        self, claim_id: str, *, input_root: Path | None = None
+    ) -> bool:
+        """Read human_in_the_loop from document_metadata.json (any document True).
+
+        :param claim_id: Validated claim folder segment.
+        :param input_root: Directory holding artifacts; defaults to preprocessed claim.
+        :return: True when any metadata entry already requires human review.
+        """
+        documents = self._document_metadata_entries(claim_id, input_root=input_root)
+        return any(bool(entry.get("human_in_the_loop")) for entry in documents)
+
+    @staticmethod
+    def _classifier_returned_false(state: ClaimAnalysisState) -> bool:
+        """True when any stage classifier selected the confident-negative ``False`` label.
+
+        :param state: Graph state with coverage / reason / document label codes.
+        :return: Whether ``False`` appears in any classifier output.
+        """
+        for key in ("coverage_labels", "reason_labels", "document_labels"):
+            if "False" in (state.get(key) or []):
+                return True
+        return False
+
+    def _resolved_human_in_the_loop(self, state: ClaimAnalysisState) -> bool:
+        """HITL from preprocess metadata or any classifier ``False`` label.
+
+        :param state: Final (or mid-pipeline) graph state.
+        :return: Whether a human should review the claim.
+        """
+        if bool(state.get("human_in_the_loop")):
+            return True
+        return self._classifier_returned_false(state)
+
+    def _persist_human_in_the_loop_metadata(self, state: ClaimAnalysisState) -> None:
+        """Set ``human_in_the_loop: true`` on every document_metadata entry.
+
+        :param state: Graph state with claim_id and optional input_root.
+        """
+        claim_id = state["claim_id"]
+        claim_in = (
+            Path(state["input_root"])
+            if state.get("input_root")
+            else self.preprocessed_root / claim_id
+        )
+        artifacts = self._config.preprocessing.artifacts
+        path = claim_in / artifacts.document_metadata
+        entries = self._document_metadata_entries(claim_id, input_root=claim_in)
+        if not entries:
+            entries = [{"source_file": "", "has_signature": False}]
+        updated = [{**entry, "human_in_the_loop": True} for entry in entries]
+        path.write_text(
+            json.dumps({"documents": updated}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        log_branch_decision(
+            logger,
+            branch="human_in_the_loop",
+            outcome="FLAGGED",
+            reason="classifier_false",
+            claim=claim_id,
+            path=str(path),
+        )
+
     def _document_metadata_entries(
         self, claim_id: str, *, input_root: Path | None = None
     ) -> list[dict[str, object]]:
@@ -484,184 +549,6 @@ class ClaimPipeline:
         if not isinstance(documents, list):
             return []
         return [entry for entry in documents if isinstance(entry, dict)]
-
-    def _claim_input_root(self, state: ClaimAnalysisState) -> Path:
-        """Resolve the preprocessed claim folder for the current state.
-
-        :param state: Graph state with claim_id and optional input_root.
-        :return: Absolute claim folder path.
-        """
-        claim_id = state["claim_id"]
-        if state.get("input_root"):
-            return Path(state["input_root"])
-        return self.preprocessed_root / claim_id
-
-    def _claim_document_image(self, claim_in: Path, source_file: str | None) -> Path | None:
-        """Find a preprocessed document image for vision OCR retry.
-
-        :param claim_in: Preprocessed claim folder.
-        :param source_file: Preferred basename from document_metadata (may be raster).
-        :return: Path to an existing image, or None.
-        """
-        suffixes = (".png", ".jpg", ".jpeg", ".webp")
-        if source_file:
-            stem = Path(source_file).stem
-            for suffix in suffixes:
-                candidate = claim_in / f"{stem}{suffix}"
-                if candidate.is_file():
-                    return candidate
-            direct = claim_in / source_file
-            if direct.is_file() and direct.suffix.lower() in suffixes:
-                return direct
-        for path in sorted(claim_in.iterdir()):
-            if path.is_file() and path.suffix.lower() in suffixes:
-                return path
-        return None
-
-    def _identity_after_ocr_retry(
-        self, state: ClaimAnalysisState
-    ) -> tuple[str, bool, bool] | None:
-        """Vision-OCR once when identity is unclear and preprocess did not retry.
-
-        :param state: Graph state after the first identity check returned unclear.
-        :return: ``(new_supporting_text, identity_check, identity_unclear)`` when a
-            retry ran; otherwise ``None``.
-        """
-        ocr_retry = self._config.ocr_retry
-        if not ocr_retry.enabled or not ocr_retry.on_identity_unclear:
-            return None
-        if not ocr_retry.model or not ocr_retry.prompt.strip():
-            return None
-
-        claim_in = self._claim_input_root(state)
-        entries = self._document_metadata_entries(
-            state["claim_id"], input_root=claim_in
-        )
-        if any(bool(entry.get("retry_used")) for entry in entries):
-            log_branch_decision(
-                logger,
-                branch="ocr_retry",
-                outcome="SKIP",
-                reason="already_retried",
-                claim=state.get("claim_id"),
-            )
-            return None
-
-        source_file = None
-        if entries:
-            raw_source = entries[0].get("source_file")
-            source_file = str(raw_source) if raw_source else None
-        image_path = self._claim_document_image(claim_in, source_file)
-        if image_path is None:
-            log_branch_decision(
-                logger,
-                branch="ocr_retry",
-                outcome="SKIP",
-                reason="no_document_image",
-                claim=state.get("claim_id"),
-            )
-            return None
-
-        chat_fn = self._chat_fn
-        if chat_fn is None:
-            import ollama
-
-            chat_fn = ollama.chat
-
-        log_branch_decision(
-            logger,
-            branch="ocr_retry",
-            outcome="START",
-            reason="identity_unclear",
-            claim=state.get("claim_id"),
-            file=image_path.name,
-            model=ocr_retry.model,
-        )
-        try:
-            retry_text = vision_ocr_text(
-                image_path,
-                model=ocr_retry.model,
-                prompt=ocr_retry.prompt,
-                chat_fn=chat_fn,
-            )
-        except Exception as exc:
-            log_branch_decision(
-                logger,
-                branch="ocr_retry",
-                outcome="ERROR",
-                reason=type(exc).__name__,
-                level=logging.WARNING,
-                claim=state.get("claim_id"),
-                file=image_path.name,
-            )
-            return None
-
-        supporting_text = (
-            f"# Supporting document\n\n## Document: 1\n{retry_text.strip()}\n"
-        )
-        self._persist_ocr_retry_artifacts(
-            claim_in,
-            supporting_text=supporting_text,
-            entries=entries,
-            retry_model=ocr_retry.model,
-        )
-        checking = self._config.checking
-        checker = Checker(
-            model_name=checking.model,
-            containment_prompt=checking.containment_prompt,
-            contradicts_prompt=checking.contradicts_prompt,
-            identity_prompt=checking.identity_prompt,
-            healthy_prompt=checking.healthy_prompt,
-            chat_fn=self._chat_fn,
-        )
-        status = checker.check_identity(
-            state.get("supporting_documents_text") or "",
-            supporting_text,
-        )
-        log_branch_decision(
-            logger,
-            branch="ocr_retry",
-            outcome="SUCCESS",
-            reason="identity_recheck",
-            claim=state.get("claim_id"),
-            identity_status=status,
-        )
-        return supporting_text, status == "match", status == "unclear"
-
-    def _persist_ocr_retry_artifacts(
-        self,
-        claim_in: Path,
-        *,
-        supporting_text: str,
-        entries: list[dict[str, object]],
-        retry_model: str,
-    ) -> None:
-        """Write refreshed OCR text and retry flags under the claim folder.
-
-        :param claim_in: Preprocessed claim folder.
-        :param supporting_text: New supporting_document.md body.
-        :param entries: Existing document_metadata entries (may be empty).
-        :param retry_model: Vision model name used for the retry.
-        """
-        artifacts = self._config.preprocessing.artifacts
-        (claim_in / artifacts.supporting_document).write_text(
-            supporting_text, encoding="utf-8"
-        )
-        if not entries:
-            entries = [{"source_file": "", "has_signature": False}]
-        updated = []
-        for entry in entries:
-            updated.append(
-                {
-                    **entry,
-                    "retry_used": True,
-                    "retry_model": retry_model,
-                }
-            )
-        (claim_in / artifacts.document_metadata).write_text(
-            json.dumps({"documents": updated}, indent=2) + "\n",
-            encoding="utf-8",
-        )
 
     def _signature_required_applies(self, state: ClaimAnalysisState) -> bool:
         """True when a cancellation medical/hospital document requires a signature.
@@ -706,7 +593,7 @@ class ClaimPipeline:
         :param state: Graph state with coverage_labels.
         :return: Whether the cancellation document taxonomy applies.
         """
-        coverage_labels = self._config.analysis.coverage.labels
+        coverage_labels = self._config.analysis.coverage.positive_labels()
         if not coverage_labels:
             return False
         coverage_codes = set(state.get("coverage_labels") or [])
@@ -859,6 +746,8 @@ class ClaimPipeline:
             payload["checker_missing_documentation"] = self._is_missing_documentation(
                 state
             )
+        hitl = self._resolved_human_in_the_loop(state)
+        payload["human_in_the_loop"] = hitl
         decision = self._decision_from_state(state)
         payload["decision"] = decision.decision
         payload["decision_explanation"] = (
@@ -877,7 +766,7 @@ class ClaimPipeline:
         :return: Document ClassificationConfig for semantic name resolution.
         """
         analysis = self._config.analysis
-        coverage_labels = analysis.coverage.labels
+        coverage_labels = analysis.coverage.positive_labels()
         if len(coverage_labels) > 1 and coverage_labels[1] in coverage_codes:
             return analysis.personal_effects_document
         if len(coverage_labels) > 2 and coverage_labels[2] in coverage_codes:
@@ -894,20 +783,22 @@ class ClaimPipeline:
         analysis = self._config.analysis
         required = analysis.required_documents
         coverage_codes = list(state.get("coverage_labels") or [])
-        coverage_labels = analysis.coverage.labels
+        coverage_labels = analysis.coverage.positive_labels()
         stage = self._document_stage_for_coverage(coverage_codes)
+        stage_positive = set(stage.positive_labels())
 
         if len(coverage_labels) > 1 and coverage_labels[1] in coverage_codes:
-            acceptable = list(required.personal_effects) or list(stage.labels)
+            acceptable = list(required.personal_effects) or list(stage_positive)
             return set(acceptable)
         if len(coverage_labels) > 2 and coverage_labels[2] in coverage_codes:
-            acceptable = list(required.missed_departure) or list(stage.labels)
+            acceptable = list(required.missed_departure) or list(stage_positive)
             return set(acceptable)
 
+        reason_abstention = analysis.cancellation_reason.abstention_labels()
         reason_codes = [
             code
             for code in (state.get("reason_labels") or [])
-            if code != analysis.cancellation_reason.other_label
+            if code not in reason_abstention
         ]
         by_reason = required.cancellation_by_reason
         if reason_codes and by_reason:
@@ -918,20 +809,21 @@ class ClaimPipeline:
                 return acceptable
         if by_reason:
             return {code for codes in by_reason.values() for code in codes}
-        return set(stage.labels)
+        return stage_positive
 
     def _classified_document_codes(self, state: ClaimAnalysisState) -> set[str]:
-        """Return non-other document codes from the document classifier stage.
+        """Return non-abstention document codes from the document classifier stage.
 
         :param state: Graph state with document_labels.
-        :return: Classified document codes excluding the stage other_label.
+        :return: Classified document codes excluding ``False`` / ``other_label``.
         """
         coverage_codes = list(state.get("coverage_labels") or [])
         stage = self._document_stage_for_coverage(coverage_codes)
+        abstention = stage.abstention_labels()
         return {
             code
             for code in (state.get("document_labels") or [])
-            if code != stage.other_label
+            if code not in abstention
         }
 
     def _is_missing_documentation(self, state: ClaimAnalysisState) -> bool:
@@ -990,11 +882,11 @@ class ClaimPipeline:
         :return: GroundTruth decision written beside analysis_result.
         """
         coverage = list(state.get("coverage_labels") or [])
-        other = self._config.analysis.coverage.other_label
-        if coverage and set(coverage) <= {other}:
+        abstention = self._config.analysis.coverage.abstention_labels()
+        if coverage and set(coverage) <= abstention:
             return GroundTruth(
                 decision=_DECISION_UNCERTAIN,
-                explanation="coverage_other_label",
+                explanation="coverage_false_label",
             )
         violated = self._violated_checkers(state)
         if violated:
@@ -1029,6 +921,9 @@ class ClaimPipeline:
     def _written_predicted_answer(self, state: ClaimAnalysisState) -> Path:
         """Persist predicted_answer.json for the evaluator from analysis decision.
 
+        Includes ``human_in_the_loop`` from preprocess metadata and/or analysis
+        classifier ``False`` abstention so operators see the flag on the prediction.
+
         :param state: Final ClaimAnalysisState.
         :return: Path to the written predicted_answer.json file.
         """
@@ -1036,19 +931,11 @@ class ClaimPipeline:
         _validate_claim_dir_name(claim_id)
         artifacts = self._config.preprocessing.artifacts
         path = self.results_root / claim_id / artifacts.predicted_answer
-        path.parent.mkdir(parents=True, exist_ok=True)
         decision = self._decision_from_state(state)
-        path.write_text(decision.model_dump_json(indent=2) + "\n", encoding="utf-8")
-        log_branch_decision(
-            logger,
-            branch="predicted_answer",
-            outcome="WROTE",
-            reason="analysis_decision",
-            claim=claim_id,
-            decision=decision.decision,
-            path=str(path),
-        )
-        return path
+        hitl = self._resolved_human_in_the_loop(state)
+        payload = decision.model_dump(mode="json")
+        payload["human_in_the_loop"] = hitl
+        return write_analysis_predicted_answer(path, payload)
 
     def _analysis_result_path(self, claim_id: str) -> Path:
         return (

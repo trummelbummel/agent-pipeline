@@ -32,7 +32,7 @@ Phase: 05 — FastAPI Claims API
 Current Plan: 4
 Total Plans in Phase: 4
 Status: Phase complete — ready for verification
-Last activity: 2026-09-26 - Completed quick task 260926-bwk: Fix the stale prediction issue
+Last activity: 2026-09-26 - Completed quick task 260926-f9c: analysis_result stats + bar charts in evaluation
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -106,6 +106,7 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260926-f9c | In evaluation, also run statistics over analysis_result.json and visualize as bar charts | 2026-09-26 | c0b13ea | [260926-f9c-in-evaluation-also-run-statistics-over-a](./quick/260926-f9c-in-evaluation-also-run-statistics-over-a/) |
 | 260926-bwk | Fix the stale prediction issue: preprocess must not delete analysis-authored predicted_answer | 2026-09-26 | aa87ffb | [260926-bwk-fix-the-stale-prediction-issue-preproces](./quick/260926-bwk-fix-the-stale-prediction-issue-preproces/) |
 | 260925-mqh | after ExtractionFailure a retry with an expensive model should be done | 2026-09-25 | 87de07c | [260925-mqh-after-extractionfailure-a-retry-with-an-](./quick/260925-mqh-after-extractionfailure-a-retry-with-an-/) |
 | 260925-mol | Checker class: modes containment (deterministic normalize+lowercase then LLM) and contradicts (LLM: True if claim contradicts text, False if supported); takes input and checks against a text | 2026-09-25 | 47de8d6 | [260925-mol-checker-class-modes-containment-determin](./quick/260925-mol-checker-class-modes-containment-determin/) |

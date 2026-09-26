@@ -1614,11 +1614,11 @@ def test_departure_within_and_multiple_document_dates_prefer_departure(
     assert "checker_contradicts" not in payload
 
 
-# --- Phase 07 authenticity (R027) — incomplete / suspicious dating xfail until 07-02 ---
+# --- Phase 07 authenticity (R027) / incomplete (R028) / suspicious dating (R029) ---
 
-_XFAIL_07_02 = pytest.mark.xfail(
+_XFAIL_SUSPICIOUS_DATING = pytest.mark.xfail(
     strict=False,
-    reason="Wave 0 stub — incomplete / suspicious dating implemented in 07-02",
+    reason="Wave 0 stub — suspicious dating implemented in 07-02 task 2",
 )
 
 
@@ -1684,7 +1684,6 @@ def test_deny_when_checker_document_not_authentic(tmp_path: Path) -> None:
     assert "checker_document_not_authentic" in payload["decision_explanation"]
 
 
-@_XFAIL_07_02
 def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     """Missing medical fields (discharge/diagnosis/condition) → DENY incomplete.
 
@@ -1741,12 +1740,12 @@ def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
-    assert payload["checker_incomplete_document"] is True
+    assert payload.get("checker_incomplete_document") is True
     assert payload["decision"] == "DENY"
     assert "checker_incomplete_document" in payload["decision_explanation"]
 
 
-@_XFAIL_07_02
+@_XFAIL_SUSPICIOUS_DATING
 def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
     """Implausible issue/stamp dating → UNCERTAIN before DENY (R029).
 

@@ -1,0 +1,36 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/theresa/Desktop/projects/compliance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, anyio-4.15.1, Faker-40.39.0
+collecting ... collected 3 items
+
+tests/test_llm/test_checker.py::test_checker_incomplete_true_when_required_medical_fields_missing FAILED [ 33%]
+tests/test_llm/test_checker.py::test_checker_incomplete_parse_failure_fail_closed_true FAILED [ 66%]
+tests/test_workflows/test_claim_pipeline.py::test_deny_when_checker_incomplete_document FAILED [100%]
+
+=================================== FAILURES ===================================
+______ test_checker_incomplete_true_when_required_medical_fields_missing _______
+tests/test_llm/test_checker.py:352: in test_checker_incomplete_true_when_required_medical_fields_missing
+    result = checker.check(
+src/compliance/llm/checker.py:112: in check
+    raise ValueError(f"Unsupported checker mode: {mode!r}")
+E   ValueError: Unsupported checker mode: 'incomplete'
+____________ test_checker_incomplete_parse_failure_fail_closed_true ____________
+tests/test_llm/test_checker.py:370: in test_checker_incomplete_parse_failure_fail_closed_true
+    result = checker.check(
+src/compliance/llm/checker.py:112: in check
+    raise ValueError(f"Unsupported checker mode: {mode!r}")
+E   ValueError: Unsupported checker mode: 'incomplete'
+__________________ test_deny_when_checker_incomplete_document __________________
+tests/test_workflows/test_claim_pipeline.py:1743: in test_deny_when_checker_incomplete_document
+    assert payload.get("checker_incomplete_document") is True
+E   AssertionError: assert None is True
+E    +  where None = <built-in method get of dict object at 0x16f8ed280>('checker_incomplete_document')
+E    +    where <built-in method get of dict object at 0x16f8ed280> = {'claim_id': 'claim incomplete doc', 'coverage_labels': ['Trip cancellation or rescheduling'], 'coverage_label_codes': ['1'], 'reason_labels': ['Medical emergency'], ...}.get
+=========================== short test summary info ============================
+FAILED tests/test_llm/test_checker.py::test_checker_incomplete_true_when_required_medical_fields_missing
+FAILED tests/test_llm/test_checker.py::test_checker_incomplete_parse_failure_fail_closed_true
+FAILED tests/test_workflows/test_claim_pipeline.py::test_deny_when_checker_incomplete_document
+============================== 3 failed in 5.07s ===============================

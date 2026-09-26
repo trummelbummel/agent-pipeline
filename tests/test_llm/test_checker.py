@@ -289,12 +289,7 @@ def test_checker_unparseable_llm_response_returns_false() -> None:
     chat.assert_called_once()
 
 
-# --- Phase 07 authenticity (R027) — incomplete remains Wave 0 xfail until 07-02 ---
-
-_XFAIL_INCOMPLETE = pytest.mark.xfail(
-    strict=False,
-    reason="Wave 0 stub — incomplete mode implemented in 07-02",
-)
+# --- Phase 07 authenticity (R027) + incomplete (R028) ---
 
 
 def test_checker_not_authentic_true_when_ocr_format_suspect() -> None:
@@ -349,7 +344,6 @@ def test_checker_not_authentic_parse_failure_fail_closed_true() -> None:
     chat.assert_called_once()
 
 
-@_XFAIL_INCOMPLETE
 def test_checker_incomplete_true_when_required_medical_fields_missing() -> None:
     """mode=incomplete: True when discharge/diagnosis/condition fields are absent."""
     chat = _chat_returning({"result": True})
@@ -358,14 +352,16 @@ def test_checker_incomplete_true_when_required_medical_fields_missing() -> None:
     result = checker.check(
         claim="",
         text="# CERTIFICADO MÉDICO\n\nPatient name only. No diagnosis.\n",
-        mode="incomplete",  # type: ignore[arg-type]
+        mode="incomplete",
     )
 
     assert result is True
     chat.assert_called_once()
+    user = chat.call_args.kwargs["messages"][1]["content"]
+    assert "Supporting document" in user
+    assert "No diagnosis" in user
 
 
-@_XFAIL_INCOMPLETE
 def test_checker_incomplete_parse_failure_fail_closed_true() -> None:
     """Deny-on-True mode: missing result key → fail-closed True (unlike containment)."""
     chat = _chat_returning({"other": True})
@@ -374,7 +370,7 @@ def test_checker_incomplete_parse_failure_fail_closed_true() -> None:
     result = checker.check(
         claim="",
         text="some OCR text",
-        mode="incomplete",  # type: ignore[arg-type]
+        mode="incomplete",
     )
 
     assert result is True

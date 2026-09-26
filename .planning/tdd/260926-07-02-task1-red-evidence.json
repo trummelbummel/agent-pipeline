@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_llm/test_checker.py::test_checker_incomplete_true_when_required_medical_fields_missing tests/test_llm/test_checker.py::test_checker_incomplete_parse_failure_fail_closed_true tests/test_workflows/test_claim_pipeline.py::test_deny_when_checker_incomplete_document -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_checker_incomplete_true_when_required_medical_fields_missing\nnot ok 2 - test_checker_incomplete_parse_failure_fail_closed_true\nnot ok 3 - test_deny_when_checker_incomplete_document\n# tests 3\n# pass 0\n# fail 3\n",
+  "targetTest": "test_deny_when_checker_incomplete_document",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "medical incomplete-document LLM check persists checker_incomplete_document True and DENYs",
+  "actual": "AssertionError: assert None is True (checker_incomplete_document not yet wired)"
+}

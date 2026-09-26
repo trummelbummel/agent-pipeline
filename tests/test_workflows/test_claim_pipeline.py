@@ -24,7 +24,8 @@ from compliance.config.settings import (
 TRIP_CANCELLATION = "1"
 PERSONAL_EFFECTS = "2"
 MISSED_DEPARTURE = "3"
-COVERAGE_OTHER = "None"
+COVERAGE_OTHER = "False"
+COVERAGE_FALSE = "False"
 MEDICAL_EMERGENCY = "2"
 MEDICAL_CERTIFICATE = "1"
 PROOF_OF_THEFT = "1"
@@ -47,14 +48,16 @@ def _analysis_config() -> AnalysisConfig:
             "1",
             "2",
             "3",
+            "False",
         ],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify coverage",
         label_names={
             "1": "Trip cancellation or rescheduling",
             "2": "Personal Effects",
             "3": "Missed Departure or Missed Connection",
+            "False": "False",
         },
     )
     cancellation_reason = ClassificationConfig(
@@ -63,8 +66,9 @@ def _analysis_config() -> AnalysisConfig:
             "2",
             "3",
             "4",
+            "False",
         ],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify reason",
         label_names={
@@ -72,11 +76,12 @@ def _analysis_config() -> AnalysisConfig:
             "2": "Medical emergency",
             "3": "Theft or criminal incident",
             "4": "Other specified personal emergencies",
+            "False": "False",
         },
     )
     cancellation_document = ClassificationConfig(
-        labels=["1", "2", "3", "4"],
-        other_label="None",
+        labels=["1", "2", "3", "4", "False"],
+        other_label="False",
         model="test-model",
         prompt="classify cancel doc",
         label_names={
@@ -84,26 +89,32 @@ def _analysis_config() -> AnalysisConfig:
             "2": "police report",
             "3": "jury summon letter",
             "4": "hospital admission",
+            "False": "False",
         },
     )
     personal_effects_document = ClassificationConfig(
-        labels=["1"],
-        other_label="None",
+        labels=["1", "False"],
+        other_label="False",
         model="test-model",
         prompt="classify pe doc",
-        label_names={"1": "Proof of theft, loss, or damage"},
+        label_names={
+            "1": "Proof of theft, loss, or damage",
+            "False": "False",
+        },
     )
     missed_departure_document = ClassificationConfig(
         labels=[
             "1",
             "2",
+            "False",
         ],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify missed doc",
         label_names={
             "1": "Incident report or documentation explaining the cause of delay",
             "2": "Proof of booking",
+            "False": "False",
         },
     )
     return AnalysisConfig(
@@ -155,7 +166,7 @@ def _config(
                 "2",
                 "3",
             ],
-            other_label="Other",
+            other_label="False",
             model="test-model",
             prompt="classify",
         ),
@@ -175,7 +186,6 @@ def _config(
             enabled=False,
             model="llava",
             prompt="ocr",
-            on_identity_unclear=False,
         ),
     )
 
@@ -189,19 +199,19 @@ def _cancellation_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": False})
@@ -294,6 +304,7 @@ def test_analyze_claim_cancellation_path_writes_analysis_result(tmp_path: Path) 
     assert predicted_path.is_file()
     predicted = json.loads(predicted_path.read_text(encoding="utf-8"))
     assert predicted["decision"] == "APPROVE"
+    assert predicted["source"] == "analysis"
     assert chat_fn.call_count >= 1
 
 
@@ -369,19 +380,19 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": False})
@@ -441,19 +452,19 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     containment = _chat_response({"result": False})
@@ -480,105 +491,6 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
     assert payload["identity_unclear"] is True
     assert payload["decision"] == "UNCERTAIN"
     assert payload["decision_explanation"] == "identity_unclear"
-
-
-def test_identity_unclear_ocr_retry_can_recover_match(tmp_path: Path) -> None:
-    """Analysis vision retry when identity is unclear can clear to a name match."""
-    ClaimPipeline = _claim_pipeline_cls()
-    config = _config(tmp_path)
-    config = config.model_copy(
-        update={
-            "ocr_retry": OcrRetryConfig(
-                enabled=True,
-                model="llava",
-                prompt="ocr",
-                on_identity_unclear=True,
-            )
-        }
-    )
-    claim_dir = _seed_preprocessed_claim(config, claim_name="claim identity retry")
-    artifacts = config.preprocessing.artifacts
-    (claim_dir / artifacts.supporting_documents).write_text(
-        "# Supporting documents\n\n## Internal: 1\n**name**: Marcos Junes\n",
-        encoding="utf-8",
-    )
-    (claim_dir / artifacts.supporting_document).write_text(
-        "# Supporting document\n\nconbhe 7\nMarcos tunes\n",
-        encoding="utf-8",
-    )
-    (claim_dir / artifacts.document_metadata).write_text(
-        json.dumps(
-            {
-                "documents": [
-                    {
-                        "source_file": "Spanish_medical_6.jpeg",
-                        "has_signature": True,
-                        "extraction_probability": 0.65,
-                        "faulty_extraction": False,
-                        "human_in_the_loop": True,
-                        "retry_used": False,
-                    }
-                ]
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (claim_dir / "Spanish_medical_6.png").write_bytes(b"png")
-    coverage = _chat_response(
-        {
-            "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
-        }
-    )
-    reason = _chat_response(
-        {
-            "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
-        }
-    )
-    document = _chat_response(
-        {
-            "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
-        }
-    )
-    containment = _chat_response({"result": False})
-    contradicts = _chat_response({"result": False})
-    identity_unclear = _chat_response({"result": "unclear"})
-    healthy = _chat_response({"result": False})
-    vision = SimpleNamespace(
-        message=SimpleNamespace(
-            content="Patient: Marcos Junes\nDiagnostico: gastroenteritis\n"
-        )
-    )
-    identity_match = _chat_response({"result": "match"})
-    chat_fn = MagicMock(
-        side_effect=[
-            coverage,
-            reason,
-            document,
-            containment,
-            contradicts,
-            identity_unclear,
-            healthy,
-            vision,
-            identity_match,
-        ]
-    )
-    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
-
-    result_path = pipeline.analyze_claim(claim_dir)
-    payload = json.loads(result_path.read_text(encoding="utf-8"))
-
-    assert payload["identity_check"] is True
-    assert payload["identity_unclear"] is False
-    assert payload["decision"] == "APPROVE"
-    meta = json.loads((claim_dir / artifacts.document_metadata).read_text(encoding="utf-8"))
-    assert meta["documents"][0]["retry_used"] is True
-    assert "Marcos Junes" in (claim_dir / artifacts.supporting_document).read_text(
-        encoding="utf-8"
-    )
 
 
 def test_identity_skipped_for_non_medical_document(tmp_path: Path) -> None:
@@ -638,19 +550,19 @@ def test_deny_when_signature_check_false_for_medical_certificate(
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [HOSPITAL_ADMISSION],
-            "probabilities": {HOSPITAL_ADMISSION: 0.8, "None": 0.2},
+            "probabilities": {HOSPITAL_ADMISSION: 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": False})
@@ -687,19 +599,19 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     # Description not in supporting doc → containment LLM
@@ -736,19 +648,19 @@ def _contradicts_deny_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": True})
@@ -788,19 +700,19 @@ def _wrong_document_type_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": ["2"],
-            "probabilities": {"2": 0.8, "None": 0.2},
+            "probabilities": {"2": 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": False})
@@ -834,13 +746,13 @@ def _none_document_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
@@ -856,7 +768,7 @@ def _none_document_chat_fn() -> MagicMock:
 
 
 def test_missing_documentation_when_document_is_none(tmp_path: Path) -> None:
-    """Document other_label (None) counts as missing acceptable documentation."""
+    """Document other_label (False) counts as missing acceptable documentation."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim no doc type")
@@ -889,13 +801,13 @@ def _pe_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [PERSONAL_EFFECTS],
-            "probabilities": {PERSONAL_EFFECTS: 0.9, "None": 0.1},
+            "probabilities": {PERSONAL_EFFECTS: 0.9, "False": 0.1},
         }
     )
     document = _chat_response(
         {
             "labels": [PROOF_OF_THEFT],
-            "probabilities": {PROOF_OF_THEFT: 0.85, "None": 0.15},
+            "probabilities": {PROOF_OF_THEFT: 0.85, "False": 0.15},
         }
     )
     contradicts = _chat_response({"result": False})
@@ -908,7 +820,7 @@ def _missed_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [MISSED_DEPARTURE],
-            "probabilities": {MISSED_DEPARTURE: 0.9, "None": 0.1},
+            "probabilities": {MISSED_DEPARTURE: 0.9, "False": 0.1},
         }
     )
     document = _chat_response(
@@ -917,7 +829,7 @@ def _missed_chat_fn() -> MagicMock:
             "probabilities": {
                 INCIDENT_REPORT: 0.7,
                 PROOF_OF_BOOKING: 0.6,
-                "None": 0.1,
+                "False": 0.1,
             },
         }
     )
@@ -999,7 +911,7 @@ def _other_coverage_chat_fn() -> MagicMock:
 
 
 def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:
-    """A7/R012: coverage other_label skips reason, docs, and Checker; still persists."""
+    """A7/R012: coverage False abstention skips reason/docs/Checker; HITL on prediction."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim other")
@@ -1008,6 +920,13 @@ def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:
 
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
+    predicted = json.loads(
+        (
+            Path(config.preprocessing.results_dir)
+            / "claim other"
+            / config.preprocessing.artifacts.predicted_answer
+        ).read_text(encoding="utf-8")
+    )
 
     assert COVERAGE_OTHER in payload["coverage_labels"]
     assert payload["coverage_labels"] == [config.analysis.coverage.other_label]
@@ -1015,7 +934,85 @@ def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:
     assert not payload.get("document_labels")
     assert "checker_containment" not in payload
     assert "checker_contradicts" not in payload
+    assert payload["human_in_the_loop"] is True
+    assert predicted["human_in_the_loop"] is True
+    assert predicted["decision"] == "UNCERTAIN"
     assert chat_fn.call_count == 1
+
+
+def test_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
+    """Coverage False flags human_in_the_loop on analysis_result, metadata, and prediction."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim false")
+    artifacts = config.preprocessing.artifacts
+    coverage = _chat_response(
+        {
+            "labels": [COVERAGE_FALSE],
+            "probabilities": {COVERAGE_FALSE: 0.9},
+        }
+    )
+    chat_fn = MagicMock(side_effect=[coverage])
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    predicted = json.loads(
+        (
+            Path(config.preprocessing.results_dir)
+            / "claim false"
+            / artifacts.predicted_answer
+        ).read_text(encoding="utf-8")
+    )
+
+    assert payload["coverage_label_codes"] == [COVERAGE_FALSE]
+    assert payload["human_in_the_loop"] is True
+    assert payload["decision"] == "UNCERTAIN"
+    assert predicted["human_in_the_loop"] is True
+    meta = json.loads((claim_dir / artifacts.document_metadata).read_text(encoding="utf-8"))
+    assert meta["documents"][0]["human_in_the_loop"] is True
+    assert chat_fn.call_count == 1
+
+
+def test_document_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
+    """Document-stage False also raises human_in_the_loop for review."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim doc false")
+    artifacts = config.preprocessing.artifacts
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [COVERAGE_FALSE],
+            "probabilities": {COVERAGE_FALSE: 0.8, "False": 0.2},
+        }
+    )
+    containment = _chat_response({"result": False})
+    contradicts = _chat_response({"result": False})
+    healthy = _chat_response({"result": False})
+    chat_fn = MagicMock(
+        side_effect=[coverage, reason, document, containment, contradicts, healthy]
+    )
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert COVERAGE_FALSE in payload["document_label_codes"]
+    assert payload["human_in_the_loop"] is True
+    meta = json.loads((claim_dir / artifacts.document_metadata).read_text(encoding="utf-8"))
+    assert meta["documents"][0]["human_in_the_loop"] is True
 
 
 def test_refuses_unsafe_claim_dir_name(tmp_path: Path) -> None:
@@ -1057,19 +1054,19 @@ def _repeating_cancellation_chat_fn() -> MagicMock:
     coverage = _chat_response(
         {
             "labels": [TRIP_CANCELLATION],
-            "probabilities": {TRIP_CANCELLATION: 0.9, "None": 0.1},
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
         }
     )
     reason = _chat_response(
         {
             "labels": [MEDICAL_EMERGENCY],
-            "probabilities": {MEDICAL_EMERGENCY: 0.85, "None": 0.15},
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
         }
     )
     document = _chat_response(
         {
             "labels": [MEDICAL_CERTIFICATE],
-            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "None": 0.2},
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
     contradicts = _chat_response({"result": False})
@@ -1136,7 +1133,7 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
     stage = "\n".join(
         [
             "    labels: [\"1\"]",
-            "    other_label: None",
+            "    other_label: \"False\"",
             "    model: test-model",
             "    prompt: classify",
         ]
@@ -1155,7 +1152,7 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
                 "  prompt: extract",
                 "classification:",
                 "  labels: [\"1\"]",
-                "  other_label: Other",
+                "  other_label: \"False\"",
                 "  model: test-model",
                 "  prompt: classify",
                 "checking:",
@@ -1209,6 +1206,35 @@ def test_main_analyze_mode_invokes_claim_pipeline_run(
 
     assert main(["--mode", "analyze", "--config", str(cfg_path)]) == 0
     assert len(calls) == 1
+
+
+def test_main_both_mode_runs_preprocess_then_analyze(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--mode both runs PreprocessingPipeline then ClaimPipeline."""
+    from compliance.workflows.claim_pipeline import ClaimPipeline
+    from compliance.workflows.pipeline import PreprocessingPipeline
+    from main import main
+
+    cfg_path = _minimal_cli_config_yaml(tmp_path)
+    calls: list[str] = []
+
+    def _fake_preprocess(
+        self: PreprocessingPipeline, source: Path | None = None
+    ) -> list[Path]:
+        calls.append("preprocess")
+        return []
+
+    def _fake_analyze(self: ClaimPipeline, source: Path | None = None) -> list[Path]:
+        calls.append("analyze")
+        return []
+
+    monkeypatch.setattr(PreprocessingPipeline, "run", _fake_preprocess)
+    monkeypatch.setattr(ClaimPipeline, "run", _fake_analyze)
+
+    assert main(["--mode", "both", "--config", str(cfg_path)]) == 0
+    assert calls == ["preprocess", "analyze"]
 
 
 def test_main_default_still_preprocess(

@@ -1159,13 +1159,27 @@ class ClaimPipeline:
         """
         claim_id = state["claim_id"]
         _validate_claim_dir_name(claim_id)
-        artifacts = self._config.preprocessing.artifacts
-        path = self.results_root / claim_id / artifacts.predicted_answer
-        decision = self._decision_from_state(state)
-        hitl = self._resolved_human_in_the_loop(state)
-        payload = decision.model_dump(mode="json")
-        payload["human_in_the_loop"] = hitl
-        return write_analysis_predicted_answer(path, payload)
+        path = self._predicted_answer_path(claim_id)
+        return write_analysis_predicted_answer(
+            path, self._predicted_answer_decision(state)
+        )
+
+    def _predicted_answer_decision(self, state: ClaimAnalysisState) -> GroundTruth:
+        """Build evaluator GroundTruth from analysis decision + resolved HITL.
+
+        :param state: Final ClaimAnalysisState after checker (or coverage-only).
+        :return: Decision with ``human_in_the_loop`` set (``source`` stamped on write).
+        """
+        return self._decision_from_state(state).model_copy(
+            update={"human_in_the_loop": self._resolved_human_in_the_loop(state)}
+        )
+
+    def _predicted_answer_path(self, claim_id: str) -> Path:
+        return (
+            self.results_root
+            / claim_id
+            / self._config.preprocessing.artifacts.predicted_answer
+        )
 
     def _claim_input_root(self, state: ClaimAnalysisState) -> Path:
         """Resolve the artifact directory for ``state`` (input_root or preprocessed).

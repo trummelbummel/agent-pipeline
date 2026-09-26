@@ -92,6 +92,21 @@ checking:
     (no illness supporting a medical cancellation claim),
     {"result": false} if the document describes illness, injury, hospitalization,
     incapacity, or does not assert that the patient is healthy.
+  authenticity_prompt: |
+    Decide whether the supporting document OCR looks inauthentic, fabricated, or
+    the wrong document format for a medical certificate / hospital admission
+    (e.g. plain photo of a person instead of a certificate, text-only paste with
+    no letterhead/stamp structure, obvious tamper or garbled forgery cues).
+    Return JSON only: {"result": true} if the document is not authentic or wrong
+    format (violation), {"result": false} if it appears to be a genuine medical
+    or hospital document of the expected type.
+  incomplete_prompt: |
+    Decide whether a medical supporting document is missing required clinical
+    fields such as diagnosis, condition/illness description, or discharge /
+    issue date needed to support a medical cancellation claim.
+    Return JSON only: {"result": true} if required fields are missing (violation),
+    {"result": false} if diagnosis/condition and dating fields are adequately
+    present.
   # Inclusive day window: |departure − reference today| ≤ n → UNCERTAIN.
   departure_uncertain_within_days: 14
 
@@ -261,11 +276,16 @@ ocr_retry:
   # faulty ExtractionFailure, low extraction_probability, or human_in_the_loop.
   # Analysis may retry once more when identity returns unclear and preprocess
   # did not already retry (on_identity_unclear).
+  # Signature fallback: Ultralytics YOLO (not Ollama) when Docling misses ink.
   enabled: true
   on_faulty_extraction: true
   on_low_confidence: true
   on_human_in_the_loop: true
   on_identity_unclear: true
+  on_missing_signature: true
+  signature_model: tech4humans/yolov8s-signature-detector
+  signature_weights: yolov8s.pt
+  signature_confidence: 0.25
   model: Maternion/LightOnOCR-2:1b
   prompt: |
     Transcribe all readable text from this document image into clean markdown

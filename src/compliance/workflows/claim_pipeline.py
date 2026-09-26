@@ -75,6 +75,8 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param document_has_signature: True when document_metadata reports has_signature.
     :param signature_check: True when signature requirement passes (or N/A).
     :param healthy_check: True when supporting_document asserts patient is healthy.
+    :param checker_document_not_authentic: True when OCR/format authenticity check
+        fails (medical/hospital docs only).
     :param departure_within_days: True when departure is within the configured
         day window of reference today (deterministic UNCERTAIN).
     :param multiple_document_dates: True when OCR supporting_document text has
@@ -98,6 +100,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     document_has_signature: bool
     signature_check: bool
     healthy_check: bool
+    checker_document_not_authentic: bool
     departure_within_days: bool
     multiple_document_dates: bool
     human_in_the_loop: bool
@@ -559,11 +562,13 @@ class ClaimPipeline:
 
     def _run_checker_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         run_identity = self._identity_required_applies(state)
+        run_authenticity = self._authenticity_required_applies(state)
         results = self._checker_results(
             state["description_text"],
             state["supporting_document_text"],
             state.get("supporting_documents_text") or "",
             run_identity=run_identity,
+            run_authenticity=run_authenticity,
         )
         signature_check = self._signature_check_result(state)
         early_uncertain = bool(results.get("departure_within_days")) or bool(
@@ -584,6 +589,9 @@ class ClaimPipeline:
             identity_unclear=results.get("identity_unclear"),
             signature_check=signature_check,
             healthy_check=results.get("healthy_check"),
+            checker_document_not_authentic=results.get(
+                "checker_document_not_authentic"
+            ),
             departure_within_days=results.get("departure_within_days"),
             multiple_document_dates=results.get("multiple_document_dates"),
         )
@@ -598,6 +606,10 @@ class ClaimPipeline:
             payload["identity_check"] = results["identity_check"]
             payload["identity_unclear"] = results["identity_unclear"]
             payload["healthy_check"] = results["healthy_check"]
+            if "checker_document_not_authentic" in results:
+                payload["checker_document_not_authentic"] = results[
+                    "checker_document_not_authentic"
+                ]
         return payload
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
@@ -776,6 +788,24 @@ class ClaimPipeline:
             return False
         return bool(self._classified_document_codes(state) & required)
 
+    def _authenticity_required_applies(self, state: ClaimAnalysisState) -> bool:
+        """True when medical/hospital document codes require authenticity check.
+
+        Uses ``signature_required_codes`` (same medical/hospital set as identity)
+        on the cancellation coverage path only — PE/missed paths skip.
+
+        :param state: Graph state with coverage and document_labels.
+        :return: Whether authenticity LLM mode should run.
+        """
+        if not self._is_cancellation_coverage(state):
+            return False
+        required = set(
+            self._config.analysis.required_documents.signature_required_codes
+        )
+        if not required:
+            return False
+        return bool(self._classified_document_codes(state) & required)
+
     def _is_cancellation_coverage(self, state: ClaimAnalysisState) -> bool:
         """True when coverage primary label is trip cancellation / rescheduling.
 
@@ -838,6 +868,7 @@ class ClaimPipeline:
         supporting_documents_text: str,
         *,
         run_identity: bool,
+        run_authenticity: bool,
     ) -> dict[str, bool]:
         """Run deterministic date checks, then Checker LLM modes when needed.
 
@@ -850,10 +881,14 @@ class ClaimPipeline:
         ``supporting_document.md`` (Docling OCR). Skipped when the classified
         document is not medical certificate / hospital admission.
 
+        Authenticity runs only when ``run_authenticity`` is True (medical/hospital
+        codes on cancellation coverage).
+
         :param description_text: Claim narrative for containment / contradicts.
         :param supporting_document_text: Medical/supporting OCR markdown.
         :param supporting_documents_text: Booking/internal markdown with ``name``.
         :param run_identity: When False, identity passes without an LLM call.
+        :param run_authenticity: When False, authenticity key is omitted.
         :return: Dict with date flags and optionally checker LLM results.
         """
         checking = self._config.checking
@@ -878,6 +913,8 @@ class ClaimPipeline:
             contradicts_prompt=checking.contradicts_prompt,
             identity_prompt=checking.identity_prompt,
             healthy_prompt=checking.healthy_prompt,
+            authenticity_prompt=checking.authenticity_prompt,
+            incomplete_prompt=checking.incomplete_prompt,
             chat_fn=self._chat_fn,
         )
         containment = checker.check(
@@ -900,7 +937,7 @@ class ClaimPipeline:
             supporting_document_text,
             mode="healthy",
         )
-        return {
+        results: dict[str, bool] = {
             **date_flags,
             "checker_containment": containment,
             "checker_contradicts": contradicts,
@@ -908,6 +945,13 @@ class ClaimPipeline:
             "identity_unclear": identity_unclear,
             "healthy_check": healthy,
         }
+        if run_authenticity:
+            results["checker_document_not_authentic"] = checker.check(
+                description_text,
+                supporting_document_text,
+                mode="not_authentic",
+            )
+        return results
 
     def _analysis_result_payload(self, state: ClaimAnalysisState) -> dict[str, object]:
         """Build the structured analysis_result.json body from graph state.
@@ -950,6 +994,10 @@ class ClaimPipeline:
             payload["signature_check"] = bool(state["signature_check"])
         if "healthy_check" in state:
             payload["healthy_check"] = bool(state["healthy_check"])
+        if "checker_document_not_authentic" in state:
+            payload["checker_document_not_authentic"] = bool(
+                state["checker_document_not_authentic"]
+            )
         if "departure_within_days" in state:
             payload["departure_within_days"] = bool(state["departure_within_days"])
         if "multiple_document_dates" in state:
@@ -1061,6 +1109,8 @@ class ClaimPipeline:
         lacks ``has_signature`` in ``document_metadata.json`` → DENY.
         ``healthy_check`` True means ``supporting_document.md`` asserts the patient
         is healthy / fit → DENY.
+        ``checker_document_not_authentic`` True means OCR/format authenticity
+        failed on a medical/hospital document → DENY.
 
         :param state: Final graph state after Checker (or coverage-only).
         :return: Ordered list of violated keys that drive DENY.
@@ -1078,6 +1128,11 @@ class ClaimPipeline:
             violated.append("signature_check")
         if "healthy_check" in state and bool(state["healthy_check"]):
             violated.append("healthy_check")
+        if (
+            "checker_document_not_authentic" in state
+            and bool(state["checker_document_not_authentic"])
+        ):
+            violated.append("checker_document_not_authentic")
         if "checker_contradicts" in state and bool(state["checker_contradicts"]):
             violated.append("checker_contradicts")
         return violated

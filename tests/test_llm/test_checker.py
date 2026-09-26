@@ -23,6 +23,8 @@ def _make_checker(chat: MagicMock) -> Checker:
         contradicts_prompt="check whether claim contradicts text",
         identity_prompt="check whether claimant name matches document",
         healthy_prompt="check whether document says patient is healthy",
+        authenticity_prompt="check authenticity of supporting document",
+        incomplete_prompt="check whether medical fields are incomplete",
         chat_fn=chat,
     )
 

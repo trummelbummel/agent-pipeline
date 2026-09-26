@@ -108,6 +108,10 @@ class CheckingConfig(BaseModel):
     :param contradicts_prompt: System prompt for contradiction checks.
     :param identity_prompt: System prompt for claimant-name vs document-name checks.
     :param healthy_prompt: System prompt for healthy / fit certificate detection.
+    :param authenticity_prompt: System prompt for document authenticity / format
+        checks (True = not authentic / wrong format → violation).
+    :param incomplete_prompt: System prompt for incomplete medical-document field
+        checks (True = required fields missing → violation); wired in a later plan.
     :param departure_uncertain_within_days: Inclusive absolute day window; when
         departure is within this many days of reference today, analysis yields
         UNCERTAIN (``departure_within_days``) without running LLM checkers.
@@ -118,6 +122,8 @@ class CheckingConfig(BaseModel):
     contradicts_prompt: str
     identity_prompt: str
     healthy_prompt: str
+    authenticity_prompt: str
+    incomplete_prompt: str
     departure_uncertain_within_days: int = 14
 
 
@@ -225,14 +231,16 @@ class EvaluationConfig(BaseModel):
 
 
 class OcrRetryConfig(BaseModel):
-    """Vision-model OCR retry after weak Docling extraction.
+    """Vision-model OCR retry and YOLO signature verify (preprocess only).
 
-    Retry triggers are independent flags. Preprocessing retries when any enabled
-    trigger matches the Docling ``DocumentMetaData``. Analysis may retry once
-    more when identity returns ``unclear`` and preprocess did not already retry.
+    Retry triggers are independent flags. ``DocumentReader`` retries text once when
+    any enabled trigger matches the Docling ``DocumentMetaData``. When Docling
+    reports ``has_signature=false``, an optional Ultralytics YOLO pass may set
+    ``has_signature=true``. Analysis never re-runs OCR — it reads preprocessed
+    artifacts only.
 
-    :param enabled: When False, DocumentReader and analysis skip vision retry.
-    :param model: Ollama vision model name (config only — never hardcode in source).
+    :param enabled: When False, DocumentReader skips vision retry and signature verify.
+    :param model: Ollama vision model name for text OCR retry (config only).
     :param prompt: Instruction to transcribe the document image into clean text.
     :param on_faulty_extraction: Retry when ``ExtractionFailure`` flags unusable OCR.
     :param on_low_confidence: Retry when ``extraction_probability`` is below
@@ -240,6 +248,11 @@ class OcrRetryConfig(BaseModel):
     :param on_human_in_the_loop: Retry when ``human_in_the_loop`` is true.
     :param on_identity_unclear: During analysis, retry when identity returns
         ``unclear`` and preprocess did not already run a vision retry.
+    :param on_missing_signature: When Docling leaves ``has_signature`` false, run
+        YOLO signature detection on the document image.
+    :param signature_model: HuggingFace repo id or local ``.pt`` path for YOLO weights.
+    :param signature_weights: Filename inside the HF repo (ignored for local ``.pt``).
+    :param signature_confidence: Minimum box confidence to treat as a signature.
     """
 
     enabled: bool = False
@@ -249,6 +262,10 @@ class OcrRetryConfig(BaseModel):
     on_low_confidence: bool = True
     on_human_in_the_loop: bool = True
     on_identity_unclear: bool = True
+    on_missing_signature: bool = True
+    signature_model: str = "tech4humans/yolov8s-signature-detector"
+    signature_weights: str = "yolov8s.pt"
+    signature_confidence: float = 0.25
 
 
 class AppConfig(BaseModel):

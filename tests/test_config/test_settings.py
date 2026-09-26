@@ -25,6 +25,10 @@ checking:
     check identity
   healthy_prompt: |
     check healthy
+  authenticity_prompt: |
+    check authenticity
+  incomplete_prompt: |
+    check incomplete
 """
 
 _MINIMAL_ANALYSIS_YAML = """
@@ -92,6 +96,10 @@ checking:
     check identity
   healthy_prompt: |
     check healthy
+  authenticity_prompt: |
+    check authenticity
+  incomplete_prompt: |
+    check incomplete
 """
         + _MINIMAL_ANALYSIS_YAML
         + _MINIMAL_EVALUATION_YAML,
@@ -229,7 +237,9 @@ def test_load_config_reads_ocr_retry_section() -> None:
     assert config.ocr_retry.on_low_confidence is True
     assert config.ocr_retry.on_human_in_the_loop is True
     assert config.ocr_retry.on_missing_signature is True
-    assert config.ocr_retry.signature_prompt.strip()
+    assert config.ocr_retry.signature_model
+    assert config.ocr_retry.signature_weights
+    assert config.ocr_retry.signature_confidence > 0
 
 
 def test_load_config_reads_classification_labels_and_other() -> None:

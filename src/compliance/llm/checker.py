@@ -12,8 +12,18 @@ from compliance.llm.chat import ChatFn, parse_llm_json_object, response_content
 
 logger = logging.getLogger(__name__)
 
-CheckerMode = Literal["containment", "contradicts", "identity", "healthy"]
+CheckerMode = Literal[
+    "containment",
+    "contradicts",
+    "identity",
+    "healthy",
+    "not_authentic",
+    "incomplete",
+]
 IdentityStatus = Literal["match", "mismatch", "unclear"]
+
+# Deny-on-True modes: parse / validation failure → True (violation / fail-closed).
+_DENY_ON_TRUE_MODES: frozenset[CheckerMode] = frozenset({"not_authentic", "incomplete"})
 
 _BOOKING_NAME_FIELD = re.compile(
     r"(?im)^\s*(?:\*\*)?name(?:\*\*)?\s*:\s*(.+?)\s*$"
@@ -29,7 +39,7 @@ class BooleanCheckResult(BaseModel):
 
 
 class Checker:
-    """Claim-vs-text checker: containment, contradicts, identity, healthy."""
+    """Claim-vs-text checker: containment, contradicts, identity, healthy, authenticity."""
 
     def __init__(
         self,
@@ -38,6 +48,8 @@ class Checker:
         contradicts_prompt: str,
         identity_prompt: str,
         healthy_prompt: str,
+        authenticity_prompt: str,
+        incomplete_prompt: str,
         chat_fn: ChatFn | None = None,
     ) -> None:
         """Bind model, prompts, and optional chat seam.
@@ -47,6 +59,10 @@ class Checker:
         :param contradicts_prompt: System prompt for contradicts mode.
         :param identity_prompt: System prompt for booking vs document name checks.
         :param healthy_prompt: System prompt for healthy-certificate detection.
+        :param authenticity_prompt: System prompt for document authenticity / format
+            (True = not authentic → violation).
+        :param incomplete_prompt: System prompt for incomplete medical fields
+            (stored for a later mode; not dispatched yet).
         :param chat_fn: Optional chat callable for tests; defaults to ollama.chat.
         """
         self.model_name = model_name
@@ -54,6 +70,8 @@ class Checker:
         self.contradicts_prompt = contradicts_prompt
         self.identity_prompt = identity_prompt
         self.healthy_prompt = healthy_prompt
+        self.authenticity_prompt = authenticity_prompt
+        self.incomplete_prompt = incomplete_prompt
         self._chat: ChatFn = chat_fn or ollama.chat
 
     def check(
@@ -64,12 +82,15 @@ class Checker:
     ) -> bool:
         """Check claim against text for the selected mode.
 
-        :param claim: Claim / booking text (unused for ``healthy`` mode).
-        :param text: Supporting document OCR text (primary input for ``healthy``).
-        :param mode: ``containment``, ``contradicts``, ``identity``, or ``healthy``.
+        :param claim: Claim / booking text (unused for OCR-focused modes).
+        :param text: Supporting document OCR text (primary input for healthy /
+            not_authentic).
+        :param mode: ``containment``, ``contradicts``, ``identity``, ``healthy``,
+            or ``not_authentic``.
         :return: True when the mode condition holds; for ``identity``, True only on
             ``match`` (``mismatch`` / ``unclear`` → False). Prefer ``check_identity``
-            when the three-way outcome matters.
+            when the three-way outcome matters. For ``not_authentic``, True means
+            authenticity violation (fail-closed on parse errors).
         :raises ValueError: When ``mode`` is not a supported checker mode.
         """
         if mode == "containment":
@@ -83,6 +104,10 @@ class Checker:
         if mode == "healthy":
             return self._llm_boolean_result(
                 self.healthy_prompt, claim, text, mode=mode
+            )
+        if mode == "not_authentic":
+            return self._llm_boolean_result(
+                self.authenticity_prompt, claim, text, mode=mode
             )
         raise ValueError(f"Unsupported checker mode: {mode!r}")
 
@@ -128,7 +153,7 @@ class Checker:
             messages=self._check_messages(prompt, claim, text, mode=mode),
             format="json",
         )
-        return self._parse_boolean_result(response_content(response))
+        return self._parse_boolean_result(response_content(response), mode=mode)
 
     @staticmethod
     def _booking_name(booking_text: str) -> str | None:
@@ -175,7 +200,7 @@ class Checker:
                 f"Booking / internal supporting documents:\n{claim}\n\n"
                 f"Supporting document (OCR):\n{text}"
             )
-        elif mode == "healthy":
+        elif mode in ("healthy", "not_authentic", "incomplete"):
             user_content = f"Supporting document (OCR):\n{text}"
         else:
             user_content = f"Claim:\n{claim}\n\nText:\n{text}"
@@ -185,15 +210,16 @@ class Checker:
         ]
 
     @staticmethod
-    def _parse_boolean_result(content: str) -> bool:
+    def _parse_boolean_result(content: str, *, mode: CheckerMode = "containment") -> bool:
+        fail_closed = mode in _DENY_ON_TRUE_MODES
         parsed = parse_llm_json_object(content, context="checker")
         if parsed is None:
-            return False
+            return fail_closed
         try:
             return BooleanCheckResult.model_validate(parsed).result
         except ValidationError:
             logger.warning("LLM checker JSON missing bool result")
-            return False
+            return fail_closed
 
     @staticmethod
     def _parse_identity_result(content: str) -> IdentityStatus:

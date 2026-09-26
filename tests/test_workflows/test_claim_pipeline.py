@@ -176,6 +176,8 @@ def _config(
             contradicts_prompt="contradicts",
             identity_prompt="identity",
             healthy_prompt="healthy",
+            authenticity_prompt="authenticity",
+            incomplete_prompt="incomplete",
         ),
         analysis=_analysis_config(),
         evaluation=EvaluationConfig(
@@ -217,7 +219,18 @@ def _cancellation_chat_fn() -> MagicMock:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
-    return MagicMock(side_effect=[coverage, reason, document, contradicts, identity, healthy])
+    authenticity = _chat_response({"result": False})
+    return MagicMock(
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            contradicts,
+            identity,
+            healthy,
+            authenticity,
+        ]
+    )
 
 
 def _seed_preprocessed_claim(config: AppConfig, claim_name: str = "claim 1") -> Path:
@@ -358,9 +371,12 @@ def test_checker_node(tmp_path: Path) -> None:
     assert payload["checker_containment"] is True
     assert payload["checker_contradicts"] is False
     assert payload["identity_check"] is True
-    # Healthy mode is the last checker LLM call.
+    assert payload["checker_document_not_authentic"] is False
+    # Authenticity mode is the last checker LLM call on medical docs.
     last_content = chat_fn.call_args_list[-1].kwargs["messages"][0]["content"]
-    assert "healthy" in last_content
+    assert "authenticity" in last_content
+    healthy_content = chat_fn.call_args_list[-2].kwargs["messages"][0]["content"]
+    assert "healthy" in healthy_content
 
 
 def test_deny_when_identity_check_false(tmp_path: Path) -> None:
@@ -398,6 +414,7 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": "mismatch"})
     healthy = _chat_response({"result": False})
+    authenticity = _chat_response({"result": False})
     # Description is not embedded in supporting_document → containment also hits LLM.
     containment = _chat_response({"result": False})
     chat_fn = MagicMock(
@@ -409,6 +426,7 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
+            authenticity,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -420,7 +438,7 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     assert payload["identity_unclear"] is False
     assert payload["decision"] == "DENY"
     assert "identity_check" in payload["decision_explanation"]
-    identity_user = chat_fn.call_args_list[-2].kwargs["messages"][1]["content"]
+    identity_user = chat_fn.call_args_list[-3].kwargs["messages"][1]["content"]
     assert "Roy Hoffman" in identity_user
     assert "Patient: R" in identity_user
     assert "Booking / internal" in identity_user
@@ -471,6 +489,7 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": "unclear"})
     healthy = _chat_response({"result": False})
+    authenticity = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
             coverage,
@@ -480,6 +499,7 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
+            authenticity,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -568,8 +588,17 @@ def test_deny_when_signature_check_false_for_medical_certificate(
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
+    authenticity = _chat_response({"result": False})
     chat_fn = MagicMock(
-        side_effect=[coverage, reason, document, contradicts, identity, healthy]
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            contradicts,
+            identity,
+            healthy,
+            authenticity,
+        ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
 
@@ -614,11 +643,11 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
             "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
-    # Description not in supporting doc → containment LLM
     containment = _chat_response({"result": False})
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": True})
+    authenticity = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
             coverage,
@@ -628,6 +657,7 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
+            authenticity,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -638,7 +668,7 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
     assert payload["healthy_check"] is True
     assert payload["decision"] == "DENY"
     assert "healthy_check" in payload["decision_explanation"]
-    healthy_user = chat_fn.call_args_list[-1].kwargs["messages"][1]["content"]
+    healthy_user = chat_fn.call_args_list[-2].kwargs["messages"][1]["content"]
     assert "CLÍNICAMENTE SANA" in healthy_user
     assert "Supporting document" in healthy_user
 
@@ -666,7 +696,18 @@ def _contradicts_deny_chat_fn() -> MagicMock:
     contradicts = _chat_response({"result": True})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
-    return MagicMock(side_effect=[coverage, reason, document, contradicts, identity, healthy])
+    authenticity = _chat_response({"result": False})
+    return MagicMock(
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            contradicts,
+            identity,
+            healthy,
+            authenticity,
+        ]
+    )
 
 
 def test_deny_explanation_names_violated_checker(tmp_path: Path) -> None:
@@ -1072,7 +1113,20 @@ def _repeating_cancellation_chat_fn() -> MagicMock:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
-    return MagicMock(side_effect=cycle([coverage, reason, document, contradicts, identity, healthy]))
+    authenticity = _chat_response({"result": False})
+    return MagicMock(
+        side_effect=cycle(
+            [
+                coverage,
+                reason,
+                document,
+                contradicts,
+                identity,
+                healthy,
+                authenticity,
+            ]
+        )
+    )
 
 
 def test_run_batch_writes_analysis_for_successful_claims(tmp_path: Path) -> None:
@@ -1161,6 +1215,8 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
                 "  contradicts_prompt: contradicts",
                 "  identity_prompt: identity",
                 "  healthy_prompt: healthy",
+                "  authenticity_prompt: authenticity",
+                "  incomplete_prompt: incomplete",
                 "analysis:",
                 "  coverage:",
                 stage,

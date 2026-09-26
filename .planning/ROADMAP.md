@@ -68,7 +68,7 @@
   - Paths/labels from config where applicable; mypy + pytest pass
 
 - [ ] **Phase 07: Denial-rule checkers in analysis pipeline** `profiles: []`
-  Plans: 07-00, 07-01, 07-02, 07-03
+  Plans: 07-00, 07-01, 07-01b, 07-02, 07-03
   Goal: Extend ClaimPipeline Checker steps so every LOGIC.md denial rule is covered by an explicit check (beyond containment/contradicts)
   Success criteria:
   - Checker modes (or nodes) cover: missing medical/supporting doc; document contradicts claim (healthy cert); identity unverifiable; document not authentic / wrong format; incomplete document; suspicious dating
@@ -221,7 +221,7 @@ Existing Checker containment + contradicts remain. Benford authenticity stays op
 
 **Requirements**: R023, R024, R025, R026, R027, R028, R029
 **Depends on:** Phase 4 (ClaimPipeline + Checker)
-**Plans:** 4 plans
+**Plans:** 5 plans
 
 Plans:
 
@@ -235,9 +235,13 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 07-02-PLAN.md — Incomplete-document DENY + suspicious-dating UNCERTAIN (R028, R029)
+- [ ] 07-01b-PLAN.md — Propagate CheckingConfig authenticity/incomplete prompts across secondary test helpers (R023)
 
 **Wave 3** *(blocked on Wave 2)*
+
+- [ ] 07-02-PLAN.md — Incomplete-document DENY + suspicious-dating UNCERTAIN (R028, R029)
+
+**Wave 4** *(blocked on Wave 3)*
 
 - [ ] 07-03-PLAN.md — LOGIC.md key sync + R024–R026 regression + R023 persistence + phase gate
 

@@ -320,22 +320,25 @@ if bool(state.get("checker_suspicious_dating")):
 | A3 | `checker_suspicious_dating` stays separate from `multiple_document_dates` (additive) | Gap Analysis | Redundant UNCERTAIN explanations if not documented |
 | A4 | No discuss-phase CONTEXT — recommendations above are discretion defaults | Open Questions | User may want different flag names or DENY vs UNCERTAIN for dating |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Canonical naming for healthy/identity**
    - What we know: Code emits `healthy_check` / `identity_check`; LOGIC Summary uses different strings.
    - What's unclear: Whether product wants a rename or doc-only sync.
    - Recommendation: **Doc-only sync** (keep code keys); dual-write aliases only if an external consumer already expects LOGIC names (none found in-repo).
+   - RESOLVED: Doc-only sync — keep shipped `healthy_check` / `identity_check` keys; LOGIC aliases in 07-03 (A2 / IMP-013).
 
 2. **Authenticity fail-closed vs UNCERTAIN on LLM error**
    - What we know: Current bool parse defaults to False (unsafe for deny-on-True).
    - What's unclear: Phase 07 vs Phase 08 IMP-005 ownership.
    - Recommendation: Phase 07 fail-closed for new deny-on-True modes; IMP-005 later for typed ERROR across all modes.
+   - RESOLVED: Fail-closed True for deny-on-True modes (`not_authentic`, `incomplete`) in Phase 07 (A10); typed ERROR across all modes deferred to IMP-005 / Phase 08.
 
 3. **Claim 20**
    - What we know: LOGIC category 7 = missing signature → UNCERTAIN acceptable; `signature_check` currently DENY.
    - What's unclear: Softening signature to UNCERTAIN is policy, not in R023–R029 explicitly.
    - Recommendation: Leave signature → DENY; do not change in Phase 07 unless eval requires UNCERTAIN for claim 20.
+   - RESOLVED: Leave `signature_check` → DENY unchanged in Phase 07 (A17); claim-20 UNCERTAIN softening out of scope.
 
 ## Environment Availability
 

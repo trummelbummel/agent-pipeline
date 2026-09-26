@@ -101,12 +101,13 @@ checking:
     format (violation), {"result": false} if it appears to be a genuine medical
     or hospital document of the expected type.
   incomplete_prompt: |
-    Decide whether a medical supporting document is missing required clinical
-    fields such as diagnosis, condition/illness description, or discharge /
-    issue date needed to support a medical cancellation claim.
-    Return JSON only: {"result": true} if required fields are missing (violation),
-    {"result": false} if diagnosis/condition and dating fields are adequately
-    present.
+    Decide whether a medical supporting document is incomplete — missing required
+    clinical fields such as diagnosis, condition/illness description, or discharge /
+    issue date needed to support a medical cancellation claim. Do not treat a
+    missing signature alone as incomplete (signature is checked separately).
+    Return JSON only: {"result": true} if required clinical fields are missing
+    (violation), {"result": false} if diagnosis/condition and dating fields are
+    adequately present.
   # Inclusive day window: |departure − reference today| ≤ n → UNCERTAIN.
   departure_uncertain_within_days: 14
 

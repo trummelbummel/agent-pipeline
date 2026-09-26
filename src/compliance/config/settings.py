@@ -111,7 +111,7 @@ class CheckingConfig(BaseModel):
     :param authenticity_prompt: System prompt for document authenticity / format
         checks (True = not authentic / wrong format → violation).
     :param incomplete_prompt: System prompt for incomplete medical-document field
-        checks (True = required fields missing → violation); wired in a later plan.
+        checks (True = required fields missing → violation).
     :param departure_uncertain_within_days: Inclusive absolute day window; when
         departure is within this many days of reference today, analysis yields
         UNCERTAIN (``departure_within_days``) without running LLM checkers.

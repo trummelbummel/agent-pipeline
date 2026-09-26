@@ -220,6 +220,7 @@ def _cancellation_chat_fn() -> MagicMock:
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     return MagicMock(
         side_effect=[
             coverage,
@@ -229,6 +230,7 @@ def _cancellation_chat_fn() -> MagicMock:
             identity,
             healthy,
             authenticity,
+            incomplete,
         ]
     )
 
@@ -372,10 +374,13 @@ def test_checker_node(tmp_path: Path) -> None:
     assert payload["checker_contradicts"] is False
     assert payload["identity_check"] is True
     assert payload["checker_document_not_authentic"] is False
-    # Authenticity mode is the last checker LLM call on medical docs.
+    assert payload["checker_incomplete_document"] is False
+    # Incomplete mode is the last medical checker LLM call; authenticity precedes it.
     last_content = chat_fn.call_args_list[-1].kwargs["messages"][0]["content"]
-    assert "authenticity" in last_content
-    healthy_content = chat_fn.call_args_list[-2].kwargs["messages"][0]["content"]
+    assert "incomplete" in last_content
+    authenticity_content = chat_fn.call_args_list[-2].kwargs["messages"][0]["content"]
+    assert "authenticity" in authenticity_content
+    healthy_content = chat_fn.call_args_list[-3].kwargs["messages"][0]["content"]
     assert "healthy" in healthy_content
 
 
@@ -415,6 +420,7 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     identity = _chat_response({"result": "mismatch"})
     healthy = _chat_response({"result": False})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     # Description is not embedded in supporting_document → containment also hits LLM.
     containment = _chat_response({"result": False})
     chat_fn = MagicMock(
@@ -427,6 +433,7 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
             identity,
             healthy,
             authenticity,
+            incomplete,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -438,7 +445,7 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     assert payload["identity_unclear"] is False
     assert payload["decision"] == "DENY"
     assert "identity_check" in payload["decision_explanation"]
-    identity_user = chat_fn.call_args_list[-3].kwargs["messages"][1]["content"]
+    identity_user = chat_fn.call_args_list[-4].kwargs["messages"][1]["content"]
     assert "Roy Hoffman" in identity_user
     assert "Patient: R" in identity_user
     assert "Booking / internal" in identity_user
@@ -490,6 +497,7 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
     identity = _chat_response({"result": "unclear"})
     healthy = _chat_response({"result": False})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
             coverage,
@@ -500,6 +508,7 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
             identity,
             healthy,
             authenticity,
+            incomplete,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -589,6 +598,7 @@ def test_deny_when_signature_check_false_for_medical_certificate(
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
             coverage,
@@ -598,6 +608,7 @@ def test_deny_when_signature_check_false_for_medical_certificate(
             identity,
             healthy,
             authenticity,
+            incomplete,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -648,6 +659,7 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": True})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
             coverage,
@@ -658,6 +670,7 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
             identity,
             healthy,
             authenticity,
+            incomplete,
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
@@ -668,7 +681,7 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
     assert payload["healthy_check"] is True
     assert payload["decision"] == "DENY"
     assert "healthy_check" in payload["decision_explanation"]
-    healthy_user = chat_fn.call_args_list[-2].kwargs["messages"][1]["content"]
+    healthy_user = chat_fn.call_args_list[-3].kwargs["messages"][1]["content"]
     assert "CLÍNICAMENTE SANA" in healthy_user
     assert "Supporting document" in healthy_user
 
@@ -697,6 +710,7 @@ def _contradicts_deny_chat_fn() -> MagicMock:
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     return MagicMock(
         side_effect=[
             coverage,
@@ -706,6 +720,7 @@ def _contradicts_deny_chat_fn() -> MagicMock:
             identity,
             healthy,
             authenticity,
+            incomplete,
         ]
     )
 
@@ -1114,6 +1129,7 @@ def _repeating_cancellation_chat_fn() -> MagicMock:
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
     authenticity = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
     return MagicMock(
         side_effect=cycle(
             [
@@ -1124,6 +1140,7 @@ def _repeating_cancellation_chat_fn() -> MagicMock:
                 identity,
                 healthy,
                 authenticity,
+                incomplete,
             ]
         )
     )

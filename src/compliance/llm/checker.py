@@ -62,7 +62,7 @@ class Checker:
         :param authenticity_prompt: System prompt for document authenticity / format
             (True = not authentic → violation).
         :param incomplete_prompt: System prompt for incomplete medical fields
-            (stored for a later mode; not dispatched yet).
+            (True = required fields missing → violation).
         :param chat_fn: Optional chat callable for tests; defaults to ollama.chat.
         """
         self.model_name = model_name
@@ -84,13 +84,13 @@ class Checker:
 
         :param claim: Claim / booking text (unused for OCR-focused modes).
         :param text: Supporting document OCR text (primary input for healthy /
-            not_authentic).
+            not_authentic / incomplete).
         :param mode: ``containment``, ``contradicts``, ``identity``, ``healthy``,
-            or ``not_authentic``.
+            ``not_authentic``, or ``incomplete``.
         :return: True when the mode condition holds; for ``identity``, True only on
             ``match`` (``mismatch`` / ``unclear`` → False). Prefer ``check_identity``
-            when the three-way outcome matters. For ``not_authentic``, True means
-            authenticity violation (fail-closed on parse errors).
+            when the three-way outcome matters. For ``not_authentic`` /
+            ``incomplete``, True means violation (fail-closed on parse errors).
         :raises ValueError: When ``mode`` is not a supported checker mode.
         """
         if mode == "containment":
@@ -108,6 +108,10 @@ class Checker:
         if mode == "not_authentic":
             return self._llm_boolean_result(
                 self.authenticity_prompt, claim, text, mode=mode
+            )
+        if mode == "incomplete":
+            return self._llm_boolean_result(
+                self.incomplete_prompt, claim, text, mode=mode
             )
         raise ValueError(f"Unsupported checker mode: {mode!r}")
 

@@ -6,13 +6,9 @@ wave: 2
 depends_on:
   - "07-01"
 files_modified:
+  - tests/test_api/conftest.py
   - tests/test_workflows/test_orchestration.py
   - tests/test_workflows/test_pipeline.py
-  - tests/test_api/test_claims_post.py
-  - tests/test_api/test_claims_get.py
-  - tests/test_api/test_claims_list.py
-  - tests/test_api/test_claims_e2e.py
-  - tests/test_api/test_deps_lifespan.py
   - tests/test_evaluation/test_evaluator.py
   - tests/test_evaluation/test_analysis_stats.py
   - tests/test_preprocessing/test_claim_batch.py
@@ -23,8 +19,8 @@ requirements:
 user_setup: []
 
 estimate:
-  tokens: 25000
-  raw_tokens: 25000
+  tokens: 22000
+  raw_tokens: 22000
   tasks: 1
   confidence: low
 
@@ -33,7 +29,7 @@ must_haves:
     - "All AppConfig/CheckingConfig test helpers under tests/ compile with authenticity_prompt and incomplete_prompt"
     - "Secondary suites (api, evaluation, orchestration, preprocessing) collect without CheckingConfig ValidationError after 07-01 required fields"
   artifacts:
-    - path: "tests/test_api/test_claims_post.py"
+    - path: "tests/test_api/conftest.py"
       provides: "CheckingConfig placeholders for new prompts"
       contains: "authenticity_prompt"
     - path: "tests/test_workflows/test_orchestration.py"
@@ -49,7 +45,7 @@ must_haves:
 Propagate CheckingConfig's new required prompts across secondary test helpers so the full suite collects after 07-01 made authenticity_prompt / incomplete_prompt required.
 
 Purpose: Keep the authenticity tracer plan under the per-plan file budget while unblocking api/evaluation/orchestration/preprocessing modules before incomplete/suspicious-dating work.
-Output: Every remaining CheckingConfig(...) site under tests/ supplies the new prompt fields; suite collects green.
+Output: Every remaining CheckingConfig(...) site under tests/ (conftest + workflows/evaluation/preprocessing helpers; primary claim_pipeline owned by 07-01) supplies the new prompt fields; suite collects green.
 </objective>
 
 <execution_context>
@@ -87,6 +83,7 @@ Output: Every remaining CheckingConfig(...) site under tests/ supplies the new p
 <interfaces>
 No production interface changes — glue only:
 - CheckingConfig(...) call sites under listed test modules must pass authenticity_prompt and incomplete_prompt
+- Live grep sites in scope: tests/test_api/conftest.py, tests/test_workflows/test_orchestration.py, tests/test_workflows/test_pipeline.py, tests/test_evaluation/test_evaluator.py, tests/test_evaluation/test_analysis_stats.py, tests/test_preprocessing/test_claim_batch.py, tests/test_preprocessing/test_integration.py (tests/test_workflows/test_claim_pipeline.py owned by 07-01)
 </interfaces>
 
 <tasks>
@@ -94,29 +91,30 @@ No production interface changes — glue only:
 <task type="auto" tdd="true">
   <name>Task 1: Propagate CheckingConfig new prompts across remaining test helpers</name>
   <precondition>07-01 SUMMARY committed — CheckingConfig requires authenticity_prompt and incomplete_prompt; primary tracer tests green</precondition>
-  <files>tests/test_workflows/test_orchestration.py, tests/test_workflows/test_pipeline.py, tests/test_api/test_claims_post.py, tests/test_api/test_claims_get.py, tests/test_api/test_claims_list.py, tests/test_api/test_claims_e2e.py, tests/test_api/test_deps_lifespan.py, tests/test_evaluation/test_evaluator.py, tests/test_evaluation/test_analysis_stats.py, tests/test_preprocessing/test_claim_batch.py, tests/test_preprocessing/test_integration.py</files>
+  <files>tests/test_api/conftest.py, tests/test_workflows/test_orchestration.py, tests/test_workflows/test_pipeline.py, tests/test_evaluation/test_evaluator.py, tests/test_evaluation/test_analysis_stats.py, tests/test_preprocessing/test_claim_batch.py, tests/test_preprocessing/test_integration.py</files>
   <read_first>
     - src/compliance/config/settings.py (CheckingConfig required fields after 07-01)
     - tests/test_workflows/test_claim_pipeline.py (updated CheckingConfig pattern from 07-01)
+    - tests/test_api/conftest.py (API AppConfig fixture CheckingConfig literal)
     - .planning/phases/07-denial-rule-checkers-in-analysis-pipeline/07-PATTERNS.md (CheckingConfig / settings test analog)
     - Grep all CheckingConfig( call sites under tests/ for missing authenticity_prompt / incomplete_prompt
   </read_first>
   <behavior>
-    - Every CheckingConfig(...) construction under tests/ supplies authenticity_prompt and incomplete_prompt (placeholder strings fine)
+    - Every CheckingConfig(...) construction in the listed secondary helpers supplies authenticity_prompt and incomplete_prompt (placeholder strings fine)
     - Full non-integration suite still collects; no TypeError / ValidationError on AppConfig construction in these modules
   </behavior>
   <action>
-  Update every remaining CheckingConfig literal under tests/ (listed files) to pass authenticity_prompt and incomplete_prompt string placeholders matching 07-01's primary helper pattern (per A8). Prefer identical placeholder values ("authenticity" / "incomplete") for consistency. Do not change production logic. Do not touch live Ollama. Skip rewriting unrelated assertions.
+  Update every remaining secondary CheckingConfig literal under tests/ in the listed files (conftest, orchestration, pipeline, evaluator, analysis_stats, claim_batch, integration — live CheckingConfig( sites only; per A8) to pass authenticity_prompt and incomplete_prompt string placeholders matching 07-01's primary helper pattern. Prefer identical placeholder values ("authenticity" / "incomplete") for consistency. Do not change production logic. Do not touch live Ollama. Skip rewriting unrelated assertions. Leave test_claim_pipeline.py to 07-01.
   </action>
   <verify>
     <automated>uv run pytest tests/test_llm/test_checker.py tests/test_workflows/test_claim_pipeline.py tests/test_config/test_settings.py tests/test_api tests/test_evaluation tests/test_workflows/test_orchestration.py tests/test_workflows/test_pipeline.py tests/test_preprocessing/test_claim_batch.py -q --tb=short && uv run mypy src/compliance/</automated>
     <fails_when>non-zero exit, TypeError/ValidationError from Missing authenticity_prompt or incomplete_prompt on CheckingConfig, collection errors, or mypy errors under src/compliance/</fails_when>
   </verify>
   <acceptance_criteria>
-    - `rg -n "CheckingConfig\(" tests -g '*.py' -A6` shows authenticity_prompt on each construction site
+    - `rg -n "CheckingConfig\(" tests -g '*.py' -A6` shows authenticity_prompt on each construction site in the listed files
     - pytest verify command exits 0
   </acceptance_criteria>
-  <done>All test CheckingConfig helpers include the new required prompts; suite collects and primary phase tests stay green.</done>
+  <done>All secondary test CheckingConfig helpers include the new required prompts; suite collects and primary phase tests stay green.</done>
 </task>
 
 </tasks>

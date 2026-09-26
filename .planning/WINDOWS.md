@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 4
+open_count: 10
 waived_count: 0
 fixed_count: 0
-total_count: 4
-last_updated: 2026-09-25T16:52:14.404Z
+total_count: 10
+last_updated: 2026-09-26T10:49:00.655Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,12 @@ last_updated: 2026-09-25T16:52:14.404Z
 | 2 | 04 | stub | tests/test_workflows/test_claim_pipeline.py |  | PE/missed routing xfail stubs deferred to 04-03 | open |  | 2026-09-25T15:28:36.541Z |  |
 | 3 | 04 | stub | src/compliance/workflows/claim_pipeline.py |  | PE/missed coverage routes to END until 04-03 | open |  | 2026-09-25T15:28:36.644Z |  |
 | 4 | 05 | deviation | src/compliance/workflows/claim_pipeline.py |  | Rule 2: input_root for caller-supplied claim folders in analyze_claim | open |  | 2026-09-25T16:52:14.404Z |  |
+| 5 | 260926-bwk | deviation | src/compliance/workflows/claim_pipeline.py |  | Bundled pre-existing HITL/False-abstention WIP with Task 2 analysis I/O wiring | open |  | 2026-09-26T06:40:46.901Z |  |
+| 6 | 07 | unmet-truth | tests/test_config/test_settings.py | 202 | Pre-existing: coverage.other_label is None not False (unrelated to 07-00 stubs) | open |  | 2026-09-26T10:48:48.357Z |  |
+| 7 | 07 | unmet-truth | tests/test_config/test_settings.py | 235 | Pre-existing: OcrRetryConfig missing on_missing_signature (unrelated to 07-00 stubs) | open |  | 2026-09-26T10:48:48.458Z |  |
+| 8 | 07 | stub | tests/test_llm/test_checker.py |  | Wave 0 xfail stubs for not_authentic/incomplete modes — implemented in 07-01/07-02 | open |  | 2026-09-26T10:49:00.453Z |  |
+| 9 | 07 | stub | tests/test_workflows/test_claim_pipeline.py |  | Wave 0 xfail stubs for authenticity/incomplete DENY + suspicious dating UNCERTAIN — implemented in 07-01/07-02 | open |  | 2026-09-26T10:49:00.552Z |  |
+| 10 | 07 | stub | tests/test_config/test_settings.py |  | Wave 0 xfail stub for authenticity_prompt/incomplete_prompt — implemented in 07-01 | open |  | 2026-09-26T10:49:00.655Z |  |
 
 ````json
 [
@@ -71,6 +77,84 @@ last_updated: 2026-09-25T16:52:14.404Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-25T16:52:14.404Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 5,
+    "kind": "deviation",
+    "phase": "260926-bwk",
+    "file": "src/compliance/workflows/claim_pipeline.py",
+    "line": null,
+    "description": "Bundled pre-existing HITL/False-abstention WIP with Task 2 analysis I/O wiring",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T06:40:46.901Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 6,
+    "kind": "unmet-truth",
+    "phase": "07",
+    "file": "tests/test_config/test_settings.py",
+    "line": 202,
+    "description": "Pre-existing: coverage.other_label is None not False (unrelated to 07-00 stubs)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:48:48.357Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 7,
+    "kind": "unmet-truth",
+    "phase": "07",
+    "file": "tests/test_config/test_settings.py",
+    "line": 235,
+    "description": "Pre-existing: OcrRetryConfig missing on_missing_signature (unrelated to 07-00 stubs)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:48:48.458Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 8,
+    "kind": "stub",
+    "phase": "07",
+    "file": "tests/test_llm/test_checker.py",
+    "line": null,
+    "description": "Wave 0 xfail stubs for not_authentic/incomplete modes — implemented in 07-01/07-02",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:49:00.453Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 9,
+    "kind": "stub",
+    "phase": "07",
+    "file": "tests/test_workflows/test_claim_pipeline.py",
+    "line": null,
+    "description": "Wave 0 xfail stubs for authenticity/incomplete DENY + suspicious dating UNCERTAIN — implemented in 07-01/07-02",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:49:00.552Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 10,
+    "kind": "stub",
+    "phase": "07",
+    "file": "tests/test_config/test_settings.py",
+    "line": null,
+    "description": "Wave 0 xfail stub for authenticity_prompt/incomplete_prompt — implemented in 07-01",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:49:00.655Z",
     "resolved_at": null,
     "milestone": "v1.0"
   }

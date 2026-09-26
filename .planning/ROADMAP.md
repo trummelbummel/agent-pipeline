@@ -97,7 +97,7 @@
 | 04 | 0/4 | Complete    | 2026-09-25 |
 | 05 | 4/4 | Complete    | 2026-09-25 |
 | 06 | 1/2 | Complete    | 2026-09-25 |
-| 07 | 0/4 | Not started |  |
+| 07 | 0/4 | In Progress|  |
 | 08 | 0/0 | Not started |  |
 
 ### Phase 2: Case Classifier Models
@@ -221,13 +221,13 @@ Existing Checker containment + contradicts remain. Benford authenticity stays op
 
 **Requirements**: R023, R024, R025, R026, R027, R028, R029
 **Depends on:** Phase 4 (ClaimPipeline + Checker)
-**Plans:** 5 plans
+**Plans:** 1/5 plans executed
 
 Plans:
 
 **Wave 0**
 
-- [ ] 07-00-PLAN.md — Nyquist stubs for authenticity / incomplete / suspicious dating (R027–R029)
+- [x] 07-00-PLAN.md — Nyquist stubs for authenticity / incomplete / suspicious dating (R027–R029)
 
 **Wave 1** *(blocked on Wave 0)*
 

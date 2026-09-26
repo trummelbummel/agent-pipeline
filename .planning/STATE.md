@@ -3,18 +3,18 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
-current_plan: 4
+current_plan: 2
 status: executing
-stopped_at: Completed 260926-fph-PLAN.md
-last_updated: "2026-09-26T10:05:57.635Z"
+stopped_at: Completed 07-00-PLAN.md
+last_updated: "2026-09-26T10:49:40.704Z"
 last_activity: 2026-09-26
-last_activity_desc: "Completed quick task 260926-gij: common API fixtures"
-state_head: 1e8b83006ac90553218409986e396f42a7da236e
+last_activity_desc: Phase 07 execution started
+state_head: 75acd2b9cb07da365a5e3a2397ae82c007f3a420
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 21
-  completed_plans: 16
+  completed_plans: 17
 milestone_name: Claim Preprocessing
 ---
 
@@ -24,15 +24,15 @@ milestone_name: Claim Preprocessing
 
 See: .planning/PROJECT.md
 
-**Current focus:** Phase 05 — FastAPI Claims API
+**Current focus:** Phase 07 — Denial-rule checkers in analysis pipeline
 
 ## Current Position
 
-Phase: 07 (Denial-rule checkers in analysis pipeline) — READY TO EXECUTE
-Current Plan: 4
+Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
+Current Plan: 2
 Total Plans in Phase: 5
 Status: Ready to execute
-Last activity: 2026-09-26 - Completed quick task 260926-gij: create common fixtures across API tests and update dedup-review
+Last activity: 2026-09-26 — Phase 07 execution started
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -99,6 +99,9 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 05]: CLI --claim-id always runs process_then_analyze (same as GET); mode only applies to batch run(None)
 - [Phase 05]: ClaimPipeline loads from claim_dir when supporting_document artifact present; else preprocessed_root/name
 - [Phase 05]: Date UNCERTAIN checkers: departure_within_days (n from config) and multiple_document_dates short-circuit LLM Checker before DENY
+- [Phase 07]: Wave 0 xfail strict=False for R027–R029 Nyquist stubs until 07-01/07-02
+- [Phase 07]: Canonical keys: checker_document_not_authentic, checker_incomplete_document, checker_suspicious_dating
+- [Phase 07]: not_authentic OCR layout mirrors healthy; deny-on-True parse failure fail-closed True
 
 ### Blockers/Concerns
 
@@ -117,8 +120,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-26T09:30:01.932Z
-Stopped at: Completed 260926-fph-PLAN.md
+Last session: 2026-09-26T10:49:40.682Z
+Stopped at: Completed 07-00-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -142,3 +145,4 @@ Resume file: None
 | Phase 05 P02 | 6min | 3 tasks | 7 files |
 | Phase 05 P03 | 7min | 2 tasks | 7 files |
 | Phase 260926-fph P01 | 8min | 2 tasks | 5 files |
+| Phase 07 P00 | 3min | 2 tasks | 4 files |

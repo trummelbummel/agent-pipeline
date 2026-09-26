@@ -221,7 +221,7 @@ Existing Checker containment + contradicts remain. Benford authenticity stays op
 
 **Requirements**: R023, R024, R025, R026, R027, R028, R029
 **Depends on:** Phase 4 (ClaimPipeline + Checker)
-**Plans:** 1/5 plans executed
+**Plans:** 2/5 plans executed
 
 Plans:
 
@@ -231,7 +231,7 @@ Plans:
 
 **Wave 1** *(blocked on Wave 0)*
 
-- [ ] 07-01-PLAN.md — Tracer: authenticity DENY via config → Checker → ClaimPipeline → analysis_result (R023, R027)
+- [x] 07-01-PLAN.md — Tracer: authenticity DENY via config → Checker → ClaimPipeline → analysis_result (R023, R027)
 
 **Wave 2** *(blocked on Wave 1)*
 

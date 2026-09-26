@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 10
+open_count: 12
 waived_count: 0
 fixed_count: 0
-total_count: 10
-last_updated: 2026-09-26T10:49:00.655Z
+total_count: 12
+last_updated: 2026-09-26T10:58:24.814Z
 ---
 
 # Broken Windows Ledger
@@ -25,6 +25,8 @@ last_updated: 2026-09-26T10:49:00.655Z
 | 8 | 07 | stub | tests/test_llm/test_checker.py |  | Wave 0 xfail stubs for not_authentic/incomplete modes — implemented in 07-01/07-02 | open |  | 2026-09-26T10:49:00.453Z |  |
 | 9 | 07 | stub | tests/test_workflows/test_claim_pipeline.py |  | Wave 0 xfail stubs for authenticity/incomplete DENY + suspicious dating UNCERTAIN — implemented in 07-01/07-02 | open |  | 2026-09-26T10:49:00.552Z |  |
 | 10 | 07 | stub | tests/test_config/test_settings.py |  | Wave 0 xfail stub for authenticity_prompt/incomplete_prompt — implemented in 07-01 | open |  | 2026-09-26T10:49:00.655Z |  |
+| 11 | 07 | unrun-verify | tests/test_config/test_settings.py | 196 | Deselected pre-existing other_label False vs None mismatch during 07-01 verify | open |  | 2026-09-26T10:58:24.614Z |  |
+| 12 | 07 | deviation | src/compliance/workflows/claim_pipeline.py |  | Pre-existing mypy errors in claim_pipeline/benford/document left untouched (out of scope) | open |  | 2026-09-26T10:58:24.814Z |  |
 
 ````json
 [
@@ -155,6 +157,32 @@ last_updated: 2026-09-26T10:49:00.655Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-26T10:49:00.655Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 11,
+    "kind": "unrun-verify",
+    "phase": "07",
+    "file": "tests/test_config/test_settings.py",
+    "line": 196,
+    "description": "Deselected pre-existing other_label False vs None mismatch during 07-01 verify",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:58:24.614Z",
+    "resolved_at": null,
+    "milestone": "v1.0"
+  },
+  {
+    "id": 12,
+    "kind": "deviation",
+    "phase": "07",
+    "file": "src/compliance/workflows/claim_pipeline.py",
+    "line": null,
+    "description": "Pre-existing mypy errors in claim_pipeline/benford/document left untouched (out of scope)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T10:58:24.814Z",
     "resolved_at": null,
     "milestone": "v1.0"
   }

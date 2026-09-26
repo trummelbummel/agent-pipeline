@@ -123,7 +123,6 @@ def test_aggregate_two_claims_decisions_and_sorted_ids(tmp_path: Path) -> None:
     # human_in_the_loop present only on claim 2
     assert stats.checker_present_counts["human_in_the_loop"] == 1
     assert stats.checker_true_counts["human_in_the_loop"] == 1
-    assert "checker_containment" not in stats.checker_present_counts or True
 
 
 def test_aggregate_soft_skips_missing_and_invalid(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from compliance.config.settings import AppConfig, load_config
+from evaluation.analysis_stats import AnalysisStats, aggregate_analysis_stats
 from evaluation.evaluator import EvaluationResult, Evaluator
 from evaluation.visualization import write_confusion_matrix_png
 
@@ -40,16 +41,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _configure_logging(config)
     result = Evaluator(config).evaluate()
-    metrics_path, matrix_path, viz_path = _write_artifacts(config, result)
+    stats = aggregate_analysis_stats(config)
+    metrics_path, matrix_path, viz_path, stats_path = _write_artifacts(
+        config, result, stats
+    )
     logger.info(
         "evaluation complete n_evaluated=%d accuracy=%.4f f1_macro=%.4f "
-        "metrics=%s confusion_matrix=%s visualization=%s",
+        "n_analysis=%d metrics=%s confusion_matrix=%s visualization=%s "
+        "analysis_stats=%s",
         result.n_evaluated,
         result.accuracy,
         result.f1_macro,
+        stats.n_claims,
         metrics_path,
         matrix_path,
         viz_path,
+        stats_path,
     )
     return 0
 
@@ -87,13 +94,16 @@ def _labeled_confusion_matrix(result: EvaluationResult) -> dict[str, dict[str, i
 
 
 def _write_artifacts(
-    config: AppConfig, result: EvaluationResult
-) -> tuple[Path, Path, Path]:
-    """Serialize metrics JSON, labeled matrix JSON, and confusion-matrix PNG.
+    config: AppConfig,
+    result: EvaluationResult,
+    stats: AnalysisStats,
+) -> tuple[Path, Path, Path, Path]:
+    """Serialize metrics, matrix, confusion PNG, and analysis stats JSON.
 
     :param config: Application config with results_dir and evaluation artifact names.
     :param result: Aggregate EvaluationResult from batch evaluate.
-    :return: ``(metrics_path, confusion_matrix_path, visualization_path)``.
+    :param stats: Aggregated analysis_result statistics for the same results_dir.
+    :return: ``(metrics_path, confusion_matrix_path, visualization_path, stats_path)``.
     """
     results_dir = Path(config.preprocessing.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +135,11 @@ def _write_artifacts(
     viz_path = write_confusion_matrix_png(
         result, results_dir / config.evaluation.visualization_artifact
     )
-    return metrics_path, matrix_path, viz_path
+    stats_path = results_dir / config.evaluation.analysis_stats_artifact
+    stats_path.write_text(
+        json.dumps(stats.to_dict(), indent=2) + "\n", encoding="utf-8"
+    )
+    return metrics_path, matrix_path, viz_path, stats_path
 
 
 if __name__ == "__main__":

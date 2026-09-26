@@ -1633,11 +1633,6 @@ def test_departure_within_and_multiple_document_dates_prefer_departure(
 
 # --- Phase 07 authenticity (R027) / incomplete (R028) / suspicious dating (R029) ---
 
-_XFAIL_SUSPICIOUS_DATING = pytest.mark.xfail(
-    strict=False,
-    reason="Wave 0 stub — suspicious dating implemented in 07-02 task 2",
-)
-
 
 def test_deny_when_checker_document_not_authentic(tmp_path: Path) -> None:
     """OCR/format authenticity violation → DENY with checker_document_not_authentic.
@@ -1762,11 +1757,12 @@ def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     assert "checker_incomplete_document" in payload["decision_explanation"]
 
 
-@_XFAIL_SUSPICIOUS_DATING
 def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
     """Implausible issue/stamp dating → UNCERTAIN before DENY (R029).
 
-    Claim 13/23-shaped date strings; explanation key checker_suspicious_dating.
+    Single OCR calendar day with year skew vs booking reference (avoids
+    multiple_document_dates stealing precedence). Explanation key
+    checker_suspicious_dating; LLM checker keys omitted.
     """
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
@@ -1781,7 +1777,7 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
     )
     (claim_dir / artifacts.supporting_document).write_text(
         "# Supporting document\n\n"
-        "Certificate issue date 2099-01-01; stamp date 1990-01-01.\n",
+        "Certificate issue date 1990-01-01.\n",
         encoding="utf-8",
     )
     coverage = _chat_response(
@@ -1802,17 +1798,181 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
             "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
         }
     )
-    chat_fn = MagicMock(side_effect=[coverage, reason, document])
+    # Extra checker responses for RED (no early-exit yet); GREEN omits LLM checkers.
+    containment = _chat_response({"result": False})
+    contradicts = _chat_response({"result": False})
+    identity = _chat_response({"result": True})
+    healthy = _chat_response({"result": False})
+    not_authentic = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
+    chat_fn = MagicMock(
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            containment,
+            contradicts,
+            identity,
+            healthy,
+            not_authentic,
+            incomplete,
+        ]
+    )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
 
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
-    assert payload["checker_suspicious_dating"] is True
+    assert payload.get("checker_suspicious_dating") is True
     assert payload["decision"] == "UNCERTAIN"
     assert payload["decision_explanation"] == "checker_suspicious_dating"
     assert "checker_document_not_authentic" not in payload
     assert "checker_incomplete_document" not in payload
+    assert chat_fn.call_count == 3
+
+
+def test_suspicious_dating_false_when_coherent_dates(tmp_path: Path) -> None:
+    """Single coherent care-window date without year skew → explicit False."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim coherent dating")
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.supporting_documents).write_text(
+        "# Supporting documents\n\n"
+        "**current date**: 2022-06-01\n"
+        "**name**: Test Claimant\n"
+        "**departure**: 2022-09-01 10:00 (local)\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# Supporting document\n\n"
+        "Medical certificate dated 2022-05-20. Diagnosis: fracture.\n",
+        encoding="utf-8",
+    )
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+        }
+    )
+    containment = _chat_response({"result": False})
+    contradicts = _chat_response({"result": False})
+    identity = _chat_response({"result": True})
+    healthy = _chat_response({"result": False})
+    not_authentic = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
+    chat_fn = MagicMock(
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            containment,
+            contradicts,
+            identity,
+            healthy,
+            not_authentic,
+            incomplete,
+        ]
+    )
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload.get("checker_suspicious_dating") is False
+    assert payload["decision"] == "APPROVE"
+
+
+def test_suspicious_dating_precedes_deny(tmp_path: Path) -> None:
+    """Suspicious dating True + signature DENY → UNCERTAIN (date flags before DENY)."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim dating precedes deny")
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.supporting_documents).write_text(
+        "# Supporting documents\n\n"
+        "**current date**: 2022-06-01\n"
+        "**name**: Test Claimant\n"
+        "**departure**: 2022-09-01 10:00 (local)\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# Supporting document\n\n"
+        "Certificate issue date 1990-01-01.\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.document_metadata).write_text(
+        json.dumps(
+            {
+                "documents": [
+                    {
+                        "source_file": "medical certificate.jpg",
+                        "has_signature": False,
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+        }
+    )
+    containment = _chat_response({"result": False})
+    contradicts = _chat_response({"result": False})
+    identity = _chat_response({"result": True})
+    healthy = _chat_response({"result": False})
+    not_authentic = _chat_response({"result": False})
+    incomplete = _chat_response({"result": False})
+    chat_fn = MagicMock(
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            containment,
+            contradicts,
+            identity,
+            healthy,
+            not_authentic,
+            incomplete,
+        ]
+    )
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload.get("checker_suspicious_dating") is True
+    assert payload.get("signature_check") is False
+    assert payload["decision"] == "UNCERTAIN"
+    assert payload["decision_explanation"] == "checker_suspicious_dating"
 
 
 def test_authenticity_incomplete_skipped_for_non_medical_document(

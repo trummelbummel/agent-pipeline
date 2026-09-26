@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/theresa/Desktop/projects/compliance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, anyio-4.15.1, Faker-40.39.0
+collecting ... collected 4 items
+
+tests/test_workflows/test_claim_pipeline.py::test_uncertain_when_checker_suspicious_dating FAILED [ 25%]
+tests/test_workflows/test_claim_pipeline.py::test_suspicious_dating_false_when_coherent_dates FAILED [ 50%]
+tests/test_workflows/test_claim_pipeline.py::test_suspicious_dating_precedes_deny FAILED [ 75%]
+tests/test_config/test_settings.py::test_load_config_reads_suspicious_dating_max_year_delta FAILED [100%]
+
+=================================== FAILURES ===================================
+________________ test_uncertain_when_checker_suspicious_dating _________________
+tests/test_workflows/test_claim_pipeline.py:1826: in test_uncertain_when_checker_suspicious_dating
+    assert payload.get("checker_suspicious_dating") is True
+E   AssertionError: assert None is True
+E    +  where None = <built-in method get of dict object at 0x301a37e00>('checker_suspicious_dating')
+E    +    where <built-in method get of dict object at 0x301a37e00> = {'claim_id': 'claim suspicious dating', 'coverage_labels': ['Trip cancellation or rescheduling'], 'coverage_label_codes': ['1'], 'reason_labels': ['Medical emergency'], ...}.get
+_______________ test_suspicious_dating_false_when_coherent_dates _______________
+tests/test_workflows/test_claim_pipeline.py:1894: in test_suspicious_dating_false_when_coherent_dates
+    assert payload.get("checker_suspicious_dating") is False
+E   AssertionError: assert None is False
+E    +  where None = <built-in method get of dict object at 0x3028e1680>('checker_suspicious_dating')
+E    +    where <built-in method get of dict object at 0x3028e1680> = {'claim_id': 'claim coherent dating', 'coverage_labels': ['Trip cancellation or rescheduling'], 'coverage_label_codes': ['1'], 'reason_labels': ['Medical emergency'], ...}.get
+_____________________ test_suspicious_dating_precedes_deny _____________________
+tests/test_workflows/test_claim_pipeline.py:1972: in test_suspicious_dating_precedes_deny
+    assert payload.get("checker_suspicious_dating") is True
+E   AssertionError: assert None is True
+E    +  where None = <built-in method get of dict object at 0x301a4fc40>('checker_suspicious_dating')
+E    +    where <built-in method get of dict object at 0x301a4fc40> = {'claim_id': 'claim dating precedes deny', 'coverage_labels': ['Trip cancellation or rescheduling'], 'coverage_label_codes': ['1'], 'reason_labels': ['Medical emergency'], ...}.get
+___________ test_load_config_reads_suspicious_dating_max_year_delta ____________
+tests/test_config/test_settings.py:177: in test_load_config_reads_suspicious_dating_max_year_delta
+    assert isinstance(delta, int)
+E   assert False
+E    +  where False = isinstance(None, int)
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_claim_pipeline.py::test_uncertain_when_checker_suspicious_dating
+FAILED tests/test_workflows/test_claim_pipeline.py::test_suspicious_dating_false_when_coherent_dates
+FAILED tests/test_workflows/test_claim_pipeline.py::test_suspicious_dating_precedes_deny
+FAILED tests/test_config/test_settings.py::test_load_config_reads_suspicious_dating_max_year_delta
+============================== 4 failed in 2.89s ===============================

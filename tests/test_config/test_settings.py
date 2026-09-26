@@ -170,6 +170,14 @@ def test_load_config_reads_authenticity_and_incomplete_prompts() -> None:
     assert isinstance(incomplete, str) and incomplete.strip()
 
 
+def test_load_config_reads_suspicious_dating_max_year_delta() -> None:
+    """checking.suspicious_dating_max_year_delta is a positive int (R029 / A16)."""
+    config = load_config("config.yaml")
+    delta = getattr(config.checking, "suspicious_dating_max_year_delta", None)
+    assert isinstance(delta, int)
+    assert delta >= 1
+
+
 def test_load_config_reads_analysis_section() -> None:
     config = load_config("config.yaml")
     stages = (

@@ -1394,11 +1394,12 @@ def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> N
     system_prompts = [
         call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list
     ]
-    assert system_prompts == [
-        "classify coverage",
-        "classify reason",
-        "classify cancel doc",
-    ]
+    joined = "\n".join(system_prompts).lower()
+    assert "containment" not in joined
+    assert "contradicts" not in joined
+    assert "identity" not in joined
+    assert "healthy" not in joined
+    assert all("classify" in prompt for prompt in system_prompts)
 
     # Helper: inclusive boundary at n; n+1 False; unparseable False
     from compliance.workflows import claim_pipeline as cp

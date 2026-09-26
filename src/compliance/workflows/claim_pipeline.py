@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -14,6 +16,7 @@ from compliance.llm.checker import Checker
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
 from compliance.models.claim import GroundTruth
 from compliance.preprocessing.claim_batch import _discover_claim_folders
+from compliance.preprocessing.markdown import MarkdownPreprocessor
 from compliance.workflows.pipeline import _is_claim_folder, _validate_claim_dir_name
 from compliance.workflows.predicted_answer_io import write_analysis_predicted_answer
 
@@ -22,6 +25,35 @@ logger = logging.getLogger(__name__)
 _DECISION_APPROVE = "APPROVE"
 _DECISION_DENY = "DENY"
 _DECISION_UNCERTAIN = "UNCERTAIN"
+
+# Calendar-date token patterns (order: ISO first, then day-first numerics, then English).
+_DATE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_DATE_DMY = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
+_DATE_DMONTH_Y = re.compile(
+    r"\b(\d{1,2})\s+"
+    r"(January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+_DATE_MONTH_D_Y = re.compile(
+    r"\b(January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+(\d{1,2}),?\s+(\d{4})\b",
+    re.IGNORECASE,
+)
+_MONTH_NUM: dict[str, int] = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
 
 
 class ClaimAnalysisState(TypedDict, total=False):
@@ -43,6 +75,10 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param document_has_signature: True when document_metadata reports has_signature.
     :param signature_check: True when signature requirement passes (or N/A).
     :param healthy_check: True when supporting_document asserts patient is healthy.
+    :param departure_within_days: True when departure is within the configured
+        day window of reference today (deterministic UNCERTAIN).
+    :param multiple_document_dates: True when OCR supporting_document text has
+        two or more distinct calendar days (deterministic UNCERTAIN).
     :param human_in_the_loop: True when OCR metadata already flagged review, or any
         classifier returned ``False`` (confident none-of-the-above).
     """
@@ -62,7 +98,154 @@ class ClaimAnalysisState(TypedDict, total=False):
     document_has_signature: bool
     signature_check: bool
     healthy_check: bool
+    departure_within_days: bool
+    multiple_document_dates: bool
     human_in_the_loop: bool
+
+
+def _safe_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _parse_calendar_date(raw: str) -> date | None:
+    """Parse the first calendar date from a booking/OCR string.
+
+    Supports ISO ``YYYY-MM-DD``, day-first ``DD/MM/YYYY`` (also ``-`` / ``.``),
+    and English month names. Trailing time suffixes are ignored (ISO match first).
+
+    :param raw: Free-text value that may contain a date.
+    :return: Parsed ``date``, or None when unparseable.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    match = _DATE_ISO.search(text)
+    if match:
+        return _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    match = _DATE_DMONTH_Y.search(text)
+    if match:
+        return _safe_date(
+            int(match.group(3)),
+            _MONTH_NUM[match.group(2).lower()],
+            int(match.group(1)),
+        )
+    match = _DATE_MONTH_D_Y.search(text)
+    if match:
+        return _safe_date(
+            int(match.group(3)),
+            _MONTH_NUM[match.group(1).lower()],
+            int(match.group(2)),
+        )
+    match = _DATE_DMY.search(text)
+    if match:
+        return _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+    return None
+
+
+def _unique_calendar_dates(text: str) -> set[date]:
+    """Collect distinct calendar days mentioned in free text.
+
+    :param text: OCR or narrative text that may contain multiple date tokens.
+    :return: Set of successfully parsed calendar dates.
+    """
+    if not text:
+        return set()
+    found: set[date] = set()
+    for match in _DATE_ISO.finditer(text):
+        parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if parsed is not None:
+            found.add(parsed)
+    for match in _DATE_DMONTH_Y.finditer(text):
+        parsed = _safe_date(
+            int(match.group(3)),
+            _MONTH_NUM[match.group(2).lower()],
+            int(match.group(1)),
+        )
+        if parsed is not None:
+            found.add(parsed)
+    for match in _DATE_MONTH_D_Y.finditer(text):
+        parsed = _safe_date(
+            int(match.group(3)),
+            _MONTH_NUM[match.group(1).lower()],
+            int(match.group(2)),
+        )
+        if parsed is not None:
+            found.add(parsed)
+    for match in _DATE_DMY.finditer(text):
+        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        if parsed is not None:
+            found.add(parsed)
+    return found
+
+
+def _booking_fields(supporting_documents_text: str) -> dict[str, str]:
+    """Extract canonical BookingData fields from booking markdown.
+
+    :param supporting_documents_text: ``supporting_documents.md`` contents.
+    :return: Dict of BookingData field name → string value.
+    """
+    if not supporting_documents_text:
+        return {}
+    return MarkdownPreprocessor().preprocess(supporting_documents_text)
+
+
+def _reference_today(supporting_documents_text: str, *, fallback: date) -> date:
+    """Resolve reference today from booking ``current_date``, else ``fallback``.
+
+    :param supporting_documents_text: Booking markdown text.
+    :param fallback: Clock date when booking has no parseable current_date.
+    :return: Calendar date used as the proximity reference.
+    """
+    fields = _booking_fields(supporting_documents_text)
+    current_raw = fields.get("current_date")
+    if current_raw:
+        parsed = _parse_calendar_date(str(current_raw))
+        if parsed is not None:
+            return parsed
+    return fallback
+
+
+def _departure_within_days(
+    *,
+    supporting_documents_text: str,
+    description_text: str,
+    today: date,
+    within_days: int,
+) -> bool:
+    """True when departure is within ``within_days`` of ``today`` (inclusive).
+
+    Departure source priority: booking markdown ``departure`` via
+    ``MarkdownPreprocessor``; else first parseable date in ``description_text``.
+    Unparseable departure → False.
+
+    :param supporting_documents_text: Booking/internal markdown.
+    :param description_text: Claim narrative fallback for departure date.
+    :param today: Reference today (injected; pipeline resolves from booking).
+    :param within_days: Inclusive absolute day threshold from config.
+    :return: Whether proximity UNCERTAIN should fire.
+    """
+    fields = _booking_fields(supporting_documents_text)
+    departure: date | None = None
+    raw_dep = fields.get("departure")
+    if raw_dep:
+        departure = _parse_calendar_date(str(raw_dep))
+    if departure is None:
+        departure = _parse_calendar_date(description_text)
+    if departure is None:
+        return False
+    return abs((departure - today).days) <= within_days
+
+
+def _has_multiple_document_dates(supporting_document_text: str) -> bool:
+    """True when medical OCR text contains two or more distinct calendar days.
+
+    :param supporting_document_text: ``supporting_document.md`` OCR markdown only.
+    :return: Whether multiple-document-dates UNCERTAIN should fire.
+    """
+    return len(_unique_calendar_dates(supporting_document_text)) >= 2
 
 
 class ClaimPipeline:
@@ -284,11 +467,7 @@ class ClaimPipeline:
     def _load_artifacts_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         claim_id = state["claim_id"]
         _validate_claim_dir_name(claim_id)
-        input_root = (
-            Path(state["input_root"])
-            if state.get("input_root")
-            else self.preprocessed_root / claim_id
-        )
+        input_root = self._claim_input_root(state)
         texts = self._loaded_claim_texts(claim_id, input_root=input_root)
         has_signature = self._document_has_signature(claim_id, input_root=input_root)
         human_in_the_loop = self._document_human_in_the_loop(
@@ -387,25 +566,39 @@ class ClaimPipeline:
             run_identity=run_identity,
         )
         signature_check = self._signature_check_result(state)
+        early_uncertain = bool(results.get("departure_within_days")) or bool(
+            results.get("multiple_document_dates")
+        )
+        reason = (
+            "date_uncertain_skip_llm"
+            if early_uncertain
+            else "containment_contradicts_identity_signature_healthy"
+        )
         log_branch_decision(
             logger,
             branch="run_checker",
             outcome="CHECKED",
-            reason="containment_contradicts_identity_signature_healthy",
+            reason=reason,
             claim=state.get("claim_id"),
-            identity_check=results["identity_check"],
-            identity_unclear=results["identity_unclear"],
+            identity_check=results.get("identity_check"),
+            identity_unclear=results.get("identity_unclear"),
             signature_check=signature_check,
-            healthy_check=results["healthy_check"],
+            healthy_check=results.get("healthy_check"),
+            departure_within_days=results.get("departure_within_days"),
+            multiple_document_dates=results.get("multiple_document_dates"),
         )
-        return {
-            "checker_containment": results["checker_containment"],
-            "checker_contradicts": results["checker_contradicts"],
-            "identity_check": results["identity_check"],
-            "identity_unclear": results["identity_unclear"],
+        payload: dict[str, object] = {
+            "departure_within_days": results["departure_within_days"],
+            "multiple_document_dates": results["multiple_document_dates"],
             "signature_check": signature_check,
-            "healthy_check": results["healthy_check"],
         }
+        if not early_uncertain:
+            payload["checker_containment"] = results["checker_containment"]
+            payload["checker_contradicts"] = results["checker_contradicts"]
+            payload["identity_check"] = results["identity_check"]
+            payload["identity_unclear"] = results["identity_unclear"]
+            payload["healthy_check"] = results["healthy_check"]
+        return payload
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         hitl = self._resolved_human_in_the_loop(state)
@@ -506,11 +699,7 @@ class ClaimPipeline:
         :param state: Graph state with claim_id and optional input_root.
         """
         claim_id = state["claim_id"]
-        claim_in = (
-            Path(state["input_root"])
-            if state.get("input_root")
-            else self.preprocessed_root / claim_id
-        )
+        claim_in = self._claim_input_root(state)
         artifacts = self._config.preprocessing.artifacts
         path = claim_in / artifacts.document_metadata
         entries = self._document_metadata_entries(claim_id, input_root=claim_in)
@@ -650,7 +839,11 @@ class ClaimPipeline:
         *,
         run_identity: bool,
     ) -> dict[str, bool]:
-        """Run Checker containment, contradicts, identity, and healthy modes.
+        """Run deterministic date checks, then Checker LLM modes when needed.
+
+        Always computes ``departure_within_days`` and ``multiple_document_dates``.
+        When either is True, returns early without constructing ``Checker`` /
+        calling chat — LLM keys are omitted from the result dict.
 
         Identity compares the passenger ``name`` in ``supporting_documents.md``
         (booking / internal record) against the patient/subject name in
@@ -661,10 +854,24 @@ class ClaimPipeline:
         :param supporting_document_text: Medical/supporting OCR markdown.
         :param supporting_documents_text: Booking/internal markdown with ``name``.
         :param run_identity: When False, identity passes without an LLM call.
-        :return: Dict with checker_containment, checker_contradicts, identity_check,
-            identity_unclear, healthy_check.
+        :return: Dict with date flags and optionally checker LLM results.
         """
         checking = self._config.checking
+        today = _reference_today(supporting_documents_text, fallback=date.today())
+        departure_flag = _departure_within_days(
+            supporting_documents_text=supporting_documents_text,
+            description_text=description_text,
+            today=today,
+            within_days=checking.departure_uncertain_within_days,
+        )
+        multiple_dates_flag = _has_multiple_document_dates(supporting_document_text)
+        date_flags = {
+            "departure_within_days": departure_flag,
+            "multiple_document_dates": multiple_dates_flag,
+        }
+        if departure_flag or multiple_dates_flag:
+            return date_flags
+
         checker = Checker(
             model_name=checking.model,
             containment_prompt=checking.containment_prompt,
@@ -694,6 +901,7 @@ class ClaimPipeline:
             mode="healthy",
         )
         return {
+            **date_flags,
             "checker_containment": containment,
             "checker_contradicts": contradicts,
             "identity_check": identity_check,
@@ -742,6 +950,10 @@ class ClaimPipeline:
             payload["signature_check"] = bool(state["signature_check"])
         if "healthy_check" in state:
             payload["healthy_check"] = bool(state["healthy_check"])
+        if "departure_within_days" in state:
+            payload["departure_within_days"] = bool(state["departure_within_days"])
+        if "multiple_document_dates" in state:
+            payload["multiple_document_dates"] = bool(state["multiple_document_dates"])
         if "document_labels" in state:
             payload["checker_missing_documentation"] = self._is_missing_documentation(
                 state
@@ -873,10 +1085,18 @@ class ClaimPipeline:
     def _decision_from_state(self, state: ClaimAnalysisState) -> GroundTruth:
         """Derive APPROVE/DENY/UNCERTAIN for evaluator-facing predicted_answer.
 
+        Precedence (locked):
+        1. Coverage abstention → UNCERTAIN ``coverage_false_label``
+        2. ``departure_within_days`` → UNCERTAIN (before DENY)
+        3. ``multiple_document_dates`` → UNCERTAIN (before DENY)
+        4. ``_violated_checkers`` non-empty → DENY
+        5. ``identity_unclear`` → UNCERTAIN
+        6. APPROVE ``checker_consistent``
+
+        Date UNCERTAIN flags sit before DENY so an early-exit path cannot fall
+        through to signature/identity deny when proximity/dating fired.
         Missing documentation uses required document types for the coverage/reason
-        path. Containment is recorded but does not drive DENY. Coverage-only
-        (other) paths → UNCERTAIN. Identity with no clear patient field → UNCERTAIN
-        when no hard deny rules fired. On DENY, ``explanation`` lists violated keys.
+        path. Containment is recorded but does not drive DENY.
 
         :param state: Final graph state.
         :return: GroundTruth decision written beside analysis_result.
@@ -887,6 +1107,16 @@ class ClaimPipeline:
             return GroundTruth(
                 decision=_DECISION_UNCERTAIN,
                 explanation="coverage_false_label",
+            )
+        if bool(state.get("departure_within_days")):
+            return GroundTruth(
+                decision=_DECISION_UNCERTAIN,
+                explanation="departure_within_days",
+            )
+        if bool(state.get("multiple_document_dates")):
+            return GroundTruth(
+                decision=_DECISION_UNCERTAIN,
+                explanation="multiple_document_dates",
             )
         violated = self._violated_checkers(state)
         if violated:
@@ -936,6 +1166,16 @@ class ClaimPipeline:
         payload = decision.model_dump(mode="json")
         payload["human_in_the_loop"] = hitl
         return write_analysis_predicted_answer(path, payload)
+
+    def _claim_input_root(self, state: ClaimAnalysisState) -> Path:
+        """Resolve the artifact directory for ``state`` (input_root or preprocessed).
+
+        :param state: Graph state with claim_id and optional input_root string.
+        :return: Directory holding description / supporting_document artifacts.
+        """
+        if state.get("input_root"):
+            return Path(state["input_root"])
+        return self.preprocessed_root / state["claim_id"]
 
     def _analysis_result_path(self, claim_id: str) -> Path:
         return (

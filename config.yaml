@@ -92,6 +92,8 @@ checking:
     (no illness supporting a medical cancellation claim),
     {"result": false} if the document describes illness, injury, hospitalization,
     incapacity, or does not assert that the patient is healthy.
+  # Inclusive day window: |departure − reference today| ≤ n → UNCERTAIN.
+  departure_uncertain_within_days: 14
 
 analysis:
   coverage:

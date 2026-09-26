@@ -82,7 +82,22 @@ class ClassificationConfig(BaseModel):
         """
         names = dict(self.label_names)
         names.setdefault(self.other_label, self.other_label)
+        names.setdefault("False", "False")
         return [names.get(code, code) for code in codes]
+
+    def abstention_labels(self) -> set[str]:
+        """Labels that mean no positive class was chosen (``False`` abstention).
+
+        :return: Set containing ``other_label`` and ``False`` when either is used.
+        """
+        return {self.other_label, "False"}
+
+    def positive_labels(self) -> list[str]:
+        """Class codes excluding confident-negative ``False``.
+
+        :return: Labels used as real coverage/reason/document types.
+        """
+        return [label for label in self.labels if label != "False"]
 
 
 class CheckingConfig(BaseModel):
@@ -93,6 +108,9 @@ class CheckingConfig(BaseModel):
     :param contradicts_prompt: System prompt for contradiction checks.
     :param identity_prompt: System prompt for claimant-name vs document-name checks.
     :param healthy_prompt: System prompt for healthy / fit certificate detection.
+    :param departure_uncertain_within_days: Inclusive absolute day window; when
+        departure is within this many days of reference today, analysis yields
+        UNCERTAIN (``departure_within_days``) without running LLM checkers.
     """
 
     model: str
@@ -100,6 +118,7 @@ class CheckingConfig(BaseModel):
     contradicts_prompt: str
     identity_prompt: str
     healthy_prompt: str
+    departure_uncertain_within_days: int = 14
 
 
 class RequiredDocumentsConfig(BaseModel):

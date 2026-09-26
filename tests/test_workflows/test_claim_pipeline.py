@@ -1441,3 +1441,119 @@ def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> N
         is False
     )
 
+
+def test_uncertain_multiple_document_dates_skips_llm_checkers(tmp_path: Path) -> None:
+    """Two distinct OCR calendar days → UNCERTAIN; skip LLM checkers."""
+    from datetime import date
+
+    from compliance.workflows import claim_pipeline as cp
+
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim multiple dates")
+    artifacts = config.preprocessing.artifacts
+    # Departure far from reference today so only multiple_document_dates fires.
+    (claim_dir / artifacts.supporting_documents).write_text(
+        "# Supporting documents\n\n"
+        "**current date**: 2017-01-01\n"
+        "**name**: Olivier Bayante\n"
+        "**departure**: 2017-06-01\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# Supporting document\n\n"
+        "I had to cancel my flight to Paris because of a medical emergency.\n"
+        "Admission on 14 April 2017. Follow-up visit on 20 April 2017.\n",
+        encoding="utf-8",
+    )
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+        }
+    )
+    chat_fn = MagicMock(side_effect=[coverage, reason, document])
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["decision"] == "UNCERTAIN"
+    assert payload["decision_explanation"] == "multiple_document_dates"
+    assert payload["multiple_document_dates"] is True
+    assert payload["departure_within_days"] is False
+    assert "checker_containment" not in payload
+    assert chat_fn.call_count == 3
+
+    dates = cp._unique_calendar_dates(
+        "Seen 14 April 2017 and again on April 20, 2017. Stamp 14/04/2017."
+    )
+    assert dates == {date(2017, 4, 14), date(2017, 4, 20)}
+    # Same calendar day repeated → single unique date
+    assert len(cp._unique_calendar_dates("Visit 2017-04-14 and again 14/04/2017.")) == 1
+
+
+def test_departure_within_and_multiple_document_dates_prefer_departure(
+    tmp_path: Path,
+) -> None:
+    """When both date flags fire, both persist; explanation is departure_within_days."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim both date flags")
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.supporting_documents).write_text(
+        "# Supporting documents\n\n"
+        "**current date**: 2017-08-01\n"
+        "**name**: Olivier Bayante\n"
+        "**departure**: 2017-08-10\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# Supporting document\n\n"
+        "I had to cancel my flight to Paris because of a medical emergency.\n"
+        "Certificate dated 01/08/2017. Discharge 10/08/2017.\n",
+        encoding="utf-8",
+    )
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+        }
+    )
+    chat_fn = MagicMock(side_effect=[coverage, reason, document])
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["departure_within_days"] is True
+    assert payload["multiple_document_dates"] is True
+    assert payload["decision"] == "UNCERTAIN"
+    assert payload["decision_explanation"] == "departure_within_days"
+    assert chat_fn.call_count == 3
+    assert "checker_contradicts" not in payload
+

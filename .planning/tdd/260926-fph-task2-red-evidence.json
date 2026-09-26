@@ -1,0 +1,10 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py -k 'departure_within or multiple_document_dates' -x -q",
+  "exitCode": 0,
+  "output": "ok 1 - test_uncertain_departure_within_days_skips_llm_checkers\nok 2 - test_uncertain_multiple_document_dates_skips_llm_checkers\nok 3 - test_departure_within_and_multiple_document_dates_prefer_departure\n# tests 3\n# pass 3\n# fail 0\n",
+  "targetTest": "test_uncertain_multiple_document_dates_skips_llm_checkers",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "multiple OCR dates yield UNCERTAIN with early LLM skip; combined flags prefer departure explanation",
+  "actual": "FEATURE_ALREADY_PRESENT: helpers/early-return/decision fold landed in Task 1 GREEN (D-03 both flags); Task 2 adds regression tests only (no separate RED)",
+  "note": "tdd_skip_red_reason=prior_task_implementation"
+}

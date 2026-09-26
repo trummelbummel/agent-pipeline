@@ -32,7 +32,7 @@ from main import main
 def _analysis_config() -> AnalysisConfig:
     stage = ClassificationConfig(
         labels=["1"],
-        other_label="None",
+        other_label="False",
         model="test-model",
         prompt="classify",
     )
@@ -62,7 +62,7 @@ def _config(
         extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
         classification=ClassificationConfig(
             labels=["1"],
-            other_label="Other",
+            other_label="False",
             model="test-model",
             prompt="classify",
         ),
@@ -206,6 +206,54 @@ def test_process_claim_skips_predicted_answer_without_pipeline_decision(tmp_path
 
     assert not (claim_out / config.preprocessing.artifacts.predicted_answer).exists()
     assert not (results_root / "claim 8" / config.preprocessing.artifacts.predicted_answer).exists()
+
+
+def test_process_claim_preserves_analysis_predicted_answer_without_decision(
+    tmp_path: Path,
+) -> None:
+    claim = tmp_path / "claim 9"
+    claim.mkdir()
+    (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
+    (claim / "description.txt").write_text("Please refund.", encoding="utf-8")
+    (claim / "scan.png").write_bytes(b"png")
+
+    output_root = tmp_path / "preprocessed_out"
+    results_root = tmp_path / "results_out"
+    results_claim = results_root / "claim 9"
+    results_claim.mkdir(parents=True)
+    predicted_name = "predicted_answer.json"
+    predicted_payload = {
+        "decision": "APPROVE",
+        "explanation": "checker_consistent",
+        "source": "analysis",
+    }
+    (results_claim / predicted_name).write_text(
+        json.dumps(predicted_payload),
+        encoding="utf-8",
+    )
+    (results_claim / "analysis_result.json").write_text(
+        json.dumps({"decision": "APPROVE"}),
+        encoding="utf-8",
+    )
+    config = _config(tmp_path, results_dir=results_root)
+    PreprocessingPipeline(
+        config,
+        description_reader=_mock_description_reader(),
+        document_reader=_mock_document_reader(
+            {
+                "scan.png": DocumentData(
+                    raw_text="ok",
+                    metadata=DocumentMetaData(extraction_probability=0.9),
+                )
+            }
+        ),
+    ).process_claim(claim, output_root)
+
+    predicted_path = results_claim / config.preprocessing.artifacts.predicted_answer
+    assert predicted_path.is_file()
+    preserved = json.loads(predicted_path.read_text(encoding="utf-8"))
+    assert preserved["decision"] == "APPROVE"
+    assert preserved["source"] == "analysis"
 
 
 def test_process_claim_writes_four_artifacts(tmp_path: Path) -> None:
@@ -423,7 +471,7 @@ def test_main_runs_workflow_with_injected_config_path(
                 "  prompt: extract",
                 "classification:",
                 "  labels: [\"1\"]",
-                "  other_label: Other",
+                "  other_label: \"False\"",
                 "  model: test-model",
                 "  prompt: classify",
                 "checking:",
@@ -431,30 +479,31 @@ def test_main_runs_workflow_with_injected_config_path(
                 "  containment_prompt: check containment",
                 "  contradicts_prompt: check contradicts",
                 "  identity_prompt: check identity",
+                "  healthy_prompt: check healthy",
                 "analysis:",
                 "  coverage:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  cancellation_reason:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  cancellation_document:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  personal_effects_document:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  missed_departure_document:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "ocr_retry:",
@@ -590,7 +639,7 @@ def test_cli_or_api_passes_path_from_outside(
                 "  prompt: extract",
                 "classification:",
                 "  labels: [\"1\"]",
-                "  other_label: Other",
+                "  other_label: \"False\"",
                 "  model: test-model",
                 "  prompt: classify",
                 "checking:",
@@ -598,30 +647,31 @@ def test_cli_or_api_passes_path_from_outside(
                 "  containment_prompt: check containment",
                 "  contradicts_prompt: check contradicts",
                 "  identity_prompt: check identity",
+                "  healthy_prompt: check healthy",
                 "analysis:",
                 "  coverage:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  cancellation_reason:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  cancellation_document:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  personal_effects_document:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "  missed_departure_document:",
                 "    labels: [\"1\"]",
-                "    other_label: None",
+                "    other_label: \"False\"",
                 "    model: test-model",
                 "    prompt: classify",
                 "ocr_retry:",

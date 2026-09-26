@@ -221,7 +221,7 @@ Existing Checker containment + contradicts remain. Benford authenticity stays op
 
 **Requirements**: R023, R024, R025, R026, R027, R028, R029
 **Depends on:** Phase 4 (ClaimPipeline + Checker)
-**Plans:** 2/5 plans executed
+**Plans:** 3/5 plans executed
 
 Plans:
 
@@ -235,7 +235,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 07-01b-PLAN.md — Propagate CheckingConfig authenticity/incomplete prompts across secondary test helpers (R023)
+- [x] 07-01b-PLAN.md — Propagate CheckingConfig authenticity/incomplete prompts across secondary test helpers (R023)
 
 **Wave 3** *(blocked on Wave 2)*
 

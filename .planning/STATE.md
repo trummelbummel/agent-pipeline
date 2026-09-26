@@ -8,7 +8,7 @@ status: verifying
 stopped_at: Completed 260926-fph-PLAN.md
 last_updated: "2026-09-26T09:30:01.953Z"
 last_activity: 2026-09-26
-last_activity_desc: Completed 05-00 Wave 0 FastAPI foundation
+last_activity_desc: "Completed quick task 260926-gij: common API fixtures"
 state_head: d36caa805aa6a1f7195da858e4312120c1e9813c
 progress:
   total_phases: 8
@@ -32,7 +32,7 @@ Phase: 05 — FastAPI Claims API
 Current Plan: 4
 Total Plans in Phase: 4
 Status: Phase complete — ready for verification
-Last activity: 2026-09-26 - Completed quick task 260926-fph: UNCERTAIN date checkers
+Last activity: 2026-09-26 - Completed quick task 260926-gij: create common fixtures across API tests and update dedup-review
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -108,6 +108,7 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260926-gij | Create common fixtures across API tests and update dedup-review fixture detection | 2026-09-26 | 3c1582d | [260926-gij-create-common-fixtures-across-api-tests-](./quick/260926-gij-create-common-fixtures-across-api-tests-/) |
 | 260926-fph | Add two analysis checkers that yield UNCERTAIN (departure proximity; multiple OCR dates) | 2026-09-26 | cbfa126 | [260926-fph-add-two-analysis-checkers-that-yield-unc](./quick/260926-fph-add-two-analysis-checkers-that-yield-unc/) |
 | 260926-f9c | In evaluation, also run statistics over analysis_result.json and visualize as bar charts | 2026-09-26 | c0b13ea | [260926-f9c-in-evaluation-also-run-statistics-over-a](./quick/260926-f9c-in-evaluation-also-run-statistics-over-a/) |
 | 260926-bwk | Fix the stale prediction issue: preprocess must not delete analysis-authored predicted_answer | 2026-09-26 | aa87ffb | [260926-bwk-fix-the-stale-prediction-issue-preproces](./quick/260926-bwk-fix-the-stale-prediction-issue-preproces/) |

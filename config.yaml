@@ -36,22 +36,18 @@ classification:
     - "1"
     - "2"
     - "3"
-    - "False"
   label_names:
     "1": Trip cancellation or rescheduling
     "2": Personal Effects
     "3": Missed Departure or Missed Connection
-    "False": "False"
-  other_label: "False"
+  other_label: Other
   model: qwen2.5:7b
   prompt: |
     Classify the claim description into one or more of the allowed coverage labels.
     Labels are numeric codes. Use this mapping:
 
     1 = Trip cancellation or rescheduling — If your trip is cancelled or rescheduled
-    for a covered reason, you may be eligible for compensation. "Trip" includes
-    holidays and also sports events, competitions, camps, stages, and similar
-    booked activities (e.g. sports internship, canoe camp, race registration).
+    for a covered reason, you may be eligible for compensation.
     2 = Personal Effects — If your personal belongings are lost or damaged during
     your trip, you may be eligible for compensation.
     3 = Missed Departure or Missed Connection — If you miss a scheduled departure
@@ -59,9 +55,8 @@ classification:
 
     Return JSON with keys "labels" (array of selected label codes as strings) and
     "probabilities" (object mapping each allowed label code to a float in [0, 1]).
-    Use "False" when none of the listed classes apply, or when you are uncertain
-    which class applies — do not guess. Do not return description text as a label —
-    only the numeric codes or "False".
+    Use {other_label} only when no coverage class fits. Do not return description text
+    as a label — only the numeric codes (or {other_label}).
 
 checking:
   model: qwen2.5:7b
@@ -79,8 +74,7 @@ checking:
     patient or subject name on the medical supporting-document text (second block).
 
     Compare only the patient / subject / claimant / insured name on the medical
-    document, fuzzy matches are also allowed as there can be spelling or transctiption 
-    errors. Ignore doctor, physician, surgeon, nurse, facility, hospital,
+    document. Ignore doctor, physician, surgeon, nurse, facility, hospital,
     clinic, laboratory, stamp, letterhead, and signature-block names — those are
     not the patient.
 
@@ -106,22 +100,18 @@ analysis:
       - "1"
       - "2"
       - "3"
-      - "False"
     label_names:
       "1": Trip cancellation or rescheduling
       "2": Personal Effects
       "3": Missed Departure or Missed Connection
-      "False": "False"
-    other_label: "False"
+    other_label: "None"
     model: qwen2.5:7b
     prompt: |
       Classify the claim description into one or more of the allowed coverage labels.
       Labels are numeric codes. Use this mapping:
 
       1 = Trip cancellation or rescheduling — If your trip is cancelled or rescheduled
-      for a covered reason, you may be eligible for compensation. "Trip" includes
-      holidays and also sports events, competitions, camps, stages, and similar
-      booked activities (e.g. sports internship, canoe camp, race registration).
+      for a covered reason, you may be eligible for compensation.
       2 = Personal Effects — If your personal belongings are lost or damaged during
       your trip, you may be eligible for compensation.
       3 = Missed Departure or Missed Connection — If you miss a scheduled departure
@@ -129,9 +119,8 @@ analysis:
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
-      Use "False" when none of the listed classes apply, or when you are uncertain
-      which class applies — do not guess. Do not return description text as a label —
-      only the numeric codes or "False".
+      Use {other_label} only when no coverage class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   cancellation_reason:
     # Numeric reason labels; descriptions live in the prompt mapping below.
     labels:
@@ -139,14 +128,12 @@ analysis:
       - "2"
       - "3"
       - "4"
-      - "False"
     label_names:
       "1": Jury duty
       "2": Medical emergency
       "3": Theft or criminal incident
       "4": Other specified personal emergencies
-      "False": "False"
-    other_label: "False"
+    other_label: "None"
     model: qwen2.5:7b
     prompt: |
       Classify the cancellation reason from the claim description into the allowed labels.
@@ -159,9 +146,8 @@ analysis:
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
-      Use "False" when none of the listed classes apply, or when you are uncertain
-      which class applies — do not guess. Do not return description text as a label —
-      only the numeric codes or "False".
+      Use {other_label} only when no reason class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   cancellation_document:
     # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
@@ -169,14 +155,12 @@ analysis:
       - "2"
       - "3"
       - "4"
-      - "False"
     label_names:
       "1": medical certificate
       "2": police report
       "3": jury summon letter
       "4": hospital admission
-      "False": "False"
-    other_label: "False"
+    other_label: "None"
     model: qwen2.5:7b
     prompt: |
       Classify the supporting document type from the document text into the allowed labels.
@@ -189,18 +173,15 @@ analysis:
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
-      Use "False" when none of the listed classes apply, or when you are uncertain
-      which class applies — do not guess. Do not return description text as a label —
-      only the numeric codes or "False".
+      Use {other_label} only when no document class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   personal_effects_document:
     # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
       - "1"
-      - "False"
     label_names:
       "1": Proof of theft, loss, or damage
-      "False": "False"
-    other_label: "False"
+    other_label: "None"
     model: qwen2.5:7b
     prompt: |
       Classify the personal-effects supporting document from the document text.
@@ -211,20 +192,17 @@ analysis:
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
-      Use "False" when none of the listed classes apply, or when you are uncertain
-      which class applies — do not guess. Do not return description text as a label —
-      only the numeric codes or "False".
+      Use {other_label} only when no document class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   missed_departure_document:
     # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
       - "1"
       - "2"
-      - "False"
     label_names:
       "1": Incident report or documentation explaining the cause of delay
       "2": Proof of booking
-      "False": "False"
-    other_label: "False"
+    other_label: "None"
     model: qwen2.5:7b
     prompt: |
       Classify the missed-departure supporting document from the document text.
@@ -235,9 +213,8 @@ analysis:
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
-      Use "False" when none of the listed classes apply, or when you are uncertain
-      which class applies — do not guess. Do not return description text as a label —
-      only the numeric codes or "False".
+      Use {other_label} only when no document class fits. Do not return description text
+      as a label — only the numeric codes (or {other_label}).
   # Acceptable supporting-document codes for missing-documentation checks.
   # Keys/codes match coverage, cancellation_reason, and document stage labels above.
   required_documents:
@@ -278,27 +255,20 @@ logging:
   format: "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 ocr_retry:
-  # Preprocess-only vision retry after weak Docling OCR (DocumentReader).
-  # Triggers (any enabled match → one text retry): faulty ExtractionFailure,
-  # low extraction_probability, or human_in_the_loop. When Docling leaves
-  # has_signature false, a second LightOn pass uses signature_prompt to confirm.
-  # Analysis never retries OCR.
+  # Vision retry after weak Docling OCR. Triggers (any enabled match → one retry):
+  # faulty ExtractionFailure, low extraction_probability, or human_in_the_loop.
+  # Analysis may retry once more when identity returns unclear and preprocess
+  # did not already retry (on_identity_unclear).
   enabled: true
   on_faulty_extraction: true
   on_low_confidence: true
   on_human_in_the_loop: true
-  on_missing_signature: true
+  on_identity_unclear: true
   model: Maternion/LightOnOCR-2:1b
   prompt: |
     Transcribe all readable text from this document image into clean markdown
     or plain text. Preserve key-value lines and headings. Do not add commentary,
     translation notes, or explanations — return only the document text.
-  signature_prompt: |
-    Look at this document image. Does it contain a handwritten signature, signed
-    name, ink signature, or signature stamp/block (firma, signature, signed by,
-    soussigné signature)? Ignore printed letterheads, logos, QR codes, and typed
-    names alone without a handwritten or ink mark.
-    Return JSON only: {"has_signature": true} or {"has_signature": false}.
 
 evaluation:
   labels:

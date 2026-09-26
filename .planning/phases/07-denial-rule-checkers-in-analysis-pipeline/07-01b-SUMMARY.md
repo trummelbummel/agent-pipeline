@@ -17,7 +17,7 @@ affects:
 actuals:
   tokens: 2594
   tasks: 1
-  commits: 1
+  commits: 3
 
 plan_head_before: 3bf0459d8eb70c57cf5563f75c092c8ea570610b
 
@@ -83,6 +83,8 @@ status: complete
 ## Task Commits
 
 1. **Task 1: Propagate CheckingConfig new prompts across remaining test helpers** - `5fad912` (test)
+
+**Plan metadata:** `e671a02` (docs: complete plan)
 
 ## Files Created/Modified
 

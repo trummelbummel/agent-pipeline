@@ -150,4 +150,4 @@ Resume file: None
 | Phase 260926-fph P01 | 8min | 2 tasks | 5 files |
 | Phase 07 P00 | 3min | 2 tasks | 4 files |
 | Phase 07-denial-rule-checkers-in-analysis-pipeline P01 | 7min | 1 tasks | 9 files |
-| Phase 07 P01b | 122min | 1 tasks | 8 files |
+| Phase 07 P01b | 3min | 1 tasks | 8 files |

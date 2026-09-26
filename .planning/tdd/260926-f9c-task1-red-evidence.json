@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_evaluation/test_analysis_stats.py tests/test_evaluation/test_cli.py -x --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_aggregate_two_claims_decisions_and_sorted_ids\nnot ok 2 - test_aggregate_soft_skips_missing_and_invalid\nnot ok 3 - test_cli_writes_metrics_json\nnot ok 4 - test_cli_exit_zero_on_empty_batch\nok 5 - test_aggregate_empty_results_dir\n# tests 5\n# pass 1\n# fail 4\n",
+  "targetTest": "test_aggregate_two_claims_decisions_and_sorted_ids",
+  "targetFile": "tests/test_evaluation/test_analysis_stats.py",
+  "expected": "aggregate_analysis_stats returns n_claims=2 with sorted claim_ids and decision/checker/label counts",
+  "actual": "AssertionError: assert 0 == 2 (stub returns empty AnalysisStats with n_claims=0)"
+}

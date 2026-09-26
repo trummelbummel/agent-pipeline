@@ -23,7 +23,7 @@ extraction:
     extract
 classification:
   labels: ["1"]
-  other_label: Other
+  other_label: "False"
   model: test-model
   prompt: |
     classify
@@ -36,27 +36,27 @@ checking:
 analysis:
   coverage:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: classify coverage
   cancellation_reason:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: classify reason
   cancellation_document:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: classify cancel doc
   personal_effects_document:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: classify pe doc
   missed_departure_document:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: classify missed doc
 logging:
@@ -67,6 +67,8 @@ evaluation:
   metrics_artifact: evaluation_metrics.json
   confusion_matrix_artifact: confusion_matrix.json
   visualization_artifact: evaluation_visualization.png
+  analysis_stats_artifact: analysis_stats.json
+  analysis_visualization_artifact: analysis_stats_visualization.png
 """,
         encoding="utf-8",
     )
@@ -86,6 +88,19 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     )
     (pred_dir / "predicted_answer.json").write_text(
         json.dumps({"decision": "DENY"}), encoding="utf-8"
+    )
+    (pred_dir / "analysis_result.json").write_text(
+        json.dumps(
+            {
+                "decision": "DENY",
+                "decision_explanation": "checker_contradicts",
+                "coverage_labels": ["Trip cancellation or rescheduling"],
+                "reason_labels": [],
+                "document_labels": [],
+                "checker_contradicts": True,
+            }
+        ),
+        encoding="utf-8",
     )
     config_path = _write_minimal_config(tmp_path, data_dir, results_dir)
     exit_code = main(["--config", str(config_path)])
@@ -111,6 +126,12 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     viz_path = results_dir / "evaluation_visualization.png"
     assert viz_path.is_file()
     assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    stats_path = results_dir / "analysis_stats.json"
+    assert stats_path.is_file()
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    assert stats["n_claims"] == 1
+    assert stats["claim_ids"] == ["claim 1"]
+    assert stats["decision_counts"]["DENY"] == 1
 
 
 def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
@@ -130,3 +151,9 @@ def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
     viz_path = results_dir / "evaluation_visualization.png"
     assert viz_path.is_file()
     assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    stats_path = results_dir / "analysis_stats.json"
+    assert stats_path.is_file()
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    assert stats["n_claims"] == 0
+    assert stats["claim_ids"] == []
+    assert stats["decision_counts"] == {}

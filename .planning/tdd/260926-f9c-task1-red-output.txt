@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, anyio-4.15.1, Faker-40.39.0
+collected 5 items
+
+tests/test_evaluation/test_analysis_stats.py F
+
+=================================== FAILURES ===================================
+E   assert 0 == 2
+     +  where 0 = AnalysisStats(claim_ids=[], n_claims=0, decision_counts={}, checker_true_counts={}, checker_present_counts={}, checker...e_rates={}, coverage_label_counts={}, reason_label_counts={}, document_label_counts={}, decision_explanation_counts={}).n_claims
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_analysis_stats.py:105: assert 0 == 2
+=========================== short test summary info ============================
+FAILED tests/test_evaluation/test_analysis_stats.py::test_aggregate_two_claims_decisions_and_sorted_ids
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+============================== 1 failed in 4.09s ===============================
+FF.FF                                                                    [100%]
+=================================== FAILURES ===================================
+E   assert 0 == 2
+     +  where 0 = AnalysisStats(claim_ids=[], n_claims=0, decision_counts={}, checker_true_counts={}, checker_present_counts={}, checker...e_rates={}, coverage_label_counts={}, reason_label_counts={}, document_label_counts={}, decision_explanation_counts={}).n_claims
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_analysis_stats.py:105: assert 0 == 2
+E   assert 0 == 1
+     +  where 0 = AnalysisStats(claim_ids=[], n_claims=0, decision_counts={}, checker_true_counts={}, checker_present_counts={}, checker...e_rates={}, coverage_label_counts={}, reason_label_counts={}, document_label_counts={}, decision_explanation_counts={}).n_claims
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_analysis_stats.py:141: assert 0 == 1
+E   AssertionError: assert False
+     +  where False = is_file()
+     +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-227/test_cli_writes_metrics_json0/results/analysis_stats.json').is_file
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_cli.py:130: AssertionError: assert False
+E   AssertionError: assert False
+     +  where False = is_file()
+     +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-227/test_cli_exit_zero_on_empty_ba0/results/analysis_stats.json').is_file
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_cli.py:155: AssertionError: assert False
+=========================== short test summary info ============================
+FAILED tests/test_evaluation/test_analysis_stats.py::test_aggregate_two_claims_decisions_and_sorted_ids
+FAILED tests/test_evaluation/test_analysis_stats.py::test_aggregate_soft_skips_missing_and_invalid
+FAILED tests/test_evaluation/test_cli.py::test_cli_writes_metrics_json - Asse...
+FAILED tests/test_evaluation/test_cli.py::test_cli_exit_zero_on_empty_batch
+4 failed, 1 passed in 3.38s

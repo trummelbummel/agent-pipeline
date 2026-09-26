@@ -173,6 +173,7 @@ def test_process_claim_writes_predicted_answer_on_fraud_deny(tmp_path: Path) -> 
     predicted = json.loads(predicted_path.read_text(encoding="utf-8"))
     assert predicted["decision"] == "DENY"
     assert "fraud" in predicted["explanation"]
+    assert predicted["source"] == "preprocess"
     # Ground truth answer.json stays separate from the prediction
     answer = json.loads(
         (claim_out / config.preprocessing.artifacts.answer).read_text(encoding="utf-8")

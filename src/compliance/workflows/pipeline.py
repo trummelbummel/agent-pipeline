@@ -24,6 +24,10 @@ from compliance.preprocessing.claim_batch import (
 )
 from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter
+from compliance.workflows.predicted_answer_io import (
+    remove_stale_preprocess_prediction,
+    write_preprocess_predicted_answer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -375,50 +379,19 @@ class PreprocessingPipeline:
     ) -> Path | None:
         results_claim = self.results_root / claim_out.name
         predicted_path = results_claim / self.artifacts.predicted_answer
+        analysis_result_path = results_claim / self.artifacts.analysis_result
         predicted = _predicted_answer_from_bundle(bundle)
         if predicted is None:
-            # Drop stale predictions (e.g. prior Benford DENYs) when this run
-            # produced no document-level decision — otherwise eval keeps scoring
-            # leftover fraud labels after benford.enabled is turned off.
-            if predicted_path.is_file():
-                predicted_path.unlink()
-                log_branch_decision(
-                    logger,
-                    branch="predicted_answer",
-                    outcome="REMOVED",
-                    reason="stale_no_pipeline_decision",
-                    claim=bundle.claim_id,
-                    path=str(predicted_path),
-                )
-            else:
-                log_branch_decision(
-                    logger,
-                    branch="predicted_answer",
-                    outcome="SKIP",
-                    reason="no_pipeline_decision",
-                    claim=bundle.claim_id,
-                )
+            # Drop preprocess-origin leftovers (e.g. Benford DENYs) only when
+            # analysis has not authored a sibling result — never wipe evaluator
+            # predictions written by ClaimPipeline.
+            remove_stale_preprocess_prediction(
+                predicted_path,
+                analysis_result_path=analysis_result_path,
+            )
             return None
 
-        results_claim.mkdir(parents=True, exist_ok=True)
-        predicted_path.write_text(
-            predicted.model_dump_json(indent=2) + "\n", encoding="utf-8"
-        )
-        log_branch_decision(
-            logger,
-            branch="predicted_answer",
-            outcome="WROTE",
-            reason=(
-                predicted.explanation
-                if isinstance(predicted.explanation, str)
-                and not is_nan_scalar(predicted.explanation)
-                else "decision"
-            ),
-            claim=bundle.claim_id,
-            decision=predicted.decision,
-            path=str(predicted_path),
-        )
-        return predicted_path
+        return write_preprocess_predicted_answer(predicted_path, predicted)
 
     def _write_document_pngs(self, claim_out: Path, bundle: ClaimBundle) -> list[Path]:
         """Copy or convert claim raster documents to PNG under ``claim_out``.

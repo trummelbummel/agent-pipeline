@@ -1,0 +1,50 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/theresa/Desktop/projects/compliance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, anyio-4.15.1, Faker-40.39.0
+collecting ... collected 5 items
+
+tests/test_config/test_settings.py::test_load_config_reads_authenticity_and_incomplete_prompts FAILED [ 20%]
+tests/test_llm/test_checker.py::test_checker_not_authentic_true_when_ocr_format_suspect FAILED [ 40%]
+tests/test_llm/test_checker.py::test_checker_not_authentic_false_on_llm_false FAILED [ 60%]
+tests/test_llm/test_checker.py::test_checker_not_authentic_parse_failure_fail_closed_true FAILED [ 80%]
+tests/test_workflows/test_claim_pipeline.py::test_deny_when_checker_document_not_authentic FAILED [100%]
+
+=================================== FAILURES ===================================
+__________ test_load_config_reads_authenticity_and_incomplete_prompts __________
+tests/test_config/test_settings.py:161: in test_load_config_reads_authenticity_and_incomplete_prompts
+    assert isinstance(authenticity, str) and authenticity.strip()
+E   assert (False)
+E    +  where False = isinstance(None, str)
+___________ test_checker_not_authentic_true_when_ocr_format_suspect ____________
+tests/test_llm/test_checker.py:307: in test_checker_not_authentic_true_when_ocr_format_suspect
+    result = checker.check(
+src/compliance/llm/checker.py:87: in check
+    raise ValueError(f"Unsupported checker mode: {mode!r}")
+E   ValueError: Unsupported checker mode: 'not_authentic'
+________________ test_checker_not_authentic_false_on_llm_false _________________
+tests/test_llm/test_checker.py:325: in test_checker_not_authentic_false_on_llm_false
+    result = checker.check(
+src/compliance/llm/checker.py:87: in check
+    raise ValueError(f"Unsupported checker mode: {mode!r}")
+E   ValueError: Unsupported checker mode: 'not_authentic'
+__________ test_checker_not_authentic_parse_failure_fail_closed_true ___________
+tests/test_llm/test_checker.py:340: in test_checker_not_authentic_parse_failure_fail_closed_true
+    result = checker.check(
+src/compliance/llm/checker.py:87: in check
+    raise ValueError(f"Unsupported checker mode: {mode!r}")
+E   ValueError: Unsupported checker mode: 'not_authentic'
+________________ test_deny_when_checker_document_not_authentic _________________
+tests/test_workflows/test_claim_pipeline.py:1626: in test_deny_when_checker_document_not_authentic
+    assert payload["checker_document_not_authentic"] is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'checker_document_not_authentic'
+=========================== short test summary info ============================
+FAILED tests/test_config/test_settings.py::test_load_config_reads_authenticity_and_incomplete_prompts
+FAILED tests/test_llm/test_checker.py::test_checker_not_authentic_true_when_ocr_format_suspect
+FAILED tests/test_llm/test_checker.py::test_checker_not_authentic_false_on_llm_false
+FAILED tests/test_llm/test_checker.py::test_checker_not_authentic_parse_failure_fail_closed_true
+FAILED tests/test_workflows/test_claim_pipeline.py::test_deny_when_checker_document_not_authentic
+============================== 5 failed in 2.11s ===============================

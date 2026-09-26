@@ -1558,15 +1558,14 @@ def test_departure_within_and_multiple_document_dates_prefer_departure(
     assert "checker_contradicts" not in payload
 
 
-# --- Phase 07 Wave 0 Nyquist stubs (R027–R029) — xfail until 07-01/07-02 ---
+# --- Phase 07 authenticity (R027) — incomplete / suspicious dating xfail until 07-02 ---
 
-_XFAIL_WAVE0 = pytest.mark.xfail(
+_XFAIL_07_02 = pytest.mark.xfail(
     strict=False,
-    reason="Wave 0 stub — implemented in 07-01/07-02",
+    reason="Wave 0 stub — incomplete / suspicious dating implemented in 07-02",
 )
 
 
-@_XFAIL_WAVE0
 def test_deny_when_checker_document_not_authentic(tmp_path: Path) -> None:
     """OCR/format authenticity violation → DENY with checker_document_not_authentic.
 
@@ -1629,7 +1628,7 @@ def test_deny_when_checker_document_not_authentic(tmp_path: Path) -> None:
     assert "checker_document_not_authentic" in payload["decision_explanation"]
 
 
-@_XFAIL_WAVE0
+@_XFAIL_07_02
 def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     """Missing medical fields (discharge/diagnosis/condition) → DENY incomplete.
 
@@ -1691,7 +1690,7 @@ def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     assert "checker_incomplete_document" in payload["decision_explanation"]
 
 
-@_XFAIL_WAVE0
+@_XFAIL_07_02
 def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
     """Implausible issue/stamp dating → UNCERTAIN before DENY (R029).
 
@@ -1744,7 +1743,6 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
     assert "checker_incomplete_document" not in payload
 
 
-@_XFAIL_WAVE0
 def test_authenticity_incomplete_skipped_for_non_medical_document(
     tmp_path: Path,
 ) -> None:
@@ -1776,7 +1774,6 @@ def test_authenticity_incomplete_skipped_for_non_medical_document(
     assert "incomplete" not in joined
 
 
-@_XFAIL_WAVE0
 def test_payload_omits_llm_keys_on_date_uncertain_early_exit(
     tmp_path: Path,
 ) -> None:

@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_config/test_settings.py::test_load_config_reads_authenticity_and_incomplete_prompts tests/test_llm/test_checker.py::test_checker_not_authentic_true_when_ocr_format_suspect tests/test_llm/test_checker.py::test_checker_not_authentic_false_on_llm_false tests/test_llm/test_checker.py::test_checker_not_authentic_parse_failure_fail_closed_true tests/test_workflows/test_claim_pipeline.py::test_deny_when_checker_document_not_authentic -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_load_config_reads_authenticity_and_incomplete_prompts\nnot ok 2 - test_checker_not_authentic_true_when_ocr_format_suspect\nnot ok 3 - test_checker_not_authentic_false_on_llm_false\nnot ok 4 - test_checker_not_authentic_parse_failure_fail_closed_true\nnot ok 5 - test_deny_when_checker_document_not_authentic\n# tests 5\n# pass 0\n# fail 5\n",
+  "targetTest": "test_load_config_reads_authenticity_and_incomplete_prompts",
+  "targetFile": "tests/test_config/test_settings.py",
+  "expected": "load_config exposes non-empty checking.authenticity_prompt and incomplete_prompt",
+  "actual": "AssertionError: authenticity is None (CheckingConfig has no authenticity_prompt yet)"
+}

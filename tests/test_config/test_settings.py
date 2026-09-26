@@ -153,10 +153,6 @@ def test_load_config_reads_checking_section() -> None:
     assert within_days == 14
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason="Wave 0 stub — implemented in 07-01/07-02",
-)
 def test_load_config_reads_authenticity_and_incomplete_prompts() -> None:
     """checking.authenticity_prompt / incomplete_prompt must be non-empty (R027/R028)."""
     config = load_config("config.yaml")

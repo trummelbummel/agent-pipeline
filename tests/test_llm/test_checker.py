@@ -287,20 +287,19 @@ def test_checker_unparseable_llm_response_returns_false() -> None:
     chat.assert_called_once()
 
 
-# --- Phase 07 Wave 0 Nyquist stubs (R027/R028) — xfail until 07-01/07-02 ---
+# --- Phase 07 authenticity (R027) — incomplete remains Wave 0 xfail until 07-02 ---
 
-_XFAIL_WAVE0 = pytest.mark.xfail(
+_XFAIL_INCOMPLETE = pytest.mark.xfail(
     strict=False,
-    reason="Wave 0 stub — implemented in 07-01/07-02",
+    reason="Wave 0 stub — incomplete mode implemented in 07-02",
 )
 
 
-@_XFAIL_WAVE0
 def test_checker_not_authentic_true_when_ocr_format_suspect() -> None:
     """mode=not_authentic: True = authenticity violation (OCR/format path, no Benford).
 
     Message layout mirrors healthy: claim may be empty; user content is OCR-focused
-    (Supporting document + text). 07-01 must match this layout.
+    (Supporting document + text).
     """
     chat = _chat_returning({"result": True})
     checker = _make_checker(chat)
@@ -308,7 +307,7 @@ def test_checker_not_authentic_true_when_ocr_format_suspect() -> None:
     result = checker.check(
         claim="",
         text="# Hospital admission\n\nPatient admitted; garbled OCR ###@@\n",
-        mode="not_authentic",  # type: ignore[arg-type]
+        mode="not_authentic",
     )
 
     assert result is True
@@ -318,7 +317,37 @@ def test_checker_not_authentic_true_when_ocr_format_suspect() -> None:
     assert "garbled OCR" in user
 
 
-@_XFAIL_WAVE0
+def test_checker_not_authentic_false_on_llm_false() -> None:
+    """mode=not_authentic: LLM {"result": false} → False (document looks authentic)."""
+    chat = _chat_returning({"result": False})
+    checker = _make_checker(chat)
+
+    result = checker.check(
+        claim="",
+        text="# Medical certificate\n\nSigned hospital letterhead with diagnosis.\n",
+        mode="not_authentic",
+    )
+
+    assert result is False
+    chat.assert_called_once()
+
+
+def test_checker_not_authentic_parse_failure_fail_closed_true() -> None:
+    """Deny-on-True mode: malformed JSON / missing result → fail-closed True."""
+    chat = _chat_returning("")
+    checker = _make_checker(chat)
+
+    result = checker.check(
+        claim="",
+        text="some OCR text",
+        mode="not_authentic",
+    )
+
+    assert result is True
+    chat.assert_called_once()
+
+
+@_XFAIL_INCOMPLETE
 def test_checker_incomplete_true_when_required_medical_fields_missing() -> None:
     """mode=incomplete: True when discharge/diagnosis/condition fields are absent."""
     chat = _chat_returning({"result": True})
@@ -334,23 +363,7 @@ def test_checker_incomplete_true_when_required_medical_fields_missing() -> None:
     chat.assert_called_once()
 
 
-@_XFAIL_WAVE0
-def test_checker_not_authentic_parse_failure_fail_closed_true() -> None:
-    """Deny-on-True mode: malformed JSON / missing result → fail-closed True."""
-    chat = _chat_returning("")
-    checker = _make_checker(chat)
-
-    result = checker.check(
-        claim="",
-        text="some OCR text",
-        mode="not_authentic",  # type: ignore[arg-type]
-    )
-
-    assert result is True
-    chat.assert_called_once()
-
-
-@_XFAIL_WAVE0
+@_XFAIL_INCOMPLETE
 def test_checker_incomplete_parse_failure_fail_closed_true() -> None:
     """Deny-on-True mode: missing result key → fail-closed True (unlike containment)."""
     chat = _chat_returning({"other": True})

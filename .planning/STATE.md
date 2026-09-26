@@ -5,13 +5,13 @@ current_phase: 05
 current_phase_name: FastAPI Claims API
 current_plan: 4
 status: verifying
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-09-25T16:51:52.264Z"
-last_activity: 2026-09-25
+stopped_at: Completed 260926-fph-PLAN.md
+last_updated: "2026-09-26T09:30:01.953Z"
+last_activity: 2026-09-26
 last_activity_desc: Completed 05-00 Wave 0 FastAPI foundation
-state_head: babce52e9f997a6c472e71bb719150548ee92b00
+state_head: d36caa805aa6a1f7195da858e4312120c1e9813c
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 4
   total_plans: 16
   completed_plans: 16
@@ -32,7 +32,7 @@ Phase: 05 — FastAPI Claims API
 Current Plan: 4
 Total Plans in Phase: 4
 Status: Phase complete — ready for verification
-Last activity: 2026-09-26 - Completed quick task 260926-f9c: analysis_result stats + bar charts in evaluation
+Last activity: 2026-09-26 - Completed quick task 260926-fph: UNCERTAIN date checkers
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -40,6 +40,7 @@ Progress: [████████░░] 80% (4/5 phases complete; Phase 05 pl
 
 ### Roadmap Evolution
 
+- Phase 8 added: Engineering improvements from `.gsd/IMPROVEMENTS.md` — prioritized decision safety, result integrity, evaluation validity, evidence association, API/configuration hardening, and policy-engine maintainability
 - Phase 7 added: Denial-rule checkers in analysis pipeline — extend ClaimPipeline Checker steps for LOGIC.md deny rules not covered by containment/contradicts (missing doc, healthy cert, identity, authenticity, incomplete, suspicious dating)
 - Phase 6 added: Prediction Evaluation — `src/evaluation` Evaluator compares predictions vs answer.json; confusion matrix, accuracy, F1
 - Phase 5 added: FastAPI Claims API — `src/api` with POST/GET /claims; single-claim + batch pipeline refactor; pipelines as FastAPI resources
@@ -97,6 +98,7 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 05]: Unsafe claim_id tested via percent-encoded %2E%2E so the segment reaches the handler
 - [Phase 05]: CLI --claim-id always runs process_then_analyze (same as GET); mode only applies to batch run(None)
 - [Phase 05]: ClaimPipeline loads from claim_dir when supporting_document artifact present; else preprocessed_root/name
+- [Phase 05]: Date UNCERTAIN checkers: departure_within_days (n from config) and multiple_document_dates short-circuit LLM Checker before DENY
 
 ### Blockers/Concerns
 
@@ -106,6 +108,7 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260926-fph | Add two analysis checkers that yield UNCERTAIN (departure proximity; multiple OCR dates) | 2026-09-26 | cbfa126 | [260926-fph-add-two-analysis-checkers-that-yield-unc](./quick/260926-fph-add-two-analysis-checkers-that-yield-unc/) |
 | 260926-f9c | In evaluation, also run statistics over analysis_result.json and visualize as bar charts | 2026-09-26 | c0b13ea | [260926-f9c-in-evaluation-also-run-statistics-over-a](./quick/260926-f9c-in-evaluation-also-run-statistics-over-a/) |
 | 260926-bwk | Fix the stale prediction issue: preprocess must not delete analysis-authored predicted_answer | 2026-09-26 | aa87ffb | [260926-bwk-fix-the-stale-prediction-issue-preproces](./quick/260926-bwk-fix-the-stale-prediction-issue-preproces/) |
 | 260925-mqh | after ExtractionFailure a retry with an expensive model should be done | 2026-09-25 | 87de07c | [260925-mqh-after-extractionfailure-a-retry-with-an-](./quick/260925-mqh-after-extractionfailure-a-retry-with-an-/) |
@@ -113,8 +116,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-25T16:51:52.244Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-09-26T09:30:01.932Z
+Stopped at: Completed 260926-fph-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -137,3 +140,4 @@ Resume file: None
 | Phase 05 P01 | 5min | 3 tasks | 7 files |
 | Phase 05 P02 | 6min | 3 tasks | 7 files |
 | Phase 05 P03 | 7min | 2 tasks | 7 files |
+| Phase 260926-fph P01 | 8min | 2 tasks | 5 files |

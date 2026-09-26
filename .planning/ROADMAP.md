@@ -68,13 +68,24 @@
   - Paths/labels from config where applicable; mypy + pytest pass
 
 - [ ] **Phase 07: Denial-rule checkers in analysis pipeline** `profiles: []`
-  Plans: TBD
+  Plans: 07-00, 07-01, 07-02, 07-03
   Goal: Extend ClaimPipeline Checker steps so every LOGIC.md denial rule is covered by an explicit check (beyond containment/contradicts)
   Success criteria:
   - Checker modes (or nodes) cover: missing medical/supporting doc; document contradicts claim (healthy cert); identity unverifiable; document not authentic / wrong format; incomplete document; suspicious dating
   - Each check is config-driven (prompt/model) and persisted in `analysis_result.json`
   - Existing containment + contradicts retained; healthy-contradiction specialized where generic contradicts is insufficient
   - Injectable chat_fn tests; mypy + pytest pass
+
+- [ ] **Phase 08: Engineering improvements from IMPROVEMENTS.md** `profiles: []`
+  Plans: TBD
+  Goal: Execute the prioritized safety, result-integrity, evaluation, API, configuration, and maintainability backlog in `.gsd/IMPROVEMENTS.md`
+  Success criteria:
+  - Static analysis and project quality gates pass
+  - Abstention, multi-label routing, HITL, and model failures have fail-safe deterministic semantics
+  - Claim outputs are atomic/run-scoped and evaluation covers the complete ground-truth population
+  - Evidence remains associated with its source document through classification and decision checks
+  - API execution/error contracts and configuration cross-references are validated
+  - Claim policy logic is separated from orchestration and protected by adversarial regression tests
 
 ## Progress
 
@@ -86,7 +97,8 @@
 | 04 | 0/4 | Complete    | 2026-09-25 |
 | 05 | 4/4 | Complete    | 2026-09-25 |
 | 06 | 1/2 | Complete    | 2026-09-25 |
-| 07 | 0/0 | Not started |  |
+| 07 | 0/4 | Not started |  |
+| 08 | 0/0 | Not started |  |
 
 ### Phase 2: Case Classifier Models
 
@@ -209,8 +221,69 @@ Existing Checker containment + contradicts remain. Benford authenticity stays op
 
 **Requirements**: R023, R024, R025, R026, R027, R028, R029
 **Depends on:** Phase 4 (ClaimPipeline + Checker)
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 7 to break down)
+**Wave 0**
+
+- [ ] 07-00-PLAN.md — Nyquist stubs for authenticity / incomplete / suspicious dating (R027–R029)
+
+**Wave 1** *(blocked on Wave 0)*
+
+- [ ] 07-01-PLAN.md — Tracer: authenticity DENY via config → Checker → ClaimPipeline → analysis_result (R023, R027)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 07-02-PLAN.md — Incomplete-document DENY + suspicious-dating UNCERTAIN (R028, R029)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 07-03-PLAN.md — LOGIC.md key sync + R024–R026 regression + R023 persistence + phase gate
+
+### Phase 8: Engineering improvements from IMPROVEMENTS.md
+
+**Goal:** Execute the prioritized engineering review backlog in `.gsd/IMPROVEMENTS.md`, closing unsafe decision paths first and then improving result integrity, evidence quality, API/configuration boundaries, evaluation validity, and maintainability.
+**Requirements**: TBD
+**Depends on:** Phase 7
+**Plans:** 0 plans
+
+Backlog tasks, in required execution order:
+
+1. **Release and decision safety**
+   - IMP-001 — Restore a green static-analysis gate.
+   - IMP-002 — Make cancellation-reason abstention fail safe.
+   - IMP-003 — Establish one authoritative coverage route.
+   - IMP-005 — Treat model/protocol failures as uncertainty.
+   - IMP-004 — Make HITL part of the automation contract.
+2. **Result integrity and evaluation**
+   - IMP-006 — Make claim output publication transactional and run-scoped.
+   - IMP-007 — Evaluate from the ground-truth population.
+   - IMP-008 — Separate raw metrics from policy-tolerant metrics.
+   - IMP-009 — Separate development, calibration, and holdout claims.
+3. **Algorithm and evidence quality**
+   - IMP-010 — Preserve per-document evidence association.
+   - IMP-011 — Recompute OCR quality after vision retry.
+   - IMP-012 — Use classifier probabilities deliberately or remove them.
+   - IMP-013 — Reconcile documented rules with executable policy; Phase 7 supplies the denial-checker implementation.
+   - IMP-014 — Short-circuit inapplicable or non-decisive model calls.
+4. **API and configuration boundaries**
+   - IMP-015 — Define stable API execution and error semantics.
+   - IMP-016 — Harden claim intake and filesystem boundaries.
+   - IMP-017 — Validate configuration cross-references.
+5. **Maintainability**
+   - IMP-018 — Split the policy engine from orchestration and persistence.
+
+Success criteria:
+
+- `uv run mypy`, `make check`, and the non-integration test suite pass.
+- No abstention, mixed-label, HITL, or checker-error path can silently broaden evidence acceptance or produce an unsafe automatic approval.
+- Published analysis and prediction artifacts share run provenance and cannot be stale or partially mixed.
+- Evaluation reports completeness and scores all ground-truth-backed claims.
+- Identity, signature, classification, and rule outcomes stay associated with the same source document.
+- API mutations are explicit, failures use stable safe contracts, and invalid configuration fails at startup.
+- Policy behavior is implemented as pure typed logic with adversarial regression coverage.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 8 to break down)

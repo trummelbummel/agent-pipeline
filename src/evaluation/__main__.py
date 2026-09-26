@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from compliance.config.settings import AppConfig, load_config
 from evaluation.analysis_stats import AnalysisStats, aggregate_analysis_stats
 from evaluation.evaluator import EvaluationResult, Evaluator
-from evaluation.visualization import write_confusion_matrix_png
+from evaluation.visualization import write_analysis_stats_png, write_confusion_matrix_png
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +42,13 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging(config)
     result = Evaluator(config).evaluate()
     stats = aggregate_analysis_stats(config)
-    metrics_path, matrix_path, viz_path, stats_path = _write_artifacts(
-        config, result, stats
+    metrics_path, matrix_path, viz_path, stats_path, analysis_viz_path = (
+        _write_artifacts(config, result, stats)
     )
     logger.info(
         "evaluation complete n_evaluated=%d accuracy=%.4f f1_macro=%.4f "
         "n_analysis=%d metrics=%s confusion_matrix=%s visualization=%s "
-        "analysis_stats=%s",
+        "analysis_stats=%s analysis_visualization=%s",
         result.n_evaluated,
         result.accuracy,
         result.f1_macro,
@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         matrix_path,
         viz_path,
         stats_path,
+        analysis_viz_path,
     )
     return 0
 
@@ -97,13 +98,13 @@ def _write_artifacts(
     config: AppConfig,
     result: EvaluationResult,
     stats: AnalysisStats,
-) -> tuple[Path, Path, Path, Path]:
-    """Serialize metrics, matrix, confusion PNG, and analysis stats JSON.
+) -> tuple[Path, Path, Path, Path, Path]:
+    """Serialize metrics, matrix, confusion PNG, analysis stats JSON, and bar PNG.
 
     :param config: Application config with results_dir and evaluation artifact names.
     :param result: Aggregate EvaluationResult from batch evaluate.
     :param stats: Aggregated analysis_result statistics for the same results_dir.
-    :return: ``(metrics_path, confusion_matrix_path, visualization_path, stats_path)``.
+    :return: ``(metrics, matrix, confusion_png, stats_json, analysis_png)`` paths.
     """
     results_dir = Path(config.preprocessing.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -139,7 +140,10 @@ def _write_artifacts(
     stats_path.write_text(
         json.dumps(stats.to_dict(), indent=2) + "\n", encoding="utf-8"
     )
-    return metrics_path, matrix_path, viz_path, stats_path
+    analysis_viz_path = write_analysis_stats_png(
+        stats, results_dir / config.evaluation.analysis_visualization_artifact
+    )
+    return metrics_path, matrix_path, viz_path, stats_path, analysis_viz_path
 
 
 if __name__ == "__main__":

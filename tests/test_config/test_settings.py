@@ -31,31 +31,31 @@ _MINIMAL_ANALYSIS_YAML = """
 analysis:
   coverage:
     labels: ["1", "2", "3"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: |
       classify coverage
   cancellation_reason:
     labels: ["1", "2"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: |
       classify reason
   cancellation_document:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: |
       classify cancel doc
   personal_effects_document:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: |
       classify pe doc
   missed_departure_document:
     labels: ["1"]
-    other_label: "None"
+    other_label: "False"
     model: test-model
     prompt: |
       classify missed doc
@@ -78,7 +78,7 @@ extraction:
     extract things
 classification:
   labels: ["1", "2", "3"]
-  other_label: Other
+  other_label: "False"
   model: test-model
   prompt: |
     classify things
@@ -148,6 +148,9 @@ def test_load_config_reads_checking_section() -> None:
     assert config.checking.model
     assert config.checking.containment_prompt.strip()
     assert config.checking.contradicts_prompt.strip()
+    within_days = getattr(config.checking, "departure_uncertain_within_days", None)
+    assert isinstance(within_days, int)
+    assert within_days == 14
 
 
 def test_load_config_reads_analysis_section() -> None:
@@ -181,10 +184,15 @@ def test_load_config_reads_analysis_section() -> None:
     assert "Proof of booking" in config.analysis.missed_departure_document.prompt
 
 
-def test_analysis_coverage_other_label_is_none() -> None:
+def test_analysis_coverage_other_label_is_false() -> None:
     config = load_config("config.yaml")
-    assert config.analysis.coverage.other_label == "None"
-    assert config.classification.other_label == "Other"
+    assert config.analysis.coverage.other_label == "False"
+    assert config.classification.other_label == "False"
+    assert "False" in config.classification.labels
+    assert "False" in config.analysis.coverage.labels
+    assert "False" in config.analysis.cancellation_reason.labels
+    assert config.analysis.coverage.abstention_labels() == {"False"}
+    assert config.analysis.coverage.positive_labels() == ["1", "2", "3"]
 
 
 def test_analysis_result_artifact_name_externalized() -> None:
@@ -211,7 +219,8 @@ def test_load_config_reads_ocr_retry_section() -> None:
     assert config.ocr_retry.on_faulty_extraction is True
     assert config.ocr_retry.on_low_confidence is True
     assert config.ocr_retry.on_human_in_the_loop is True
-    assert config.ocr_retry.on_identity_unclear is True
+    assert config.ocr_retry.on_missing_signature is True
+    assert config.ocr_retry.signature_prompt.strip()
 
 
 def test_load_config_reads_classification_labels_and_other() -> None:
@@ -229,8 +238,8 @@ def test_load_config_reads_classification_labels_and_other() -> None:
         == "Trip cancellation or rescheduling"
     )
     assert (
-        config.analysis.coverage.resolve_label_names(["1", "None"])
-        == ["Trip cancellation or rescheduling", "None"]
+        config.analysis.coverage.resolve_label_names(["1", "False"])
+        == ["Trip cancellation or rescheduling", "False"]
     )
     assert config.analysis.cancellation_reason.label_names["2"] == "Medical emergency"
 

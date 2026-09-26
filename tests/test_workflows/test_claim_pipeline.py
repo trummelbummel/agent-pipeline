@@ -1334,3 +1334,109 @@ def test_run_none_uses_config_roots(tmp_path: Path) -> None:
     results_root = Path(config.preprocessing.results_dir)
     assert written == [results_root / "claim 1" / analysis_name]
 
+
+def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> None:
+    """Departure within n days of booking current_date → UNCERTAIN; skip LLM checkers."""
+    from datetime import date
+
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    assert getattr(config.checking, "departure_uncertain_within_days", None) == 14
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim departure within")
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.supporting_documents).write_text(
+        "# Supporting documents\n\n"
+        "**current date**: 2017-08-01\n"
+        "**name**: Olivier Bayante\n"
+        "**departure**: 2017-08-10 13:15 (local)\n",
+        encoding="utf-8",
+    )
+    # Single OCR calendar day — must not trigger multiple_document_dates.
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# Supporting document\n\n"
+        "I had to cancel my flight to Paris because of a medical emergency.\n"
+        "Certificate dated 14 April 2017.\n",
+        encoding="utf-8",
+    )
+    coverage = _chat_response(
+        {
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }
+    )
+    reason = _chat_response(
+        {
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }
+    )
+    document = _chat_response(
+        {
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+        }
+    )
+    chat_fn = MagicMock(side_effect=[coverage, reason, document])
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["decision"] == "UNCERTAIN"
+    assert payload["decision_explanation"] == "departure_within_days"
+    assert payload["departure_within_days"] is True
+    assert "checker_containment" not in payload
+    assert "checker_contradicts" not in payload
+    assert "identity_check" not in payload
+    assert "healthy_check" not in payload
+    # coverage + reason + document only — no containment/contradicts/identity/healthy
+    assert chat_fn.call_count == 3
+    system_prompts = [
+        call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list
+    ]
+    assert system_prompts == [
+        "classify coverage",
+        "classify reason",
+        "classify cancel doc",
+    ]
+
+    # Helper: inclusive boundary at n; n+1 False; unparseable False
+    from compliance.workflows import claim_pipeline as cp
+
+    departure_fn = getattr(cp, "_departure_within_days", None)
+    assert departure_fn is not None, "_departure_within_days helper missing"
+    booking = (
+        "**current date**: 2017-08-01\n"
+        "**departure**: 2017-08-15\n"
+    )
+    assert (
+        departure_fn(
+            supporting_documents_text=booking,
+            description_text="",
+            today=date(2017, 8, 1),
+            within_days=14,
+        )
+        is True
+    )
+    assert (
+        departure_fn(
+            supporting_documents_text=(
+                "**current date**: 2017-08-01\n"
+                "**departure**: 2017-08-16\n"
+            ),
+            description_text="",
+            today=date(2017, 8, 1),
+            within_days=14,
+        )
+        is False
+    )
+    assert (
+        departure_fn(
+            supporting_documents_text="**departure**: not-a-date\n",
+            description_text="also no date here",
+            today=date(2017, 8, 1),
+            within_days=14,
+        )
+        is False
+    )
+

@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_uncertain_departure_within_days_skips_llm_checkers tests/test_config/test_settings.py::test_load_config_reads_checking_section -v --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_uncertain_departure_within_days_skips_llm_checkers\nnot ok 2 - test_load_config_reads_checking_section\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_uncertain_departure_within_days_skips_llm_checkers",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "departure within n days yields UNCERTAIN with explanation departure_within_days and skips LLM checkers; config exposes departure_uncertain_within_days=14",
+  "actual": "AssertionError: assert None == 14 (CheckingConfig has no departure_uncertain_within_days; decision path not yet implemented)"
+}

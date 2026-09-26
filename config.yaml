@@ -110,6 +110,8 @@ checking:
     adequately present.
   # Inclusive day window: |departure − reference today| ≤ n → UNCERTAIN.
   departure_uncertain_within_days: 14
+  # Inclusive year skew: |OCR date year − reference today year| ≥ n → UNCERTAIN.
+  suspicious_dating_max_year_delta: 2
 
 analysis:
   coverage:

@@ -115,6 +115,9 @@ class CheckingConfig(BaseModel):
     :param departure_uncertain_within_days: Inclusive absolute day window; when
         departure is within this many days of reference today, analysis yields
         UNCERTAIN (``departure_within_days``) without running LLM checkers.
+    :param suspicious_dating_max_year_delta: Inclusive absolute year threshold;
+        when any OCR calendar date year differs from reference today by at least
+        this many years, analysis yields UNCERTAIN (``checker_suspicious_dating``).
     """
 
     model: str
@@ -125,6 +128,7 @@ class CheckingConfig(BaseModel):
     authenticity_prompt: str
     incomplete_prompt: str
     departure_uncertain_within_days: int = 14
+    suspicious_dating_max_year_delta: int = 2
 
 
 class RequiredDocumentsConfig(BaseModel):

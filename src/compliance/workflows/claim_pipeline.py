@@ -83,6 +83,8 @@ class ClaimAnalysisState(TypedDict, total=False):
         day window of reference today (deterministic UNCERTAIN).
     :param multiple_document_dates: True when OCR supporting_document text has
         two or more distinct calendar days (deterministic UNCERTAIN).
+    :param checker_suspicious_dating: True when OCR dating is implausible
+        (year skew vs reference today, or issue/stamp before care window).
     :param human_in_the_loop: True when OCR metadata already flagged review, or any
         classifier returned ``False`` (confident none-of-the-above).
     """
@@ -106,6 +108,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     checker_incomplete_document: bool
     departure_within_days: bool
     multiple_document_dates: bool
+    checker_suspicious_dating: bool
     human_in_the_loop: bool
 
 
@@ -252,6 +255,58 @@ def _has_multiple_document_dates(supporting_document_text: str) -> bool:
     :return: Whether multiple-document-dates UNCERTAIN should fire.
     """
     return len(_unique_calendar_dates(supporting_document_text)) >= 2
+
+
+_ISSUE_STAMP_HINT = re.compile(
+    r"(?i)\b(issue|issued|stamp|stamped|émission|emision|emisión)\b"
+)
+_CARE_WINDOW_HINT = re.compile(
+    r"(?i)\b(care|admission|visit|discharge|consulta|hospitaliz|"
+    r"tratamiento|treatment|attending)\b"
+)
+
+
+def _suspicious_dating(
+    supporting_document_text: str,
+    *,
+    today: date,
+    max_year_delta: int,
+) -> bool:
+    """True when OCR dating is implausible vs reference today or care window.
+
+    Uses existing ``_unique_calendar_dates`` / ``_parse_calendar_date`` only —
+    no ad-hoc date parser. Fires when:
+    - an OCR calendar date year differs from ``today.year`` by at least
+      ``max_year_delta`` (inclusive) and is either in the future or the OCR
+      text has issue/stamp cues (plain past DOB-style dates without those cues
+      do not fire), or
+    - issue/stamp wording co-occurs with care-window wording and at least two
+      distinct OCR dates (issue/stamp before care signal, claim 13-shaped).
+
+    :param supporting_document_text: Medical/supporting OCR markdown.
+    :param today: Reference today (booking ``current_date`` or clock).
+    :param max_year_delta: Inclusive absolute year threshold from config.
+    :return: Whether suspicious-dating UNCERTAIN should fire.
+    """
+    dates = _unique_calendar_dates(supporting_document_text)
+    if not dates:
+        return False
+    has_issue_stamp = _ISSUE_STAMP_HINT.search(supporting_document_text) is not None
+    for d in dates:
+        year_delta = abs(d.year - today.year)
+        if year_delta < max_year_delta:
+            continue
+        # Future dates, or issue/stamp-labeled past dates with large year skew.
+        # Plain DOB-style past dates without issue/stamp cues do not fire.
+        if d.year > today.year or has_issue_stamp:
+            return True
+    if (
+        len(dates) >= 2
+        and has_issue_stamp
+        and _CARE_WINDOW_HINT.search(supporting_document_text) is not None
+    ):
+        return True
+    return False
 
 
 class ClaimPipeline:
@@ -574,8 +629,10 @@ class ClaimPipeline:
             run_medical_document_checks=run_medical_document_checks,
         )
         signature_check = self._signature_check_result(state)
-        early_uncertain = bool(results.get("departure_within_days")) or bool(
-            results.get("multiple_document_dates")
+        early_uncertain = (
+            bool(results.get("departure_within_days"))
+            or bool(results.get("multiple_document_dates"))
+            or bool(results.get("checker_suspicious_dating"))
         )
         reason = (
             "date_uncertain_skip_llm"
@@ -598,18 +655,22 @@ class ClaimPipeline:
             checker_incomplete_document=results.get("checker_incomplete_document"),
             departure_within_days=results.get("departure_within_days"),
             multiple_document_dates=results.get("multiple_document_dates"),
+            checker_suspicious_dating=results.get("checker_suspicious_dating"),
         )
         payload: dict[str, object] = {
             "departure_within_days": results["departure_within_days"],
             "multiple_document_dates": results["multiple_document_dates"],
             "signature_check": signature_check,
         }
+        if results.get("checker_suspicious_dating"):
+            payload["checker_suspicious_dating"] = True
         if not early_uncertain:
             payload["checker_containment"] = results["checker_containment"]
             payload["checker_contradicts"] = results["checker_contradicts"]
             payload["identity_check"] = results["identity_check"]
             payload["identity_unclear"] = results["identity_unclear"]
             payload["healthy_check"] = results["healthy_check"]
+            payload["checker_suspicious_dating"] = results["checker_suspicious_dating"]
             if "checker_document_not_authentic" in results:
                 payload["checker_document_not_authentic"] = results[
                     "checker_document_not_authentic"
@@ -891,9 +952,10 @@ class ClaimPipeline:
     ) -> dict[str, bool]:
         """Run deterministic date checks, then Checker LLM modes when needed.
 
-        Always computes ``departure_within_days`` and ``multiple_document_dates``.
-        When either is True, returns early without constructing ``Checker`` /
-        calling chat — LLM keys are omitted from the result dict.
+        Always computes ``departure_within_days``, ``multiple_document_dates``,
+        and ``checker_suspicious_dating``. When any is True, returns early without
+        constructing ``Checker`` / calling chat — LLM keys are omitted from the
+        result dict.
 
         Identity compares the passenger ``name`` in ``supporting_documents.md``
         (booking / internal record) against the patient/subject name in
@@ -920,11 +982,17 @@ class ClaimPipeline:
             within_days=checking.departure_uncertain_within_days,
         )
         multiple_dates_flag = _has_multiple_document_dates(supporting_document_text)
+        suspicious_dating_flag = _suspicious_dating(
+            supporting_document_text,
+            today=today,
+            max_year_delta=checking.suspicious_dating_max_year_delta,
+        )
         date_flags = {
             "departure_within_days": departure_flag,
             "multiple_document_dates": multiple_dates_flag,
+            "checker_suspicious_dating": suspicious_dating_flag,
         }
-        if departure_flag or multiple_dates_flag:
+        if departure_flag or multiple_dates_flag or suspicious_dating_flag:
             return date_flags
 
         checker = Checker(
@@ -1031,6 +1099,10 @@ class ClaimPipeline:
             payload["departure_within_days"] = bool(state["departure_within_days"])
         if "multiple_document_dates" in state:
             payload["multiple_document_dates"] = bool(state["multiple_document_dates"])
+        if "checker_suspicious_dating" in state:
+            payload["checker_suspicious_dating"] = bool(
+                state["checker_suspicious_dating"]
+            )
         if "document_labels" in state:
             payload["checker_missing_documentation"] = self._is_missing_documentation(
                 state
@@ -1181,9 +1253,10 @@ class ClaimPipeline:
         1. Coverage abstention → UNCERTAIN ``coverage_false_label``
         2. ``departure_within_days`` → UNCERTAIN (before DENY)
         3. ``multiple_document_dates`` → UNCERTAIN (before DENY)
-        4. ``_violated_checkers`` non-empty → DENY
-        5. ``identity_unclear`` → UNCERTAIN
-        6. APPROVE ``checker_consistent``
+        4. ``checker_suspicious_dating`` → UNCERTAIN (before DENY)
+        5. ``_violated_checkers`` non-empty → DENY
+        6. ``identity_unclear`` → UNCERTAIN
+        7. APPROVE ``checker_consistent``
 
         Date UNCERTAIN flags sit before DENY so an early-exit path cannot fall
         through to signature/identity deny when proximity/dating fired.
@@ -1209,6 +1282,11 @@ class ClaimPipeline:
             return GroundTruth(
                 decision=_DECISION_UNCERTAIN,
                 explanation="multiple_document_dates",
+            )
+        if bool(state.get("checker_suspicious_dating")):
+            return GroundTruth(
+                decision=_DECISION_UNCERTAIN,
+                explanation="checker_suspicious_dating",
             )
         violated = self._violated_checkers(state)
         if violated:

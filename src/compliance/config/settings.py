@@ -207,8 +207,6 @@ class CheckingConfig(StrictConfigModel):
     :param identity_prompt: System prompt that extracts a person name as JSON
         ``{"name": "..."}`` / ``{"name": null}`` for identity edit-distance matching.
     :param healthy_prompt: System prompt for healthy / fit certificate detection.
-    :param authenticity_prompt: System prompt for document authenticity / format
-        checks (True = not authentic / wrong format → violation).
     :param incomplete_prompt: System prompt for incomplete medical-document field
         checks (True = required fields missing → violation).
     :param identity_max_edit_distance: Inclusive Levenshtein threshold on
@@ -216,17 +214,20 @@ class CheckingConfig(StrictConfigModel):
     :param departure_uncertain_enabled: When False, skip the medical far-departure
         UNCERTAIN gate entirely.
     :param departure_uncertain_within_days: Inclusive near-window in days; on the
-        medical path, when |departure - reference today| is strictly greater than
-        this value, analysis yields UNCERTAIN (``departure_within_days``) without
-        running LLM checkers. Departures within the window continue through
-        the remaining checkers. Ignored when ``departure_uncertain_enabled`` is False.
+        medical path, when an upcoming departure is strictly more than this many
+        days ahead of reference today, analysis yields UNCERTAIN
+        (``departure_within_days``) without running LLM checkers — ranked before
+        identity DENY. Past flights and near-window departures
+        continue through the remaining checkers. Ignored when
+        ``departure_uncertain_enabled`` is False.
     :param suspicious_dating_max_month_delta: Inclusive absolute month threshold;
         when any OCR calendar date differs from reference today by at least this
         many months, analysis yields UNCERTAIN (``checker_suspicious_dating``).
         Default 1 month.
     :param suspicious_dating_consider_within_years: Only OCR dates within this
         many years of reference today are eligible for suspicious dating;
-        farther dates are ignored as date-of-birth / history.
+        farther dates are ignored as history. Birth/DOB cues also drop a date.
+        Default 5 years.
     :param transport_retry: Retry/backoff for checker chat transport failures
         (connection / timeout / server error); exhaustion → CheckOutcome.ERROR.
     """
@@ -236,13 +237,12 @@ class CheckingConfig(StrictConfigModel):
     contradicts_prompt: str
     identity_prompt: str
     healthy_prompt: str
-    authenticity_prompt: str
     incomplete_prompt: str
     identity_max_edit_distance: int = Field(default=3, ge=0)
-    departure_uncertain_enabled: bool = False
+    departure_uncertain_enabled: bool = True
     departure_uncertain_within_days: int = Field(default=14, ge=0)
     suspicious_dating_max_month_delta: int = Field(default=1, ge=0)
-    suspicious_dating_consider_within_years: int = Field(default=2, ge=0)
+    suspicious_dating_consider_within_years: int = Field(default=5, ge=0)
     transport_retry: TransportRetryConfig = Field(default_factory=TransportRetryConfig)
 
 
@@ -257,16 +257,22 @@ class RequiredDocumentsConfig(StrictConfigModel):
         cancellation-document codes (e.g. medical emergency ``"2"`` → ``["1"]``).
     :param personal_effects: Acceptable personal-effects document codes.
     :param missed_departure: Acceptable missed-departure document codes.
+    :param missed_departure_medical_codes: Missed-departure document codes that
+        trigger the full medical gated-check set (healthy, identity, signature,
+        …) — typically a medical certificate / hospital document explaining the
+        missed departure.
     :param signature_required_codes: Document codes that must have
         ``has_signature: true`` in ``document_metadata.json`` (e.g. medical
-        certificate, hospital admission).
+        certificate, hospital admission) on the cancellation path.
     :param identity_required_codes: Document codes that trigger booking-vs-OCR
-        identity checks (typically medical certificate / hospital admission).
+        identity checks on the cancellation path (typically medical certificate /
+        hospital admission).
     """
 
     cancellation_by_reason: dict[str, list[str]] = Field(default_factory=dict)
     personal_effects: list[str] = Field(default_factory=list)
     missed_departure: list[str] = Field(default_factory=list)
+    missed_departure_medical_codes: list[str] = Field(default_factory=list)
     signature_required_codes: list[str] = Field(default_factory=list)
     identity_required_codes: list[str] = Field(default_factory=list)
 
@@ -334,6 +340,11 @@ class AnalysisConfig(StrictConfigModel):
             ("required_documents.identity_required_codes", docs.identity_required_codes, cancel_doc_positives),
             ("required_documents.personal_effects", docs.personal_effects, pe_positives),
             ("required_documents.missed_departure", docs.missed_departure, missed_positives),
+            (
+                "required_documents.missed_departure_medical_codes",
+                docs.missed_departure_medical_codes,
+                missed_positives,
+            ),
         ]
         for field, codes, allowed in checks:
             unknown = sorted(set(codes) - allowed)

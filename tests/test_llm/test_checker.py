@@ -28,7 +28,6 @@ def _make_checker(
         contradicts_prompt="check whether claim contradicts text",
         identity_prompt="extract person name as JSON",
         healthy_prompt="check whether document says patient is healthy",
-        authenticity_prompt="check authenticity of supporting document",
         incomplete_prompt="check whether medical fields are incomplete",
         chat_fn=chat,
         identity_max_edit_distance=identity_max_edit_distance,
@@ -208,7 +207,7 @@ def test_checker_identity_partner_note_skips_containment_requester_false_pass(
 def test_checker_identity_extract_null_when_not_contained(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """No patient name in OCR -> extraction null -> ABSTAIN."""
+    """No patient name in OCR -> extraction null -> VIOLATION (DENY)."""
     chat = chat_returning_factory({"name": None})
     checker = _make_checker(chat)
 
@@ -217,7 +216,7 @@ def test_checker_identity_extract_null_when_not_contained(
         "31. X. 20u\nSignature\nuv\n",
     )
 
-    assert status == CheckOutcome.ABSTAIN
+    assert status == CheckOutcome.VIOLATION
     chat.assert_called_once()
 
 
@@ -254,9 +253,10 @@ def test_checker_identity_mismatch_when_edit_distance_above_threshold(
     chat.assert_called_once()
 
 
-def test_checker_identity_unclear_when_no_patient_field(
+def test_checker_identity_deny_when_no_patient_field(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
+    """Redacted / missing patient field → VIOLATION (unverifiable → DENY)."""
     chat = chat_returning_factory({"name": None})
     checker = _make_checker(chat)
 
@@ -265,14 +265,14 @@ def test_checker_identity_unclear_when_no_patient_field(
         "Dr. Rossi\nAmbulatorio\n",
     )
 
-    assert status == CheckOutcome.ABSTAIN
+    assert status == CheckOutcome.VIOLATION
     assert (
         checker.check(
             claim="# Supporting documents\n\n**name**: Olivier Bayante\n",
             text="Dr. Rossi\nAmbulatorio\n",
             mode="identity",
         )
-        == CheckOutcome.ABSTAIN
+        == CheckOutcome.VIOLATION
     )
 
 
@@ -294,14 +294,14 @@ def test_checker_identity_exact_containment_skips_llm_for_ada() -> None:
     ("document_payload", "expected"),
     [
         pytest.param({"name": 7}, CheckOutcome.ERROR, id="schema_invalid_name_type"),
-        pytest.param({"name": "   "}, CheckOutcome.ABSTAIN, id="blank_name"),
+        pytest.param({"name": "   "}, CheckOutcome.VIOLATION, id="blank_name"),
     ],
 )
 def test_identity_extraction_outcomes_document_side(
     document_payload: dict[str, object],
     expected: CheckOutcome,
 ) -> None:
-    """Document-side extraction: schema-invalid name type -> ERROR; blank -> ABSTAIN."""
+    """Document-side extraction: schema-invalid name type -> ERROR; blank -> VIOLATION."""
     chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps(document_payload))))
     checker = _make_checker(chat)
 
@@ -390,65 +390,7 @@ def test_checker_unparseable_llm_response_returns_error(
     chat.assert_called_once()
 
 
-# --- Phase 07 authenticity (R027) + incomplete (R028) ---
-
-
-def test_checker_not_authentic_true_when_ocr_format_suspect(
-    chat_returning_factory: ChatReturningFactory,
-) -> None:
-    """mode=not_authentic: True = authenticity violation (OCR/format path, no Benford).
-
-    Message layout mirrors healthy: claim may be empty; user content is OCR-focused
-    (Supporting document + text).
-    """
-    chat = chat_returning_factory({"result": True})
-    checker = _make_checker(chat)
-
-    result = checker.check(
-        claim="",
-        text="# Hospital admission\n\nPatient admitted; garbled OCR ###@@\n",
-        mode="not_authentic",
-    )
-
-    assert result == CheckOutcome.VIOLATION
-    chat.assert_called_once()
-    user = chat.call_args.kwargs["messages"][1]["content"]
-    assert "Supporting document" in user
-    assert "garbled OCR" in user
-
-
-def test_checker_not_authentic_false_on_llm_false(
-    chat_returning_factory: ChatReturningFactory,
-) -> None:
-    """mode=not_authentic: LLM {"result": false} -> PASS (document looks authentic)."""
-    chat = chat_returning_factory({"result": False})
-    checker = _make_checker(chat)
-
-    result = checker.check(
-        claim="",
-        text="# Medical certificate\n\nSigned hospital letterhead with diagnosis.\n",
-        mode="not_authentic",
-    )
-
-    assert result == CheckOutcome.PASS
-    chat.assert_called_once()
-
-
-def test_checker_not_authentic_parse_failure_returns_error(
-    chat_returning_factory: ChatReturningFactory,
-) -> None:
-    """Malformed JSON / missing result -> ERROR (D-01; no longer fail-closed True)."""
-    chat = chat_returning_factory("")
-    checker = _make_checker(chat)
-
-    result = checker.check(
-        claim="",
-        text="some OCR text",
-        mode="not_authentic",
-    )
-
-    assert result == CheckOutcome.ERROR
-    chat.assert_called_once()
+# --- Phase 07 incomplete (R028) ---
 
 
 def test_checker_incomplete_true_when_required_medical_fields_missing(

@@ -31,8 +31,6 @@ checking:
     check identity
   healthy_prompt: |
     check healthy
-  authenticity_prompt: |
-    check authenticity
   incomplete_prompt: |
     check incomplete
 """
@@ -106,8 +104,6 @@ checking:
     check identity
   healthy_prompt: |
     check healthy
-  authenticity_prompt: |
-    check authenticity
   incomplete_prompt: |
     check incomplete
 """
@@ -173,15 +169,13 @@ def test_load_config_reads_checking_section() -> None:
     within_days = getattr(config.checking, "departure_uncertain_within_days", None)
     assert isinstance(within_days, int)
     assert within_days == 14
-    assert config.checking.departure_uncertain_enabled is False
+    assert config.checking.departure_uncertain_enabled is True
 
 
-def test_load_config_reads_authenticity_and_incomplete_prompts() -> None:
-    """checking.authenticity_prompt / incomplete_prompt must be non-empty (R027/R028)."""
+def test_load_config_reads_incomplete_prompt() -> None:
+    """checking.incomplete_prompt must be non-empty (R028)."""
     config = load_config("config.yaml")
-    authenticity = getattr(config.checking, "authenticity_prompt", None)
     incomplete = getattr(config.checking, "incomplete_prompt", None)
-    assert isinstance(authenticity, str) and authenticity.strip()
     assert isinstance(incomplete, str) and incomplete.strip()
 
 
@@ -193,7 +187,7 @@ def test_load_config_reads_suspicious_dating_max_month_delta() -> None:
     assert delta >= 1
     assert delta == 1
     within = getattr(config.checking, "suspicious_dating_consider_within_years", None)
-    assert within == 2
+    assert within == 5
 
 
 def test_load_config_reads_analysis_section() -> None:
@@ -223,8 +217,11 @@ def test_load_config_reads_analysis_section() -> None:
     assert "1" in config.analysis.personal_effects_document.labels
     assert "Proof of theft" in config.analysis.personal_effects_document.prompt
     assert "1" in config.analysis.missed_departure_document.labels
+    assert "3" in config.analysis.missed_departure_document.labels
     assert "Incident report" in config.analysis.missed_departure_document.prompt
     assert "Proof of booking" in config.analysis.missed_departure_document.prompt
+    assert "Medical certificate" in config.analysis.missed_departure_document.prompt
+    assert config.analysis.required_documents.missed_departure_medical_codes == ["3"]
 
 
 def test_analysis_coverage_other_label_is_false() -> None:
@@ -554,7 +551,6 @@ checking:
   contradicts_prompt: check contradicts
   identity_prompt: check identity
   healthy_prompt: check healthy
-  authenticity_prompt: check authenticity
   incomplete_prompt: check incomplete
   transport_retry:
     max_retries: 2
@@ -663,7 +659,6 @@ def test_out_of_range_config_values_rejected(factory: str, kwargs: dict[str, obj
             contradicts_prompt="x",
             identity_prompt="i",
             healthy_prompt="h",
-            authenticity_prompt="a",
             incomplete_prompt="n",
             **kw,
         ),
@@ -703,7 +698,7 @@ def _compact_analysis(**required_documents_kwargs: object) -> AnalysisConfig:
         cancellation_reason=_compact_stage(["1", "2", "3", "4"]),
         cancellation_document=_compact_stage(["1", "2", "3", "4"]),
         personal_effects_document=_compact_stage(["1"]),
-        missed_departure_document=_compact_stage(["1", "2"]),
+        missed_departure_document=_compact_stage(["1", "2", "3"]),
         required_documents=RequiredDocumentsConfig(**required_documents_kwargs),  # type: ignore[arg-type]
     )
 
@@ -783,7 +778,6 @@ def test_classification_and_coverage_vocabulary_must_match() -> None:
                 contradicts_prompt="x",
                 identity_prompt="i",
                 healthy_prompt="h",
-                authenticity_prompt="a",
                 incomplete_prompt="n",
             ),
             analysis=AnalysisConfig(

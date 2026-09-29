@@ -161,7 +161,6 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             contradicts_prompt="contradicts",
             identity_prompt="identity",
             healthy_prompt="healthy",
-            authenticity_prompt="authenticity",
             incomplete_prompt="incomplete",
         ),
         analysis=AnalysisConfig(

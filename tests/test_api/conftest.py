@@ -88,12 +88,11 @@ def api_config_factory(
 def cancellation_chat_fn(
     cancellation_chat_factory: CancellationChatFactory,
 ) -> MagicMock:
-    """Provide a fresh seven-response cancellation-path LLM mock."""
+    """Provide a fresh cancellation-path cancellation-path LLM mock."""
     return cancellation_chat_factory([
         {"result": False},
         {"name": "Ada Lovelace"},
         {"name": "Ada Lovelace"},
-        {"result": False},
         {"result": False},
         {"result": False},
     ])

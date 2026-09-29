@@ -358,7 +358,6 @@ class ClaimPipeline:
             identity_unclear=results.legacy_booleans.get("identity_unclear"),
             signature_check=(bool(state.get("document_has_signature")) if "signature" in rule_set.applicable else None),
             healthy_check=results.legacy_booleans.get("healthy_check"),
-            checker_document_not_authentic=results.legacy_booleans.get("checker_document_not_authentic"),
             checker_incomplete_document=results.legacy_booleans.get("checker_incomplete_document"),
             departure_within_days=results.departure_within_days,
             checker_suspicious_dating=results.suspicious_dating,

@@ -34,6 +34,7 @@ MEDICAL_CERTIFICATE = "1"
 PROOF_OF_THEFT = "1"
 INCIDENT_REPORT = "1"
 PROOF_OF_BOOKING = "2"
+MISSED_MEDICAL_CERTIFICATE = "3"
 
 _PIPELINE_CLASSIFICATION = ClassificationConfig(
     labels=["1", "2", "3"],
@@ -121,6 +122,7 @@ def _analysis_config() -> AnalysisConfig:
         labels=[
             "1",
             "2",
+            "3",
             "False",
         ],
         other_label="False",
@@ -129,6 +131,7 @@ def _analysis_config() -> AnalysisConfig:
         label_names={
             "1": "Incident report or documentation explaining the cause of delay",
             "2": "Proof of booking",
+            "3": "Medical certificate or hospital documentation explaining the miss",
             "False": "False",
         },
     )
@@ -146,7 +149,8 @@ def _analysis_config() -> AnalysisConfig:
                 "4": ["1", "2", "3", "4"],
             },
             personal_effects=["1"],
-            missed_departure=["1", "2"],
+            missed_departure=["1", "2", "3"],
+            missed_departure_medical_codes=["3"],
             signature_required_codes=["1", "4"],
             identity_required_codes=["1", "4"],
         ),
@@ -189,7 +193,6 @@ def _cancellation_chat_fn(
 ) -> MagicMock:
     """Injected chat_fn: coverage → reason → cancel-doc → checker (identity skipped)."""
     return cancellation_chat_factory([
-        {"result": False},
         {"result": False},
         {"result": False},
         {"result": False},
@@ -247,7 +250,6 @@ _COVERAGE_WINNER_TAILS: dict[str, list[dict[str, Any]]] = {
         {"result": False},
         {"result": False},
         {"result": False},
-        {"result": False},
     ],
     PERSONAL_EFFECTS: [
         {"labels": [PROOF_OF_THEFT], "probabilities": {PROOF_OF_THEFT: 0.8, "False": 0.2}},
@@ -269,8 +271,7 @@ _COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
         "decision": "APPROVE",
         "decision_explanation": "checker_consistent",
         "human_in_the_loop": False,
-        "call_count": 7,
-        "not_authentic_present": True,
+        "call_count": 6,
     },
     PERSONAL_EFFECTS: {
         "routed_coverage_label": "Personal Effects",
@@ -280,7 +281,6 @@ _COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
         "decision_explanation": "checker_consistent",
         "human_in_the_loop": False,
         "call_count": 3,
-        "not_authentic_present": False,
     },
     MISSED_DEPARTURE: {
         "routed_coverage_label": "Missed Departure or Missed Connection",
@@ -290,7 +290,6 @@ _COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
         "decision_explanation": "checker_consistent",
         "human_in_the_loop": False,
         "call_count": 3,
-        "not_authentic_present": False,
     },
     COVERAGE_FALSE: {
         "routed_coverage_label": "False",
@@ -298,9 +297,8 @@ _COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
         "reason_label_codes": [],
         "decision": "UNCERTAIN",
         "decision_explanation": "coverage_false_label",
-        "human_in_the_loop": True,
+        "human_in_the_loop": False,
         "call_count": 1,
-        "not_authentic_present": False,
     },
 }
 
@@ -368,7 +366,6 @@ def test_coverage_route_by_probability(
     assert payload["decision_explanation"] == expected["decision_explanation"]
     assert payload["human_in_the_loop"] is expected["human_in_the_loop"]
     assert chat_fn.call_count == expected["call_count"]
-    assert ("checker_document_not_authentic" in payload) is expected["not_authentic_present"]
 
 
 def test_coverage_label_order_does_not_remap_branch(tmp_path: Path) -> None:
@@ -549,14 +546,11 @@ def test_checker_node(
     assert payload["checker_containment"] is True
     assert payload["checker_contradicts"] is False
     assert payload["identity_check"] is True
-    assert payload["checker_document_not_authentic"] is False
     assert payload["checker_incomplete_document"] is False
-    # Incomplete mode is the last medical checker LLM call; authenticity precedes it.
+    # Incomplete mode is the last medical checker LLM call; healthy precedes it.
     last_content = chat_fn.call_args_list[-1].kwargs["messages"][0]["content"]
     assert "incomplete" in last_content
-    authenticity_content = chat_fn.call_args_list[-2].kwargs["messages"][0]["content"]
-    assert "authenticity" in authenticity_content
-    healthy_content = chat_fn.call_args_list[-3].kwargs["messages"][0]["content"]
+    healthy_content = chat_fn.call_args_list[-2].kwargs["messages"][0]["content"]
     assert "healthy" in healthy_content
 
 
@@ -589,7 +583,6 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"name": "R"})
     healthy = _chat_response({"result": False})
-    authenticity = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     # Description is not embedded in supporting_document → containment also hits LLM.
     containment = _chat_response({"result": False})
@@ -602,7 +595,6 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
-            authenticity,
             incomplete,
         ]
     )
@@ -627,8 +619,8 @@ def test_deny_when_identity_check_false(tmp_path: Path) -> None:
     assert "identity_check" in predicted["explanation"]
 
 
-def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
-    """No clear patient name field on medical OCR → UNCERTAIN, not DENY."""
+def test_deny_when_identity_name_unextractable(tmp_path: Path) -> None:
+    """No clear patient name field on medical OCR → DENY (unverifiable identity)."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim identity unclear")
@@ -657,7 +649,6 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"name": None})
     healthy = _chat_response({"result": False})
-    authenticity = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
@@ -668,7 +659,6 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
-            authenticity,
             incomplete,
         ]
     )
@@ -680,18 +670,18 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
     assert payload["identity_check"] is False
-    assert payload["identity_unclear"] is True
-    assert payload["decision"] == "UNCERTAIN"
-    assert payload["decision_explanation"] == "identity_unclear"
-    assert payload["human_in_the_loop"] is True
+    assert payload["identity_unclear"] is False
+    assert payload["decision"] == "DENY"
+    assert "identity_check" in payload["decision_explanation"]
+    assert payload["human_in_the_loop"] is False
     predicted = json.loads(
         (Path(config.preprocessing.results_dir) / claim_dir.name / artifacts.predicted_answer).read_text(
             encoding="utf-8"
         )
     )
-    assert predicted["human_in_the_loop"] is True
+    assert predicted["decision"] == "DENY"
+    assert "identity_check" in predicted["explanation"]
     assert meta_path.read_bytes() == before_meta
-    assert payload["human_in_the_loop_source"] == "uncertain_decision"
 
 
 def test_identity_skipped_for_non_medical_document(tmp_path: Path) -> None:
@@ -756,7 +746,6 @@ def test_deny_when_signature_check_false_for_medical_certificate(
     })
     contradicts = _chat_response({"result": False})
     healthy = _chat_response({"result": False})
-    authenticity = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
@@ -765,7 +754,6 @@ def test_deny_when_signature_check_false_for_medical_certificate(
             document,
             contradicts,
             healthy,
-            authenticity,
             incomplete,
         ]
     )
@@ -810,7 +798,6 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
     containment = _chat_response({"result": False})
     contradicts = _chat_response({"result": False})
     healthy = _chat_response({"result": True})
-    authenticity = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
@@ -820,7 +807,6 @@ def test_deny_when_healthy_check_true(tmp_path: Path) -> None:
             containment,
             contradicts,
             healthy,
-            authenticity,
             incomplete,
         ]
     )
@@ -853,7 +839,6 @@ def _contradicts_deny_chat_fn() -> MagicMock:
     })
     contradicts = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
-    authenticity = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     return MagicMock(
         side_effect=[
@@ -862,7 +847,6 @@ def _contradicts_deny_chat_fn() -> MagicMock:
             document,
             contradicts,
             healthy,
-            authenticity,
             incomplete,
         ]
     )
@@ -999,7 +983,7 @@ def _pe_chat_fn() -> MagicMock:
 
 
 def _missed_chat_fn() -> MagicMock:
-    """Injected chat_fn: coverage missed → missed document → checker (no identity/healthy)."""
+    """Injected chat_fn: coverage missed → non-medical docs → contradicts only."""
     coverage = _chat_response({
         "labels": [MISSED_DEPARTURE],
         "probabilities": {MISSED_DEPARTURE: 0.9, "False": 0.1},
@@ -1087,7 +1071,6 @@ _GATED_CHECK_NAMES = (
     "identity",
     "signature",
     "healthy",
-    "not_authentic",
     "incomplete",
     "suspicious_dating",
     "departure",
@@ -1099,7 +1082,6 @@ _GATED_CHECK_RECORD: dict[str, tuple[str, str]] = {
     "identity": ("outcomes", "identity"),
     "signature": ("boolean", "signature_check"),
     "healthy": ("outcomes", "healthy"),
-    "not_authentic": ("outcomes", "not_authentic"),
     "incomplete": ("outcomes", "incomplete"),
     "suspicious_dating": ("boolean", "checker_suspicious_dating"),
     "departure": ("boolean", "departure_within_days"),
@@ -1234,9 +1216,8 @@ def test_non_medical_branch_cannot_deny_for_medical_semantics(tmp_path: Path) ->
     contradicts = _chat_response({"result": False})
     # Hostile medical responses that must never be consumed.
     healthy = _chat_response({"result": True})
-    authenticity = _chat_response({"result": True})
     incomplete = _chat_response({"result": True})
-    chat_fn = MagicMock(side_effect=[coverage, document, containment, contradicts, healthy, authenticity, incomplete])
+    chat_fn = MagicMock(side_effect=[coverage, document, containment, contradicts, healthy, incomplete])
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
 
     result_path = pipeline.analyze_claim(claim_dir)
@@ -1253,7 +1234,7 @@ def test_non_medical_branch_cannot_deny_for_medical_semantics(tmp_path: Path) ->
     assert "departure_within_days" not in payload
     system_prompts = {call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list}
     assert system_prompts >= {"containment", "contradicts"}
-    assert system_prompts.isdisjoint({"identity", "healthy", "authenticity", "incomplete"})
+    assert system_prompts.isdisjoint({"identity", "healthy", "incomplete"})
     assert chat_fn.call_count == 4
 
 
@@ -1266,8 +1247,8 @@ _RULE_SET_MATRIX_ROWS: list[tuple[str, str, str | None, str, str, list[str], set
         MEDICAL_CERTIFICATE,
         "cancellation_medical",
         [],
-        {"containment", "contradicts", "identity", "healthy", "not_authentic", "incomplete"},
-        [{"result": False}, {"result": False}, {"result": False}, {"result": False}],
+        {"containment", "contradicts", "identity", "healthy", "incomplete"},
+        [{"result": False}, {"result": False}, {"result": False}],
     ),
     (
         "cancel_hospital",
@@ -1276,8 +1257,8 @@ _RULE_SET_MATRIX_ROWS: list[tuple[str, str, str | None, str, str, list[str], set
         HOSPITAL_ADMISSION,
         "cancellation_medical",
         [],
-        {"containment", "contradicts", "identity", "healthy", "not_authentic", "incomplete"},
-        [{"result": False}, {"result": False}, {"result": False}, {"result": False}],
+        {"containment", "contradicts", "identity", "healthy", "incomplete"},
+        [{"result": False}, {"result": False}, {"result": False}],
     ),
     (
         "cancel_police",
@@ -1310,7 +1291,7 @@ _RULE_SET_MATRIX_ROWS: list[tuple[str, str, str | None, str, str, list[str], set
         [{"result": False}],
     ),
     (
-        "missed_departure",
+        "missed_departure_incident",
         MISSED_DEPARTURE,
         None,
         INCIDENT_REPORT,
@@ -1318,6 +1299,16 @@ _RULE_SET_MATRIX_ROWS: list[tuple[str, str, str | None, str, str, list[str], set
         list(_GATED_CHECK_NAMES),
         {"containment", "contradicts"},
         [{"result": False}],
+    ),
+    (
+        "missed_departure_medical",
+        MISSED_DEPARTURE,
+        None,
+        MISSED_MEDICAL_CERTIFICATE,
+        "missed_departure_medical",
+        [],
+        {"containment", "contradicts", "identity", "healthy", "incomplete"},
+        [{"result": False}, {"result": False}, {"result": False}],
     ),
 ]
 
@@ -1376,7 +1367,7 @@ def test_checker_rule_set_matrix(
     assert chat_fn.call_count == expected_calls
     if skipped:
         system_prompts = {call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list}
-        assert system_prompts.isdisjoint({"identity", "healthy", "authenticity", "incomplete"})
+        assert system_prompts.isdisjoint({"identity", "healthy", "incomplete"})
 
 
 def test_suspicious_dating_skipped_on_non_medical_branch(tmp_path: Path) -> None:
@@ -1434,7 +1425,7 @@ def test_skipped_checks_have_no_recorded_result(tmp_path: Path) -> None:
         coverage_code=TRIP_CANCELLATION,
         reason_code=MEDICAL_EMERGENCY,
         document_code=MEDICAL_CERTIFICATE,
-        checker_results=[{"result": False}, {"result": False}, {"result": False}, {"result": False}],
+        checker_results=[{"result": False}, {"result": False}, {"result": False}],
     )
     medical_payload = json.loads(
         ClaimPipeline(config, chat_fn=medical_chat).analyze_claim(medical_dir).read_text(encoding="utf-8")
@@ -1463,7 +1454,7 @@ def test_skipped_checks_have_no_recorded_result(tmp_path: Path) -> None:
 
 
 def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:
-    """A7/R012: coverage False abstention skips reason/docs/Checker; HITL on prediction."""
+    """A7/R012: coverage False abstention skips reason/docs/Checker; no OCR HITL."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim other")
@@ -1484,14 +1475,15 @@ def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:
     assert not payload.get("document_labels")
     assert "checker_containment" not in payload
     assert "checker_contradicts" not in payload
-    assert payload["human_in_the_loop"] is True
-    assert predicted["human_in_the_loop"] is True
+    assert payload["human_in_the_loop"] is False
+    assert payload["human_in_the_loop_source"] == "none"
+    assert predicted["human_in_the_loop"] is False
     assert predicted["decision"] == "UNCERTAIN"
     assert chat_fn.call_count == 1
 
 
-def test_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
-    """Coverage False flags human_in_the_loop on analysis_result, metadata, and prediction."""
+def test_classifier_false_does_not_set_human_in_the_loop(tmp_path: Path) -> None:
+    """Coverage False stays UNCERTAIN without HITL when OCR/YOLO did not flag."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim false")
@@ -1514,16 +1506,16 @@ def test_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
     )
 
     assert payload["coverage_label_codes"] == [COVERAGE_FALSE]
-    assert payload["human_in_the_loop"] is True
-    assert payload["human_in_the_loop_source"] == "classifier_false"
+    assert payload["human_in_the_loop"] is False
+    assert payload["human_in_the_loop_source"] == "none"
     assert payload["decision"] == "UNCERTAIN"
-    assert predicted["human_in_the_loop"] is True
+    assert predicted["human_in_the_loop"] is False
     assert meta_path.read_bytes() == before_meta
     assert chat_fn.call_count == 1
 
 
-def test_document_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
-    """Document-stage False also raises human_in_the_loop for review."""
+def test_document_classifier_false_does_not_set_human_in_the_loop(tmp_path: Path) -> None:
+    """Document-stage False does not raise HITL without OCR/YOLO uncertainty."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim doc false")
@@ -1552,8 +1544,8 @@ def test_document_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> Non
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
     assert COVERAGE_FALSE in payload["document_label_codes"]
-    assert payload["human_in_the_loop"] is True
-    assert payload["human_in_the_loop_source"] == "classifier_false"
+    assert payload["human_in_the_loop"] is False
+    assert payload["human_in_the_loop_source"] == "none"
     assert meta_path.read_bytes() == before_meta
 
 
@@ -1704,7 +1696,6 @@ def _repeating_cancellation_chat_fn() -> MagicMock:
     })
     contradicts = _chat_response({"result": False})
     healthy = _chat_response({"result": False})
-    authenticity = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     return MagicMock(
         side_effect=cycle([
@@ -1713,7 +1704,6 @@ def _repeating_cancellation_chat_fn() -> MagicMock:
             document,
             contradicts,
             healthy,
-            authenticity,
             incomplete,
         ])
     )
@@ -1810,7 +1800,6 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
             "  contradicts_prompt: contradicts",
             "  identity_prompt: identity",
             "  healthy_prompt: healthy",
-            "  authenticity_prompt: authenticity",
             "  incomplete_prompt: incomplete",
             "analysis:",
             "  coverage:",
@@ -2054,7 +2043,8 @@ def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> N
     assert payload["decision"] == "UNCERTAIN"
     assert payload["decision_explanation"] == "departure_within_days"
     assert payload["departure_within_days"] is True
-    assert payload["human_in_the_loop"] is True
+    assert payload["human_in_the_loop"] is False
+    assert payload["human_in_the_loop_source"] == "none"
     assert "checker_containment" not in payload
     assert "checker_contradicts" not in payload
     assert "identity_check" not in payload
@@ -2069,7 +2059,7 @@ def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> N
     assert "healthy" not in joined
     assert all("classify" in prompt for prompt in system_prompts)
 
-    # Helper: distance > n → True; distance ≤ n → False; unparseable → False
+    # Helper: future > n → True; ≤ n or past → False; unparseable → False
     from compliance.workflows.claim_dates import _departure_beyond_days
 
     departure_fn = _departure_beyond_days
@@ -2090,6 +2080,16 @@ def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> N
             within_days=14,
         )
         is True
+    )
+    # Past flights must not UNCERTAIN (healthy / identity DENY still apply).
+    assert (
+        departure_fn(
+            supporting_documents_text=("**current date**: 2017-08-20\n**departure**: 2017-08-01\n"),
+            description_text="",
+            today=date(2017, 8, 20),
+            within_days=14,
+        )
+        is False
     )
     assert (
         departure_fn(
@@ -2114,7 +2114,7 @@ def test_unique_calendar_dates_helper(tmp_path: Path) -> None:
 
 
 def test_suspicious_dating_ignores_dob_outside_year_window() -> None:
-    """Dates farther than consider_within_years are DOB/history, not suspicious."""
+    """Dates farther than consider_within_years are history, not suspicious."""
     from datetime import date
 
     from compliance.workflows.claim_dates import _suspicious_dating
@@ -2123,26 +2123,64 @@ def test_suspicious_dating_ignores_dob_outside_year_window() -> None:
     text = (
         "CERTIFICATO DI RICOVERO. Si Attesta che PICCIRILLI FRANCESCA "
         "nata il 30-07-1980. Ricoverata il 14-04-2017 dimesso il 20-04-2017. "
-        "Issue stamp present."
+        "Lanciano o lì,18-04-2017\nStamp\n"
     )
     assert (
         _suspicious_dating(
             text,
             today=date(2017, 5, 11),
-            max_month_delta=6,
-            consider_within_years=2,
+            max_month_delta=1,
+            consider_within_years=5,
         )
         is False
     )
-    # Eligible stamp within ±2y but ≥6 months away still fires.
+    # Explicit issue date within ±5y but ≥1 month away still fires.
     assert (
         _suspicious_dating(
             "Certificate issue date 2016-01-01.\n",
             today=date(2017, 5, 11),
-            max_month_delta=6,
-            consider_within_years=2,
+            max_month_delta=1,
+            consider_within_years=5,
         )
         is True
+    )
+
+
+def test_suspicious_dating_ignores_dob_cue_inside_year_window() -> None:
+    """Birth-cued dates inside the year window are dropped (young patient DOB)."""
+    from datetime import date
+
+    from compliance.workflows.claim_dates import _suspicious_dating
+
+    # DOB 2015 is within ±5y of 2017; care dates are coherent with today.
+    text = "Patient born 15-03-2015. Admission 10-04-2017. Discharge 12-04-2017.\n"
+    assert (
+        _suspicious_dating(
+            text,
+            today=date(2017, 5, 11),
+            max_month_delta=1,
+            consider_within_years=5,
+        )
+        is False
+    )
+
+
+def test_suspicious_dating_claim16_real_ocr_is_not_uncertain() -> None:
+    """Real claim-16 hospital OCR (birth + ricovero + bare Stamp) must not fire."""
+    from datetime import date
+    from pathlib import Path
+
+    from compliance.workflows.claim_dates import _suspicious_dating
+
+    text = Path("data/preprocessed/claim 16/supporting_document.md").read_text(encoding="utf-8")
+    assert (
+        _suspicious_dating(
+            text,
+            today=date(2017, 5, 11),
+            max_month_delta=1,
+            consider_within_years=5,
+        )
+        is False
     )
 
 
@@ -2193,68 +2231,14 @@ def test_departure_within_days_skips_llm_even_with_multiple_ocr_dates(
     assert "checker_contradicts" not in payload
 
 
-# --- Phase 07 authenticity (R027) / incomplete (R028) / suspicious dating (R029) ---
-
-
-def test_deny_when_checker_document_not_authentic(tmp_path: Path) -> None:
-    """OCR/format authenticity violation → DENY with checker_document_not_authentic.
-
-    Claim 8/18-shaped synthetic OCR (no live Docling). Injectable chat_fn only.
-    """
-    ClaimPipeline = _claim_pipeline_cls()
-    config = _config(tmp_path)
-    claim_dir = _seed_preprocessed_claim(config, claim_name="claim not authentic")
-    artifacts = config.preprocessing.artifacts
-    (claim_dir / artifacts.supporting_document).write_text(
-        "# Hospital admission document\n\n"
-        "Patient: Ada Lovelace\n"
-        "Patient admitted ### garbled OCR @@ format anomaly\n"
-        "Stamp unreadable.\n",
-        encoding="utf-8",
-    )
-    coverage = _chat_response({
-        "labels": [TRIP_CANCELLATION],
-        "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
-    })
-    reason = _chat_response({
-        "labels": [MEDICAL_EMERGENCY],
-        "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
-    })
-    document = _chat_response({
-        "labels": [HOSPITAL_ADMISSION],
-        "probabilities": {HOSPITAL_ADMISSION: 0.8, "False": 0.2},
-    })
-    containment = _chat_response({"result": False})
-    contradicts = _chat_response({"result": False})
-    healthy = _chat_response({"result": False})
-    not_authentic = _chat_response({"result": True})
-    incomplete = _chat_response({"result": False})
-    chat_fn = MagicMock(
-        side_effect=[
-            coverage,
-            reason,
-            document,
-            containment,
-            contradicts,
-            healthy,
-            not_authentic,
-            incomplete,
-        ]
-    )
-    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
-
-    result_path = pipeline.analyze_claim(claim_dir)
-    payload = json.loads(result_path.read_text(encoding="utf-8"))
-
-    assert payload["checker_document_not_authentic"] is True
-    assert payload["decision"] == "DENY"
-    assert "checker_document_not_authentic" in payload["decision_explanation"]
+# --- Phase 07 incomplete (R028) / suspicious dating (R029) ---
 
 
 def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     """Missing medical fields (discharge/diagnosis/condition) → DENY incomplete.
 
     Signature may still pass separately; incomplete is its own payload key (R028).
+    Clean OCR (HITL false) keeps hard DENY polarity.
     """
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
@@ -2281,7 +2265,6 @@ def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     containment = _chat_response({"result": False})
     contradicts = _chat_response({"result": False})
     healthy = _chat_response({"result": False})
-    not_authentic = _chat_response({"result": False})
     incomplete = _chat_response({"result": True})
     chat_fn = MagicMock(
         side_effect=[
@@ -2291,7 +2274,6 @@ def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
             containment,
             contradicts,
             healthy,
-            not_authentic,
             incomplete,
         ]
     )
@@ -2303,6 +2285,84 @@ def test_deny_when_checker_incomplete_document(tmp_path: Path) -> None:
     assert payload.get("checker_incomplete_document") is True
     assert payload["decision"] == "DENY"
     assert "checker_incomplete_document" in payload["decision_explanation"]
+    assert payload["human_in_the_loop"] is False
+
+
+def test_uncertain_when_incomplete_and_ocr_hitl(tmp_path: Path) -> None:
+    """Incomplete VIOLATION + preprocess OCR HITL → UNCERTAIN (not DENY).
+
+    Soft polarity for claims 5/19 shape: garbled OCR makes field-gap judgements
+    unreliable; HITL stays from OCR metadata.
+    """
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim incomplete ocr hitl")
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.document_metadata).write_text(
+        json.dumps({
+            "documents": [
+                {
+                    "source_file": "medical.png",
+                    "has_signature": True,
+                    "extraction_probability": 0.56,
+                    "faulty_extraction": False,
+                    "human_in_the_loop": True,
+                }
+            ]
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# CERTIFICADO MÉDICO\n\n"
+        "Patient: Ada Lovelace\n"
+        "Garbled OCR: Coxalgia acuta … Note: handwritten text transcribed poorly.\n",
+        encoding="utf-8",
+    )
+    coverage = _chat_response({
+        "labels": [TRIP_CANCELLATION],
+        "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+    })
+    reason = _chat_response({
+        "labels": [MEDICAL_EMERGENCY],
+        "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+    })
+    document = _chat_response({
+        "labels": [MEDICAL_CERTIFICATE],
+        "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+    })
+    containment = _chat_response({"result": False})
+    contradicts = _chat_response({"result": False})
+    healthy = _chat_response({"result": False})
+    incomplete = _chat_response({"result": True})
+    chat_fn = MagicMock(
+        side_effect=[
+            coverage,
+            reason,
+            document,
+            containment,
+            contradicts,
+            healthy,
+            incomplete,
+        ]
+    )
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    predicted = json.loads(
+        (Path(config.preprocessing.results_dir) / claim_dir.name / artifacts.predicted_answer).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert payload.get("checker_incomplete_document") is True
+    assert payload["decision"] == "UNCERTAIN"
+    assert payload["decision_explanation"] == "checker_incomplete_document"
+    assert payload["human_in_the_loop"] is True
+    assert payload["human_in_the_loop_source"] == "preprocess_metadata"
+    assert predicted["decision"] == "UNCERTAIN"
+    assert predicted["human_in_the_loop"] is True
 
 
 def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
@@ -2319,7 +2379,7 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
         "# Supporting documents\n\n"
         "**current date**: 2022-06-01\n"
         "**name**: Test Claimant\n"
-        "**departure**: 2022-09-01 10:00 (local)\n",
+        "**departure**: 2022-06-05 10:00 (local)\n",
         encoding="utf-8",
     )
     (claim_dir / artifacts.supporting_document).write_text(
@@ -2338,12 +2398,11 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
         "labels": [MEDICAL_CERTIFICATE],
         "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
     })
-    # Extra checker responses for RED (no early-exit yet); GREEN omits LLM checkers.
+    # Extra checker responses unused on GREEN (dating early-exit); RED would consume them.
     containment = _chat_response({"result": False})
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
-    not_authentic = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
@@ -2354,7 +2413,6 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
-            not_authentic,
             incomplete,
         ]
     )
@@ -2366,14 +2424,14 @@ def test_uncertain_when_checker_suspicious_dating(tmp_path: Path) -> None:
     assert payload.get("checker_suspicious_dating") is True
     assert payload["decision"] == "UNCERTAIN"
     assert payload["decision_explanation"] == "checker_suspicious_dating"
-    assert payload["human_in_the_loop"] is True
+    assert payload["human_in_the_loop"] is False
+    assert payload["human_in_the_loop_source"] == "none"
     predicted = json.loads(
         (Path(config.preprocessing.results_dir) / claim_dir.name / artifacts.predicted_answer).read_text(
             encoding="utf-8"
         )
     )
-    assert predicted["human_in_the_loop"] is True
-    assert "checker_document_not_authentic" not in payload
+    assert predicted["human_in_the_loop"] is False
     assert "checker_incomplete_document" not in payload
     assert chat_fn.call_count == 3
 
@@ -2388,7 +2446,7 @@ def test_suspicious_dating_false_when_coherent_dates(tmp_path: Path) -> None:
         "# Supporting documents\n\n"
         "**current date**: 2022-06-01\n"
         "**name**: Test Claimant\n"
-        "**departure**: 2022-09-01 10:00 (local)\n",
+        "**departure**: 2022-06-05 10:00 (local)\n",
         encoding="utf-8",
     )
     (claim_dir / artifacts.supporting_document).write_text(
@@ -2410,7 +2468,6 @@ def test_suspicious_dating_false_when_coherent_dates(tmp_path: Path) -> None:
     containment = _chat_response({"result": False})
     contradicts = _chat_response({"result": False})
     healthy = _chat_response({"result": False})
-    not_authentic = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
@@ -2420,7 +2477,6 @@ def test_suspicious_dating_false_when_coherent_dates(tmp_path: Path) -> None:
             containment,
             contradicts,
             healthy,
-            not_authentic,
             incomplete,
         ]
     )
@@ -2443,7 +2499,7 @@ def test_suspicious_dating_precedes_deny(tmp_path: Path) -> None:
         "# Supporting documents\n\n"
         "**current date**: 2022-06-01\n"
         "**name**: Test Claimant\n"
-        "**departure**: 2022-09-01 10:00 (local)\n",
+        "**departure**: 2022-06-05 10:00 (local)\n",
         encoding="utf-8",
     )
     (claim_dir / artifacts.supporting_document).write_text(
@@ -2478,7 +2534,6 @@ def test_suspicious_dating_precedes_deny(tmp_path: Path) -> None:
     contradicts = _chat_response({"result": False})
     identity = _chat_response({"result": True})
     healthy = _chat_response({"result": False})
-    not_authentic = _chat_response({"result": False})
     incomplete = _chat_response({"result": False})
     chat_fn = MagicMock(
         side_effect=[
@@ -2489,7 +2544,6 @@ def test_suspicious_dating_precedes_deny(tmp_path: Path) -> None:
             contradicts,
             identity,
             healthy,
-            not_authentic,
             incomplete,
         ]
     )
@@ -2504,10 +2558,10 @@ def test_suspicious_dating_precedes_deny(tmp_path: Path) -> None:
     assert payload["decision_explanation"] == "checker_suspicious_dating"
 
 
-def test_authenticity_incomplete_skipped_for_non_medical_document(
+def test_incomplete_skipped_for_non_medical_document(
     tmp_path: Path,
 ) -> None:
-    """PE/missed path must not invoke authenticity or incomplete chat prompts."""
+    """PE/missed path must not invoke incomplete chat prompts."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim pe auth skip")
@@ -2523,18 +2577,16 @@ def test_authenticity_incomplete_skipped_for_non_medical_document(
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
-    assert "checker_document_not_authentic" not in payload
     assert "checker_incomplete_document" not in payload
     system_prompts = [call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list]
     joined = "\n".join(system_prompts).lower()
-    assert "authenticity" not in joined
     assert "incomplete" not in joined
 
 
 def test_payload_omits_llm_keys_on_date_uncertain_early_exit(
     tmp_path: Path,
 ) -> None:
-    """When date UNCERTAIN early-exits, authenticity/incomplete keys stay omitted."""
+    """When date UNCERTAIN early-exits, incomplete keys stay omitted."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _with_departure_uncertain_enabled(_config(tmp_path))
     claim_dir = _seed_preprocessed_claim(config, claim_name="claim date omit keys")
@@ -2569,7 +2621,6 @@ def test_payload_omits_llm_keys_on_date_uncertain_early_exit(
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
     assert payload["decision"] == "UNCERTAIN"
-    assert "checker_document_not_authentic" not in payload
     assert "checker_incomplete_document" not in payload
     assert "checker_suspicious_dating" not in payload
 
@@ -2580,7 +2631,6 @@ _BOOLEAN_CHECKER_MODES = (
     "containment",
     "contradicts",
     "healthy",
-    "not_authentic",
     "incomplete",
 )
 
@@ -2590,7 +2640,6 @@ _BENIGN_CHECKER_OVERRIDES: dict[str, str] = {
     "containment": json.dumps({"result": True}),
     "contradicts": json.dumps({"result": False}),
     "healthy": json.dumps({"result": False}),
-    "not_authentic": json.dumps({"result": False}),
     "incomplete": json.dumps({"result": False}),
 }
 
@@ -2601,7 +2650,6 @@ for _mode in _BOOLEAN_CHECKER_MODES:
         "containment": None,
         "contradicts": "checker_contradicts",
         "healthy": "healthy_check",
-        "not_authentic": "checker_document_not_authentic",
         "incomplete": "checker_incomplete_document",
     }[_mode]
     _true_outcome = "PASS" if _mode == "containment" else "VIOLATION"
@@ -2761,7 +2809,7 @@ def test_checker_policy_matrix(
     assert payload["decision"] == expected_decision
     assert payload["decision_explanation"] == expected_explanation
     assert predicted["decision"] == expected_decision
-    assert predicted["human_in_the_loop"] is (expected_decision == "UNCERTAIN")
+    assert predicted["human_in_the_loop"] is False
     assert chat_fn.call_count == len(side_effect)
 
 
@@ -2799,11 +2847,11 @@ def test_checker_policy_matrix(
         pytest.param(
             "null_name",
             json.dumps({"name": None}),
-            "ABSTAIN",
-            "UNCERTAIN",
-            "identity_unclear",
+            "VIOLATION",
+            "DENY",
+            "identity_check",
             False,
-            True,
+            False,
             id="null_name",
         ),
         pytest.param(
@@ -2865,7 +2913,7 @@ def test_identity_outcome_policy(
     assert payload["decision"] == expected_decision
     assert payload["decision_explanation"] == expected_explanation
     assert predicted["decision"] == expected_decision
-    assert predicted["human_in_the_loop"] is (expected_decision == "UNCERTAIN")
+    assert predicted["human_in_the_loop"] is False
     assert chat_fn.call_count == len(side_effect)
 
 
@@ -2889,9 +2937,9 @@ def test_identity_outcome_policy(
         pytest.param(
             {"contradicts": '{"result": tru'},
             json.dumps({"name": None}),
-            "UNCERTAIN",
-            "checker_error:contradicts",
-            id="error_beats_identity_abstain",
+            "DENY",
+            "identity_check",
+            id="identity_missing_name_beats_contradicts_error",
         ),
         pytest.param(
             {"incomplete": ""},
@@ -2909,7 +2957,7 @@ def test_checker_outcome_precedence(
     expected_decision: str,
     expected_explanation: str,
 ) -> None:
-    """VIOLATION beats ERROR; ERROR beats identity ABSTAIN (D-01 precedence)."""
+    """VIOLATION (including missing name) beats ERROR (D-01 precedence)."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _with_transport_retry(_config(tmp_path), max_retries=1, backoff_seconds=0.0)
     needs_identity_llm = identity_content is not None

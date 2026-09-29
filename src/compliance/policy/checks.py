@@ -63,14 +63,12 @@ def legacy_booleans_from_outcomes(
     if "identity" in outcomes:
         identity = outcomes["identity"]
         flags["identity_check"] = identity is CheckOutcome.PASS
-        flags["identity_unclear"] = identity in (CheckOutcome.ABSTAIN, CheckOutcome.ERROR)
+        flags["identity_unclear"] = identity is CheckOutcome.ERROR
     else:
         flags["identity_check"] = True
         flags["identity_unclear"] = False
     if "healthy" in outcomes:
         flags["healthy_check"] = outcomes["healthy"] is CheckOutcome.VIOLATION
-    if "not_authentic" in outcomes:
-        flags["checker_document_not_authentic"] = outcomes["not_authentic"] is CheckOutcome.VIOLATION
     if "incomplete" in outcomes:
         flags["checker_incomplete_document"] = outcomes["incomplete"] is CheckOutcome.VIOLATION
     return flags
@@ -186,7 +184,6 @@ def _build_checker(checking: CheckingConfig, chat_fn: ChatFn | None) -> Checker:
         contradicts_prompt=checking.contradicts_prompt,
         identity_prompt=checking.identity_prompt,
         healthy_prompt=checking.healthy_prompt,
-        authenticity_prompt=checking.authenticity_prompt,
         incomplete_prompt=checking.incomplete_prompt,
         chat_fn=chat_fn,
         identity_max_edit_distance=checking.identity_max_edit_distance,
@@ -206,8 +203,8 @@ def _checker_outcomes(
     """Run Checker modes in fixed order; record only modes that ran.
 
     Order: containment → contradicts → identity (optional) → healthy
-    (optional) → not_authentic / incomplete (optional). Do not reorder —
-    MagicMock side_effect sequences in tests depend on it. Containment and
+    (optional) → incomplete (optional). Do not reorder — MagicMock
+    side_effect sequences in tests depend on it. Containment and
     contradicts are never gated (P-06).
 
     :param description_text: Claim narrative text.
@@ -233,12 +230,6 @@ def _checker_outcomes(
             description_text,
             supporting_document_text,
             mode="healthy",
-        )
-    if "not_authentic" in rule_set.applicable:
-        outcomes["not_authentic"] = checker.check(
-            description_text,
-            supporting_document_text,
-            mode="not_authentic",
         )
     if "incomplete" in rule_set.applicable:
         outcomes["incomplete"] = checker.check(

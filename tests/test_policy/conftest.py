@@ -77,13 +77,14 @@ def analysis_config(coverage_config: CoverageClassificationConfig) -> AnalysisCo
         label_names={"1": "Proof of theft, loss, or damage", "False": "False"},
     )
     missed_departure_document = ClassificationConfig(
-        labels=["1", "2", "False"],
+        labels=["1", "2", "3", "False"],
         other_label="False",
         model="test-model",
         prompt="classify missed doc",
         label_names={
             "1": "Incident report or documentation explaining the cause of delay",
             "2": "Proof of booking",
+            "3": "Medical certificate or hospital documentation explaining the miss",
             "False": "False",
         },
     )
@@ -101,7 +102,8 @@ def analysis_config(coverage_config: CoverageClassificationConfig) -> AnalysisCo
                 "4": ["1", "2", "3", "4"],
             },
             personal_effects=["1"],
-            missed_departure=["1", "2"],
+            missed_departure=["1", "2", "3"],
+            missed_departure_medical_codes=["3"],
             signature_required_codes=["1", "4"],
             identity_required_codes=["1", "4"],
         ),
@@ -120,6 +122,5 @@ def checking_config() -> CheckingConfig:
         contradicts_prompt="contradicts",
         identity_prompt="identity",
         healthy_prompt="healthy",
-        authenticity_prompt="authenticity",
         incomplete_prompt="incomplete",
     )

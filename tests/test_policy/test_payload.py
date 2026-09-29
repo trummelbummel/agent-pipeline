@@ -25,7 +25,6 @@ def test_payload_key_order_and_conditional_omission(analysis_config: AnalysisCon
         "checker_containment": True,
         "checker_contradicts": False,
         "healthy_check": False,
-        "checker_document_not_authentic": False,
         "checker_incomplete_document": False,
         "checker_outcomes": {
             "containment": CheckOutcome.PASS,

@@ -15,7 +15,6 @@ GatedCheck = Literal[
     "identity",
     "signature",
     "healthy",
-    "not_authentic",
     "incomplete",
     "suspicious_dating",
     "departure",
@@ -26,7 +25,6 @@ _GATED_CHECKS: tuple[GatedCheck, ...] = (
     "identity",
     "signature",
     "healthy",
-    "not_authentic",
     "incomplete",
     "suspicious_dating",
     "departure",
@@ -38,7 +36,6 @@ _IDENTITY_GROUP_CHECKS: frozenset[GatedCheck] = frozenset({"identity"})
 _SIGNATURE_GROUP_CHECKS: frozenset[GatedCheck] = frozenset({
     "signature",
     "healthy",
-    "not_authentic",
     "incomplete",
     "suspicious_dating",
     "departure",
@@ -60,11 +57,14 @@ class CheckerRuleSet(NamedTuple):
 
     Rule matrix (routed path → applicable gated checks):
 
-    - ``cancellation_medical`` — all seven when classified codes hit the
+    - ``cancellation_medical`` — all six when classified codes hit the
       configured identity/signature required-document lists
     - ``cancellation_non_medical`` — none (police report, jury summons, …)
+    - ``missed_departure_medical`` — all six when classified codes hit
+      ``missed_departure_medical_codes`` (medical / hospital evidence on a
+      missed-departure claim)
+    - ``missed_departure_non_medical`` — none (incident report, booking proof)
     - ``personal_effects_non_medical`` — none
-    - ``missed_departure_non_medical`` — none
 
     Ungated always: missing_documentation, containment, contradicts.
 
@@ -92,19 +92,27 @@ def rule_set_for_claim(
 ) -> CheckerRuleSet:
     """Compute the single per-claim medical rule set from branch + document codes.
 
-    Non-cancellation branches yield an empty applicable set named
-    ``{branch}_non_medical``. On cancellation, each configured code group
-    (identity / signature required codes) enables its gated checks when any
-    classified document code intersects that group; the set is named
-    ``cancellation_medical`` when anything applies, else
-    ``cancellation_non_medical``.
+    ``missed_departure`` enables every gated medical check only when a classified
+    document code is in ``missed_departure_medical_codes``; otherwise it is
+    ``missed_departure_non_medical``. ``personal_effects`` and ``abstention``
+    yield an empty applicable set named ``{branch}_non_medical``. On
+    cancellation, each configured code group (identity / signature required
+    codes) enables its gated checks when any classified document code
+    intersects that group; the set is named ``cancellation_medical`` when
+    anything applies, else ``cancellation_non_medical``.
 
     :param branch: Routed coverage branch for this claim.
     :param classified_codes: Non-abstention document codes from the document stage.
-    :param required_documents: Config pairing identity/signature code lists with
-        gated-check groups (producer order matches ``_RULE_SET_CODE_GROUPS``).
+    :param required_documents: Config pairing identity/signature/missed-medical
+        code lists with gated-check groups.
     :return: Named rule set deciding which gated checks run.
     """
+    if branch == "missed_departure":
+        medical_codes = set(required_documents.missed_departure_medical_codes)
+        if medical_codes and classified_codes & medical_codes:
+            return CheckerRuleSet(name="missed_departure_medical", applicable=frozenset(_GATED_CHECKS))
+        return CheckerRuleSet(name="missed_departure_non_medical", applicable=frozenset())
+
     if branch != "cancellation":
         return CheckerRuleSet(name=f"{branch}_non_medical", applicable=frozenset())
 

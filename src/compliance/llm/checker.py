@@ -9,7 +9,6 @@ polarity table lookup — there is no per-mode if/elif polarity logic.
 | containment   | PASS         | ABSTAIN      | ERROR                                                   | ERROR                         |
 | contradicts   | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
 | healthy       | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
-| not_authentic | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
 | incomplete    | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
 
 A deterministic containment hit (normalized claim substring of the text) is
@@ -27,12 +26,12 @@ Identity:
 | booking name field contained in OCR (no role note), no LLM call                 | PASS      |
 | both names extracted, within identity_max_edit_distance                         | PASS      |
 | both names extracted, beyond identity_max_edit_distance                          | VIOLATION |
-| an extraction returned {"name": null} or a blank name, none errored             | ABSTAIN   |
+| an extraction returned {"name": null} or a blank name, none errored             | VIOLATION |
 | an extraction was unparseable / schema-invalid / transport error after retries  | ERROR     |
 
-See ``compliance.workflows.claim_pipeline`` for how ``CheckOutcome`` folds
-into the claim decision (VIOLATION -> DENY; ERROR -> UNCERTAIN, except
-containment; identity ABSTAIN -> UNCERTAIN; else APPROVE).
+See ``compliance.policy.decision`` for how ``CheckOutcome`` folds into the claim
+decision (VIOLATION → DENY, except incomplete VIOLATION alone under OCR/YOLO
+HITL → UNCERTAIN; ERROR → UNCERTAIN, except containment; else APPROVE).
 """
 
 from __future__ import annotations
@@ -56,7 +55,6 @@ CheckerMode = Literal[
     "contradicts",
     "identity",
     "healthy",
-    "not_authentic",
     "incomplete",
 ]
 
@@ -104,7 +102,6 @@ _MODE_POLARITY: dict[CheckerMode, _ModePolarity] = {
     "containment": _ModePolarity(CheckOutcome.PASS, CheckOutcome.ABSTAIN),
     "contradicts": _ModePolarity(CheckOutcome.VIOLATION, CheckOutcome.PASS),
     "healthy": _ModePolarity(CheckOutcome.VIOLATION, CheckOutcome.PASS),
-    "not_authentic": _ModePolarity(CheckOutcome.VIOLATION, CheckOutcome.PASS),
     "incomplete": _ModePolarity(CheckOutcome.VIOLATION, CheckOutcome.PASS),
 }
 
@@ -149,7 +146,7 @@ class UnsupportedCheckerModeError(ValueError):
 
 
 class Checker:
-    """Claim-vs-text checker: containment, contradicts, identity, healthy, authenticity."""
+    """Claim-vs-text checker: containment, contradicts, identity, healthy, incomplete."""
 
     def __init__(
         self,
@@ -158,7 +155,6 @@ class Checker:
         contradicts_prompt: str,
         identity_prompt: str,
         healthy_prompt: str,
-        authenticity_prompt: str,
         incomplete_prompt: str,
         chat_fn: ChatFn | None = None,
         *,
@@ -173,8 +169,6 @@ class Checker:
         :param identity_prompt: System prompt that extracts a person name as JSON
             ``{"name": "..."}`` or ``{"name": null}``.
         :param healthy_prompt: System prompt for healthy-certificate detection.
-        :param authenticity_prompt: System prompt for document authenticity / format
-            (True = not authentic -> violation).
         :param incomplete_prompt: System prompt for incomplete medical fields
             (True = required fields missing -> violation).
         :param chat_fn: Optional chat callable for tests; defaults to ollama.chat.
@@ -188,7 +182,6 @@ class Checker:
         self.contradicts_prompt = contradicts_prompt
         self.identity_prompt = identity_prompt
         self.healthy_prompt = healthy_prompt
-        self.authenticity_prompt = authenticity_prompt
         self.incomplete_prompt = incomplete_prompt
         self.identity_max_edit_distance = identity_max_edit_distance
         self._transport_retry = transport_retry if transport_retry is not None else TransportRetryConfig()
@@ -204,9 +197,9 @@ class Checker:
 
         :param claim: Claim / booking text (unused for OCR-focused modes).
         :param text: Supporting document OCR text (primary input for healthy /
-            not_authentic / incomplete).
+            incomplete).
         :param mode: ``containment``, ``contradicts``, ``identity``, ``healthy``,
-            ``not_authentic``, or ``incomplete``.
+            or ``incomplete``.
         :return: The mode's ``CheckOutcome`` per the module policy matrix.
             ``identity`` delegates to ``check_identity``.
         :raises UnsupportedCheckerModeError: When ``mode`` is not a supported checker mode
@@ -231,8 +224,9 @@ class Checker:
            extraction. Document name: always an LLM extraction. Both extractions
            are always attempted before folding (today's call order is unchanged).
         3. Either extraction unparseable/schema-invalid -> ERROR. Either name
-           missing (null/blank) -> ABSTAIN. Lowercased Levenshtein distance
-           (also token-wise) <= ``identity_max_edit_distance`` -> PASS, else VIOLATION.
+           missing (null/blank) -> VIOLATION (unverifiable identity → DENY).
+           Lowercased Levenshtein distance (also token-wise) <=
+           ``identity_max_edit_distance`` -> PASS, else VIOLATION.
 
         :param booking_text: Booking / internal ``supporting_documents`` markdown.
         :param document_text: Medical ``supporting_document`` OCR markdown.
@@ -259,13 +253,14 @@ class Checker:
 
         :param booking: Booking/claimant name extraction result.
         :param document: Document/patient name extraction result.
-        :return: ERROR when either extraction failed; ABSTAIN when either name
-            is missing; PASS within the edit-distance threshold; else VIOLATION.
+        :return: ERROR when either extraction failed; VIOLATION when either name
+            is missing (redacted / unextractable) or names mismatch; PASS within
+            the edit-distance threshold.
         """
         if booking.failed or document.failed:
             return CheckOutcome.ERROR
         if not booking.name or not document.name:
-            return CheckOutcome.ABSTAIN
+            return CheckOutcome.VIOLATION
         if self._names_within_edit_distance(
             booking.name,
             document.name,
@@ -321,7 +316,6 @@ class Checker:
         prompts: dict[CheckerMode, str] = {
             "contradicts": self.contradicts_prompt,
             "healthy": self.healthy_prompt,
-            "not_authentic": self.authenticity_prompt,
             "incomplete": self.incomplete_prompt,
         }
         return prompts[mode]
@@ -459,7 +453,7 @@ class Checker:
     def _check_messages(
         prompt: str, claim: str, text: str, *, mode: CheckerMode = "containment"
     ) -> list[dict[str, str]]:
-        if mode in ("healthy", "not_authentic", "incomplete"):
+        if mode in ("healthy", "incomplete"):
             user_content = f"Supporting document (OCR):\n{text}"
         else:
             user_content = f"Claim:\n{claim}\n\nText:\n{text}"

@@ -21,14 +21,12 @@ def _base_state(**overrides: object) -> ClaimAnalysisState:
             "contradicts": CheckOutcome.PASS,
             "identity": CheckOutcome.PASS,
             "healthy": CheckOutcome.PASS,
-            "not_authentic": CheckOutcome.PASS,
             "incomplete": CheckOutcome.PASS,
         },
         "identity_check": True,
         "identity_unclear": False,
         "checker_contradicts": False,
         "healthy_check": False,
-        "checker_document_not_authentic": False,
         "checker_incomplete_document": False,
     }
     state.update(overrides)  # type: ignore[typeddict-item]
@@ -86,36 +84,36 @@ def test_violation_beats_checker_error(analysis_config: AnalysisConfig) -> None:
     assert decision.explanation == "checker_contradicts"
 
 
-def test_checker_error_beats_identity_abstain(analysis_config: AnalysisConfig) -> None:
-    """Decision-relevant ERROR beats identity ABSTAIN."""
+def test_checker_error_beats_identity_violation(analysis_config: AnalysisConfig) -> None:
+    """Decision-relevant ERROR is checked after VIOLATION; VIOLATION wins first."""
     state = _base_state(
         checker_outcomes={
             "containment": CheckOutcome.PASS,
             "contradicts": CheckOutcome.ERROR,
-            "identity": CheckOutcome.ABSTAIN,
+            "identity": CheckOutcome.VIOLATION,
         },
         identity_check=False,
-        identity_unclear=True,
+        identity_unclear=False,
     )
     decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
-    assert decision.decision == DECISION_UNCERTAIN
-    assert decision.explanation == "checker_error:contradicts"
+    assert decision.decision == DECISION_DENY
+    assert "identity_check" in (decision.explanation or "")
 
 
-def test_identity_abstain(analysis_config: AnalysisConfig) -> None:
-    """Identity ABSTAIN alone yields UNCERTAIN identity_unclear."""
+def test_identity_missing_name_denies(analysis_config: AnalysisConfig) -> None:
+    """Unextractable patient name (VIOLATION) yields DENY identity_check."""
     state = _base_state(
         checker_outcomes={
             "containment": CheckOutcome.PASS,
             "contradicts": CheckOutcome.PASS,
-            "identity": CheckOutcome.ABSTAIN,
+            "identity": CheckOutcome.VIOLATION,
         },
         identity_check=False,
-        identity_unclear=True,
+        identity_unclear=False,
     )
     decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
-    assert decision.decision == DECISION_UNCERTAIN
-    assert decision.explanation == "identity_unclear"
+    assert decision.decision == DECISION_DENY
+    assert decision.explanation == "identity_check"
 
 
 def test_clean_path_approves(analysis_config: AnalysisConfig) -> None:
@@ -133,3 +131,58 @@ def test_legacy_boolean_fallback_path(analysis_config: AnalysisConfig) -> None:
     decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
     assert decision.decision == DECISION_DENY
     assert decision.explanation == "checker_contradicts"
+
+
+def test_incomplete_violation_denies_when_ocr_clean(analysis_config: AnalysisConfig) -> None:
+    """Clean OCR keeps incomplete VIOLATION as DENY."""
+    state = _base_state(
+        human_in_the_loop=False,
+        checker_outcomes={
+            "containment": CheckOutcome.PASS,
+            "contradicts": CheckOutcome.PASS,
+            "identity": CheckOutcome.PASS,
+            "healthy": CheckOutcome.PASS,
+            "incomplete": CheckOutcome.VIOLATION,
+        },
+        checker_incomplete_document=True,
+    )
+    decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
+    assert decision.decision == DECISION_DENY
+    assert decision.explanation == "checker_incomplete_document"
+
+
+def test_incomplete_violation_uncertain_when_ocr_hitl(analysis_config: AnalysisConfig) -> None:
+    """OCR HITL softens incomplete-only VIOLATION to UNCERTAIN (claims 5/19 shape)."""
+    state = _base_state(
+        human_in_the_loop=True,
+        checker_outcomes={
+            "containment": CheckOutcome.PASS,
+            "contradicts": CheckOutcome.PASS,
+            "identity": CheckOutcome.PASS,
+            "healthy": CheckOutcome.PASS,
+            "incomplete": CheckOutcome.VIOLATION,
+        },
+        checker_incomplete_document=True,
+    )
+    decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
+    assert decision.decision == DECISION_UNCERTAIN
+    assert decision.explanation == "checker_incomplete_document"
+
+
+def test_hard_violation_beats_ocr_soft_incomplete(analysis_config: AnalysisConfig) -> None:
+    """OCR HITL softens incomplete but healthy VIOLATION still DENYs."""
+    state = _base_state(
+        human_in_the_loop=True,
+        checker_outcomes={
+            "containment": CheckOutcome.PASS,
+            "contradicts": CheckOutcome.PASS,
+            "identity": CheckOutcome.PASS,
+            "healthy": CheckOutcome.VIOLATION,
+            "incomplete": CheckOutcome.VIOLATION,
+        },
+        healthy_check=True,
+        checker_incomplete_document=True,
+    )
+    decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
+    assert decision.decision == DECISION_DENY
+    assert decision.explanation == "healthy_check"

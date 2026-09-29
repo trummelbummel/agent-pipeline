@@ -147,11 +147,12 @@ def _departure_beyond_days(
     today: date,
     within_days: int,
 ) -> bool:
-    """True when departure is farther than ``within_days`` from ``today``.
+    """True when an upcoming departure is farther than ``within_days`` ahead.
 
     Used on the medical path only: a flight still more than ``n`` days out makes
-    recovery / ability-to-fly unclear → UNCERTAIN. When departure is within
-    ``n`` days, analysis continues through the remaining checkers instead.
+    recovery / ability-to-fly unclear → UNCERTAIN. Past departures and flights
+    within the near window continue through the remaining checkers (healthy /
+    identity DENY must still run on already-traveled trips).
 
     Departure source priority: booking markdown ``departure`` via
     ``MarkdownPreprocessor``; else first parseable date in ``description_text``.
@@ -160,8 +161,8 @@ def _departure_beyond_days(
     :param supporting_documents_text: Booking/internal markdown.
     :param description_text: Claim narrative fallback for departure date.
     :param today: Reference today (injected; pipeline resolves from booking).
-    :param within_days: Inclusive near-window; UNCERTAIN only when distance
-        is strictly greater than this many days.
+    :param within_days: Inclusive near-window; UNCERTAIN only when
+        ``(departure - today).days`` is strictly greater than this value.
     :return: Whether far-departure UNCERTAIN should fire.
     """
     fields = _booking_fields(supporting_documents_text)
@@ -173,13 +174,28 @@ def _departure_beyond_days(
         departure = _parse_calendar_date(description_text)
     if departure is None:
         return False
-    return abs((departure - today).days) > within_days
+    return (departure - today).days > within_days
 
 
-_ISSUE_STAMP_HINT = re.compile(r"(?i)\b(issue|issued|stamp|stamped|émission|emision|emisión)\b")
+_ISSUE_STAMP_HINT = re.compile(
+    r"(?i)\b("
+    r"issue\s*date|date\s*of\s*issue|issued\s+on|issued\b|stamped\b|"
+    r"émission|emision|emisión|fecha\s+de\s+emisi[oó]n"
+    r")\b"
+)
+# Birth / DOB cues: drop calendar dates that appear in the same local window
+# (avoids UNCERTAIN from birth+admission on hospital certificates).
+_DOB_CUE = re.compile(
+    r"(?i)\b("
+    r"nata|nato|nati|born|birth|dob|d\.o\.b|"
+    r"nacimiento|geboren|geburt|né(?:e)?|née|nascida|nascido"
+    r")\b"
+)
 _CARE_WINDOW_HINT = re.compile(
-    r"(?i)\b(care|admission|visit|discharge|consulta|hospitaliz|"
-    r"tratamiento|treatment|attending)\b"
+    r"(?i)\b("
+    r"care|admission|visit|discharge|consulta|hospitaliz|"
+    r"tratamiento|treatment|attending|ricover|dimess|ingreso|alta\b"
+    r")\b"
 )
 
 
@@ -194,42 +210,103 @@ def _month_delta(left: date, right: date) -> int:
     return abs((left.year - right.year) * 12 + (left.month - right.month))
 
 
+def _dates_with_match_spans(text: str) -> list[tuple[date, int, int]]:
+    """Parse calendar dates with their character spans in ``text``.
+
+    :param text: OCR or narrative text.
+    :return: ``(date, start, end)`` for each successful parse (duplicates kept).
+    """
+    if not text:
+        return []
+    found: list[tuple[date, int, int]] = []
+    for match in _DATE_ISO.finditer(text):
+        parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if parsed is not None:
+            found.append((parsed, match.start(), match.end()))
+    for match in _DATE_DMONTH_Y.finditer(text):
+        parsed = _safe_date(
+            int(match.group(3)),
+            _MONTH_NUM[match.group(2).lower()],
+            int(match.group(1)),
+        )
+        if parsed is not None:
+            found.append((parsed, match.start(), match.end()))
+    for match in _DATE_MONTH_D_Y.finditer(text):
+        parsed = _safe_date(
+            int(match.group(3)),
+            _MONTH_NUM[match.group(1).lower()],
+            int(match.group(2)),
+        )
+        if parsed is not None:
+            found.append((parsed, match.start(), match.end()))
+    for match in _DATE_DMY.finditer(text):
+        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        if parsed is not None:
+            found.append((parsed, match.start(), match.end()))
+    return found
+
+
+def _is_dob_context(text: str, start: int, end: int, *, window: int = 40) -> bool:
+    """True when a birth/DOB cue appears near the date span.
+
+    :param text: Full OCR text.
+    :param start: Date token start index.
+    :param end: Date token end index.
+    :param window: Characters of left/right context to inspect.
+    :return: Whether this date should be treated as a date of birth.
+    """
+    left = max(0, start - window)
+    right = min(len(text), end + window)
+    return _DOB_CUE.search(text[left:right]) is not None
+
+
 def _suspicious_dating(
     supporting_document_text: str,
     *,
     today: date,
     max_month_delta: int,
-    consider_within_years: int = 2,
+    consider_within_years: int = 5,
 ) -> bool:
     """True when OCR dating is implausible vs reference today or care window.
 
-    Uses existing ``_unique_calendar_dates`` / ``_parse_calendar_date`` only —
-    no ad-hoc date parser. Only dates within ``consider_within_years`` of
-    ``today`` are considered; farther dates are treated as DOB / history and
-    ignored. Fires when:
+    Uses existing calendar parsers only — no ad-hoc date parser. Eligible dates:
+    within ``consider_within_years`` of ``today``, and not adjacent to a birth/DOB
+    cue (``nata`` / ``born`` / …). Farther or DOB-cued dates are ignored.
+
+    Fires when:
     - an eligible OCR date differs from ``today`` by at least
       ``max_month_delta`` months (inclusive) and is either in the future or the
-      OCR text has issue/stamp cues, or
-    - issue/stamp wording co-occurs with care-window wording and at least two
-      distinct eligible OCR dates (issue/stamp before care signal).
+      OCR text has real issue/issued cues (not a bare image ``Stamp`` label), or
+    - issue/issued wording co-occurs with care-window wording and the span
+      between the earliest and latest eligible OCR dates is at least
+      ``max_month_delta`` months (same-episode admission+discharge does not fire).
 
     :param supporting_document_text: Medical/supporting OCR markdown.
     :param today: Reference today (booking ``current_date`` or clock).
-    :param max_month_delta: Inclusive absolute month threshold from config
-        (half a year = 6).
+    :param max_month_delta: Inclusive absolute month threshold from config.
     :param consider_within_years: Inclusive year window around ``today``;
-        dates outside are ignored as DOB.
+        dates outside are ignored as history.
     :return: Whether suspicious-dating UNCERTAIN should fire.
     """
-    all_dates = _unique_calendar_dates(supporting_document_text)
-    dates = {d for d in all_dates if abs(d.year - today.year) <= consider_within_years}
+    dated_spans = _dates_with_match_spans(supporting_document_text)
+    dates = {
+        d
+        for d, start, end in dated_spans
+        if abs(d.year - today.year) <= consider_within_years
+        and not _is_dob_context(supporting_document_text, start, end)
+    }
     if not dates:
         return False
     has_issue_stamp = _ISSUE_STAMP_HINT.search(supporting_document_text) is not None
     for d in dates:
         if _month_delta(d, today) < max_month_delta:
             continue
-        # Future dates, or issue/stamp-labeled past dates with large month skew.
+        # Future dates, or issue/issued-labeled past dates with large month skew.
         if d > today or has_issue_stamp:
             return True
-    return len(dates) >= 2 and has_issue_stamp and _CARE_WINDOW_HINT.search(supporting_document_text) is not None
+    if not has_issue_stamp or _CARE_WINDOW_HINT.search(supporting_document_text) is None:
+        return False
+    if len(dates) < 2:
+        return False
+    earliest, latest = min(dates), max(dates)
+    return _month_delta(earliest, latest) >= max_month_delta

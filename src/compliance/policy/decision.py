@@ -24,7 +24,6 @@ from compliance.policy.state import ClaimAnalysisState
 _VIOLATION_LEGACY_KEYS: tuple[tuple[CheckerMode, str], ...] = (
     ("identity", "identity_check"),
     ("healthy", "healthy_check"),
-    ("not_authentic", "checker_document_not_authentic"),
     ("incomplete", "checker_incomplete_document"),
     ("contradicts", "checker_contradicts"),
 )
@@ -36,7 +35,6 @@ _ABSTAIN_UNCERTAIN_MODES: frozenset[CheckerMode] = frozenset({"identity"})
 _ERROR_DECISION_MODES: frozenset[CheckerMode] = frozenset({
     "contradicts",
     "healthy",
-    "not_authentic",
     "incomplete",
     "identity",
 })
@@ -57,6 +55,9 @@ class _DecisionGate(NamedTuple):
     outcome: Callable[[], GroundTruth]
 
 
+_INCOMPLETE_DENY_KEY = "checker_incomplete_document"
+
+
 def decision_from_state(
     state: ClaimAnalysisState,
     *,
@@ -65,15 +66,19 @@ def decision_from_state(
 ) -> GroundTruth:
     """Derive APPROVE/DENY/UNCERTAIN for evaluator-facing predicted_answer.
 
-    Precedence (locked, SR-008):
+    Precedence (locked, SR-008 + OCR-aware incomplete):
     1. Supplied OCR-failure reason → UNCERTAIN (explanation is the reason)
     2. Routed coverage abstention → UNCERTAIN ``coverage_false_label``
     3. ``departure_within_days`` → UNCERTAIN
     4. ``checker_suspicious_dating`` → UNCERTAIN
-    5. Any VIOLATION (checker or missing-doc / signature) → DENY
-    6. Any ERROR (except containment) → UNCERTAIN ``checker_error:<modes>``
-    7. Identity ABSTAIN → UNCERTAIN ``identity_unclear``
-    8. APPROVE ``checker_consistent``
+    5. Incomplete VIOLATION alone when OCR/YOLO already flagged HITL → UNCERTAIN
+       ``checker_incomplete_document`` (soft polarity; clean OCR still DENYs)
+    6. Any hard VIOLATION (checker or missing-doc / signature; incomplete
+       excluded under OCR HITL) → DENY
+    7. Any ERROR (except containment) → UNCERTAIN ``checker_error:<modes>``
+    8. Legacy ``identity_unclear`` (identity ERROR / pre-VIOLATION unclear flag)
+       → UNCERTAIN ``identity_unclear``
+    9. APPROVE ``checker_consistent``
 
     :param state: Final graph state.
     :param analysis: Analysis stage configuration for document acceptability.
@@ -81,11 +86,16 @@ def decision_from_state(
         caller reads metadata once and passes it in (filesystem-free fold).
     :return: GroundTruth decision written beside analysis_result.
     """
+    all_violated = violated_checkers(state, analysis=analysis)
+    hard_violated = _hard_deny_keys(
+        all_violated,
+        ocr_uncertain=_ocr_uncertain(state, ocr_failure_reason),
+    )
 
     def _deny_violations() -> GroundTruth:
         return GroundTruth(
             decision=DECISION_DENY,
-            explanation=",".join(violated_checkers(state, analysis=analysis)),
+            explanation=",".join(hard_violated),
         )
 
     def _uncertain_errors() -> GroundTruth:
@@ -115,7 +125,16 @@ def decision_from_state(
             outcome=lambda: GroundTruth(decision=DECISION_UNCERTAIN, explanation="checker_suspicious_dating"),
         ),
         _DecisionGate(
-            applies=lambda: bool(violated_checkers(state, analysis=analysis)),
+            applies=lambda: (
+                _INCOMPLETE_DENY_KEY in all_violated and not hard_violated and _ocr_uncertain(state, ocr_failure_reason)
+            ),
+            outcome=lambda: GroundTruth(
+                decision=DECISION_UNCERTAIN,
+                explanation=_INCOMPLETE_DENY_KEY,
+            ),
+        ),
+        _DecisionGate(
+            applies=lambda: bool(hard_violated),
             outcome=_deny_violations,
         ),
         _DecisionGate(
@@ -163,25 +182,20 @@ def resolved_human_in_the_loop(
     analysis: AnalysisConfig,
     ocr_failure_reason: str | None,
 ) -> bool:
-    """HITL from preprocess, classifier ``False``, or any UNCERTAIN decision.
+    """HITL only when preprocess OCR/YOLO already flagged uncertainty.
 
-    Checker gates that emit UNCERTAIN (suspicious dating, far departure,
-    identity unclear, coverage abstention, OCR failure) always require
-    operator review — same as classifier abstention.
+    Classifier abstention and analysis UNCERTAIN decisions (dating gates,
+    identity unclear, coverage ``False``, checker ERROR) do **not** set HITL —
+    those remain machine outcomes. Operator review is reserved for weak OCR
+    (low confidence / faulty extraction / OCR failure) and uncertain YOLO
+    signature verify, carried in from ``document_metadata.json``.
 
     :param state: Final (or mid-pipeline) graph state.
-    :param analysis: Analysis stage configuration.
+    :param analysis: Analysis stage configuration (unused; kept for call-site stability).
     :param ocr_failure_reason: Preprocess OCR-failure code when present.
-    :return: Whether a human should review the claim.
+    :return: Whether a human should review because OCR/YOLO was uncertain.
     """
-    if bool(state.get("human_in_the_loop")):
-        return True
-    if _classifier_returned_false(state):
-        return True
-    return (
-        decision_from_state(state, analysis=analysis, ocr_failure_reason=ocr_failure_reason).decision
-        == DECISION_UNCERTAIN
-    )
+    return bool(state.get("human_in_the_loop")) or ocr_failure_reason is not None
 
 
 def human_in_the_loop_provenance(
@@ -192,27 +206,17 @@ def human_in_the_loop_provenance(
 ) -> str:
     """Return the stable source code that drove HITL for this run.
 
-    Check order (first match wins): ``classifier_false`` when the routed
-    coverage or a raw reason/document label is the confident-negative;
-    ``preprocess_metadata`` when the flag came in from the metadata read;
-    ``uncertain_decision`` when the decision resolves to UNCERTAIN; else
-    ``none``.
+    Only ``preprocess_metadata`` (OCR/YOLO uncertainty from the metadata read,
+    or an OCR-failure reason) or ``none``. Classifier abstention and analysis
+    UNCERTAIN no longer contribute.
 
     :param state: Final graph state after checker (or coverage-only).
-    :param analysis: Analysis stage configuration.
+    :param analysis: Analysis stage configuration (unused; kept for call-site stability).
     :param ocr_failure_reason: Preprocess OCR-failure code when present.
-    :return: One of ``classifier_false``, ``preprocess_metadata``,
-        ``uncertain_decision``, or ``none``.
+    :return: ``preprocess_metadata`` or ``none``.
     """
-    if _classifier_returned_false(state):
-        return "classifier_false"
-    if bool(state.get("human_in_the_loop")):
+    if bool(state.get("human_in_the_loop")) or ocr_failure_reason is not None:
         return "preprocess_metadata"
-    if (
-        decision_from_state(state, analysis=analysis, ocr_failure_reason=ocr_failure_reason).decision
-        == DECISION_UNCERTAIN
-    ):
-        return "uncertain_decision"
     return "none"
 
 
@@ -226,9 +230,13 @@ def violated_checkers(state: ClaimAnalysisState, *, analysis: AnalysisConfig) ->
     ``signature_check`` False means a medical certificate / hospital admission
     lacks ``has_signature`` in ``document_metadata.json`` → DENY.
 
+    Includes ``checker_incomplete_document`` even when OCR-aware polarity later
+    softens that key to UNCERTAIN — callers that need hard DENY keys only should
+    use :func:`_hard_deny_keys`.
+
     :param state: Final graph state after Checker (or coverage-only).
     :param analysis: Analysis stage configuration.
-    :return: Ordered list of violated keys that drive DENY.
+    :return: Ordered list of violated keys (including softenable incomplete).
     """
     violated: list[str] = []
     if is_missing_documentation(state, analysis=analysis):
@@ -239,20 +247,29 @@ def violated_checkers(state: ClaimAnalysisState, *, analysis: AnalysisConfig) ->
     return _ordered_violated_keys(violated)
 
 
-def _classifier_returned_false(state: ClaimAnalysisState) -> bool:
-    """True when the routed coverage label is ``False``, or a raw reason/document label is.
+def _ocr_uncertain(state: ClaimAnalysisState, ocr_failure_reason: str | None) -> bool:
+    """Whether preprocess already flagged OCR/YOLO uncertainty for this run.
 
-    Coverage follows the routed winner (P-01): a losing ``False`` in the
-    coverage selection has no HITL side effect. Reason and document stages
-    keep raw membership (SR-010/SR-004 out-of-scope precedence unchanged).
-
-    :param state: Graph state with routed_coverage and reason/document label codes.
-    :return: Whether the routed coverage label, or a raw reason/document
-        label, is the confident-negative ``False``.
+    :param state: Graph state carrying preprocess ``human_in_the_loop``.
+    :param ocr_failure_reason: Preprocess OCR-failure code when present.
+    :return: True when operator review was requested for OCR/signature quality.
     """
-    if state["routed_coverage"].label == "False":
-        return True
-    return any("False" in labels for labels in (state.get("reason_labels") or [], state.get("document_labels") or []))
+    return bool(state.get("human_in_the_loop")) or ocr_failure_reason is not None
+
+
+def _hard_deny_keys(violated: list[str], *, ocr_uncertain: bool) -> list[str]:
+    """DENY keys after OCR-aware incomplete softening.
+
+    When OCR/YOLO is uncertain, incomplete VIOLATION is not a hard DENY — it
+    alone becomes UNCERTAIN. Clean OCR keeps incomplete as DENY.
+
+    :param violated: Full violated key list from :func:`violated_checkers`.
+    :param ocr_uncertain: Whether preprocess OCR/YOLO flagged review.
+    :return: Keys that still drive DENY under current OCR confidence.
+    """
+    if not ocr_uncertain:
+        return list(violated)
+    return [key for key in violated if key != _INCOMPLETE_DENY_KEY]
 
 
 def _checker_violation_keys(state: ClaimAnalysisState) -> list[str]:
@@ -269,8 +286,6 @@ def _checker_violation_keys(state: ClaimAnalysisState) -> list[str]:
         keys.append("identity_check")
     if "healthy_check" in state and bool(state["healthy_check"]):
         keys.append("healthy_check")
-    if "checker_document_not_authentic" in state and bool(state["checker_document_not_authentic"]):
-        keys.append("checker_document_not_authentic")
     if "checker_incomplete_document" in state and bool(state["checker_incomplete_document"]):
         keys.append("checker_incomplete_document")
     if "checker_contradicts" in state and bool(state["checker_contradicts"]):
@@ -289,7 +304,6 @@ def _ordered_violated_keys(violated: list[str]) -> list[str]:
         "identity_check",
         "signature_check",
         "healthy_check",
-        "checker_document_not_authentic",
         "checker_incomplete_document",
         "checker_contradicts",
     )

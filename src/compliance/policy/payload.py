@@ -24,7 +24,6 @@ _STATE_BOOLEAN_KEYS: tuple[str, ...] = (
     "document_has_signature",
     "signature_check",
     "healthy_check",
-    "checker_document_not_authentic",
     "checker_incomplete_document",
     "departure_within_days",
     "checker_suspicious_dating",

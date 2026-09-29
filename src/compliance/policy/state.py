@@ -38,28 +38,27 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param checker_contradicts: True when contradicts outcome is VIOLATION.
     :param identity_check: True when identity outcome is PASS, or identity was
         skipped (non-medical document).
-    :param identity_unclear: True when identity outcome is ABSTAIN or ERROR.
+    :param identity_unclear: True when identity outcome is ERROR (transport /
+        parse failure). Missing/null patient names are VIOLATION → DENY, not unclear.
     :param document_has_signature: True when document_metadata reports has_signature.
     :param signature_check: True when signature requirement passes; absent when
         the signature check is skipped.
     :param healthy_check: True when healthy outcome is VIOLATION; absent when
         the healthy check is skipped.
-    :param checker_document_not_authentic: True when not_authentic outcome is
-        VIOLATION (medical/hospital docs only).
     :param checker_incomplete_document: True when incomplete outcome is VIOLATION
         (medical/hospital docs only).
-    :param departure_within_days: True on the medical path when departure is
-        farther than the configured day window from reference today
+    :param departure_within_days: True on the medical path when an upcoming
+        departure is farther than the configured day window ahead of today
         (deterministic UNCERTAIN — recovery / ability-to-fly still unclear);
         absent when the departure check is skipped.
     :param checker_suspicious_dating: True when OCR dating is implausible
         (year skew vs reference today, or issue/stamp before care window);
         absent when the suspicious-dating check is skipped.
-    :param human_in_the_loop: True when OCR metadata already flagged review for
-        this run's inputs. Analysis-driven HITL (classifier ``False`` or
-        UNCERTAIN) is resolved at persist time and recorded on the published
-        artifacts via ``human_in_the_loop_source`` — it is not written back into
-        the preprocessed tree.
+    :param human_in_the_loop: True when OCR/YOLO metadata already flagged review for
+        this run's inputs (low confidence, faulty extraction, OCR failure, or
+        uncertain signature verify). Analysis UNCERTAIN / classifier ``False`` do
+        not set this flag — provenance on published artifacts is
+        ``preprocess_metadata`` or ``none``.
     :param run_id: Generation id stamped into every artifact published for this
         claim in the current run.
     """
@@ -84,7 +83,6 @@ class ClaimAnalysisState(TypedDict, total=False):
     document_has_signature: bool
     signature_check: bool
     healthy_check: bool
-    checker_document_not_authentic: bool
     checker_incomplete_document: bool
     departure_within_days: bool
     checker_suspicious_dating: bool

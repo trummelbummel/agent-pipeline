@@ -18,28 +18,26 @@ def test_legacy_booleans_containment_and_contradicts() -> None:
 
 
 def test_legacy_booleans_identity_outcomes() -> None:
-    """Identity PASS / ABSTAIN / VIOLATION map to identity_check and unclear."""
+    """Identity PASS / ERROR / VIOLATION map to identity_check and unclear."""
     assert legacy_booleans_from_outcomes({"identity": CheckOutcome.PASS}) == {
         "identity_check": True,
         "identity_unclear": False,
     }
-    unclear = legacy_booleans_from_outcomes({"identity": CheckOutcome.ABSTAIN})
-    assert unclear["identity_check"] is False
-    assert unclear["identity_unclear"] is True
+    error = legacy_booleans_from_outcomes({"identity": CheckOutcome.ERROR})
+    assert error["identity_check"] is False
+    assert error["identity_unclear"] is True
     violation = legacy_booleans_from_outcomes({"identity": CheckOutcome.VIOLATION})
     assert violation["identity_check"] is False
     assert violation["identity_unclear"] is False
 
 
 def test_legacy_booleans_medical_modes() -> None:
-    """Healthy / not_authentic / incomplete VIOLATION map to legacy keys."""
+    """Healthy / incomplete VIOLATION map to legacy keys."""
     flags = legacy_booleans_from_outcomes({
         "healthy": CheckOutcome.VIOLATION,
-        "not_authentic": CheckOutcome.VIOLATION,
         "incomplete": CheckOutcome.VIOLATION,
     })
     assert flags["healthy_check"] is True
-    assert flags["checker_document_not_authentic"] is True
     assert flags["checker_incomplete_document"] is True
 
 

@@ -213,7 +213,7 @@ make check             # lock + pre-commit + mypy
 
 1. **Coverage first, then a fixed branch** — After `classify_coverage`, edges are hard-coded. Trip cancellation always runs reason → cancel-document → checker; personal effects and missed departure each have one document stage then the same checker sink. The LLM does not invent a different procedure per claim.
 2. **Shared `run_checker` sink** — Every document path joins one checker node. Gates that apply only to some docs (identity, signature on medical/hospital) are config-gated inside that node, not separate ad-hoc agents.
-3. **One decision fold** — `_decision_from_state` applies a single ordered policy to the same flags (missing doc → identity → signature → healthy → contradicts → unclear → approve). Same flags ⇒ same decision and explanation string.
+3. **One decision fold** — `compliance.policy.decision.decision_from_state` applies a single ordered policy to the same flags (missing doc → identity → signature → healthy → contradicts → unclear → approve). Same flags ⇒ same decision and explanation string. Analysis policy lives in `compliance/policy/`; `ClaimPipeline` is the LangGraph orchestration over it.
 4. **LLM where it fits** — Models classify labels and run boolean checks; routing and precedence stay deterministic so “be consistent” is structural, not prompt-only.
 
 ### Cost management decisions
@@ -242,7 +242,7 @@ make check             # lock + pre-commit + mypy
 | **Identity** (medical/hospital) | Booking `**name`** → full-name or **all tokens** in OCR (order-independent; strips `(partner)` notes) | Containment miss → LLM **name extraction** + lowercased Levenshtein ≤ `identity_max_edit_distance` |
 | **Signature** (medical/hospital)| Read `has_signature` from `document_metadata.json` (Docling and/or vision verify above)               | No analysis-time vision call                                                                       |
 | **Missing documentation**       | Classified doc code ∈ `required_documents` for that coverage/reason                                   | Config set-membership — not an LLM                                                                 |
-| Graph routing / deny fold       | Hard-coded edges + ordered `_decision_from_state`                                                     | Never — topology is free                                                                           |
+| Graph routing / deny fold       | Hard-coded edges + ordered `decision_from_state`                                                  | Never — topology is free                                                                           |
 
 
 `contradicts` stays LLM-only (no reliable cheap proxy yet). Medical semantics (healthy, suspicious dating, identity, signature, authenticity, incomplete) are skipped on non-medical branches.
@@ -315,7 +315,7 @@ HITL is a **backup for weak OCR and signature detection**, not a label-error fla
 
 ### When the pipeline returns `UNCERTAIN`
 
-`_decision_from_state` emits **UNCERTAIN** (not APPROVE/DENY) in these cases — in order:
+`decision_from_state` emits **UNCERTAIN** (not APPROVE/DENY) in these cases — in order:
 
 1. **Preprocess OCR failure** — `ocr_read_failure` / `ocr_failure` on document metadata.
 2. **Coverage abstention** — coverage classifier returns `"False"` (none of the trip-cancellation / PE / missed-departure classes, or the model will not guess) → persist only, **no** reason/document/checkers (`coverage_false_label`).

@@ -93,7 +93,7 @@ The analysis graph is a **typed decision tree with a shared checker sink**, not 
 
 1. **Same coverage ⇒ same path** — Once coverage is classified, edges are fixed. Every trip-cancellation claim runs reason → cancel-document → checker; every personal-effects claim runs PE-document → checker. Similar claims cannot silently take different node sequences.
 2. **Shared checkers, gated by type** — All document branches call the same `run_checker` node. Which gates fire (identity, signature, required-doc set) depends only on config maps for the labels already chosen on that path — not on ad-hoc LLM planning.
-3. **One decision fold** — `_decision_from_state` applies a single ordered policy to the same flag vocabulary. Same failed flags ⇒ same APPROVE / DENY / UNCERTAIN explanation string, so outcomes stay comparable across the batch.
+3. **One decision fold** — `decision_from_state` applies a single ordered policy to the same flag vocabulary. Same failed flags ⇒ same APPROVE / DENY / UNCERTAIN explanation string, so outcomes stay comparable across the batch.
 4. **LLM for classification and boolean checks only** — Routing and deny precedence stay deterministic. Consistency comes from **topology + config + shared decision function**, not from asking the model to “be consistent.”
 5. **Cost: cheap / deterministic first** — See [Cost management](#cost-management-cheapdeterministic-before-models). Models run only when substring / token gates miss or Docling OCR is unusable; analysis never re-OCRs.
 
@@ -223,7 +223,7 @@ classify_coverage
 1. **Hard routing, not free-form LLM decisions** — After coverage, edges are fixed. A medical cancellation never invents a PE document stage; a PE claim never runs cancellation-reason classification.
 2. **Shared sinks** — All document branches converge on `run_checker` then `persist`. Containment / contradicts / healthy use the same checker node; only *which* gates fire (identity, signature, required docs) depends on coverage + classified document type from config.
 3. **Config-tied gates on the same path** — `required_documents`, `identity_required_codes`, and `signature_required_codes` are looked up from the labels produced on that path. Two claims with the same coverage + reason + document type hit the same acceptability set and the same identity/signature rules.
-4. **Deterministic decision fold** — `_decision_from_state` applies one ordered policy (missing doc → identity mismatch → signature → healthy → contradicts → identity unclear → approve). Same flag pattern → same APPROVE / DENY / UNCERTAIN.
+4. **Deterministic decision fold** — `compliance.policy.decision.decision_from_state` applies one ordered policy (missing doc → identity mismatch → signature → healthy → contradicts → identity unclear → approve). Same flag pattern → same APPROVE / DENY / UNCERTAIN.
 
 So consistency comes from **topology + shared decision function**, not from asking the LLM to “be consistent.” Similar cases that classify the same way walk the same edges and face the same rules.
 
@@ -232,7 +232,7 @@ So consistency comes from **topology + shared decision function**, not from aski
 1. **Discover claims** (`ClaimPipeline.run`)
   Scan `preprocessing.preprocessed_dir` for claim folders. Soft-fail per claim: one failure is logged (claim name + exception type only — no letter/OCR payloads) and the batch continues.
 2. **Load artifacts** (`load_artifacts`)
-  Read `description.txt`, `supporting_document.md`, and optional `supporting_documents.md` into `ClaimAnalysisState`. Claim folder names are validated as a single safe path segment.
+  Read `description.txt`, `supporting_document.md`, and optional `supporting_documents.md` into `ClaimAnalysisState` (`compliance.policy.state`). Claim folder names are validated as a single safe path segment.
 3. **Classify coverage** (`classify_coverage`)
   `CaseClassifier` on `description_text` with `analysis.coverage`:
 
@@ -292,7 +292,7 @@ So consistency comes from **topology + shared decision function**, not from aski
   | Missed Departure / Connection                     | `"1"` incident/delay doc · `"2"` proof of booking    |
 
    Multiple cancellation reasons → union of their acceptable codes. Document only `"False"` / abstention → missing.
-9. **Derive decision** (`_decision_from_state`) → written into `analysis_result.json` and `predicted_answer.json`
+9. **Derive decision** (`decision_from_state`) → written into `analysis_result.json` and `predicted_answer.json`
   1. Coverage = `"False"` / unknown → **UNCERTAIN** (`coverage_false_label`) + HITL; skip checkers below
   2. Missing documentation → **DENY** (`checker_missing_documentation`)
   3. Identity **mismatch** on a medical/hospital doc → **DENY** (`identity_check`)

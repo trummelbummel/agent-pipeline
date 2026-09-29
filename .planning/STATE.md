@@ -3,13 +3,13 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
-current_plan: 4
+current_plan: 5
 status: executing
-stopped_at: Completed 260929-mqy-PLAN.md (SR-009)
-last_updated: "2026-09-29T14:42:23.130Z"
+stopped_at: Completed 260929-n7w-PLAN.md (SR-013)
+last_updated: "2026-09-29T15:22:52.239Z"
 last_activity: 2026-09-29
 last_activity_desc: Completed quick task 260929-mqy (SR-009)
-state_head: 0807f87ababad78509dcb1863d0868c03f90dd1c
+state_head: 7450f4dad9159518ed838b95908e603f10ecf31b
 progress:
   total_phases: 8
   completed_phases: 4
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
-Current Plan: 4
+Current Plan: 5
 Total Plans in Phase: 5
 Status: Ready to execute
 Last activity: 2026-09-29 - Completed quick task 260929-mqy: SR-009 harden upload/path/symlink boundaries
@@ -117,6 +117,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 07]: SR-007: non-blocking flock at results_dir/.locks/{claim_id}.lock; 409 on contention
 - [Quick 260929-mqy]: SR-009: api.upload 25/50 MiB; Content-Length middleware + chunked writer; hard-reject symlink claim roots; artifact basenames at load
 - [Phase 260929-mqy]: SR-009: api.upload 25/50 MiB; Content-Length middleware + chunked writer; hard-reject symlink claim roots; artifact basenames at load — D-01..D-03 steered; closes last input-boundary hole
+- [Phase 07]: SR-013: policy in compliance/policy/; ClaimPipeline thin LangGraph; behaviour-preserving
+- [Phase 07]: SR-013 P-04: preserve asymmetric document_metadata roots (OCR under preprocessed_dir, run_id under claim input root)
 
 ### Blockers/Concerns
 
@@ -143,8 +145,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-29T14:42:23.107Z
-Stopped at: Completed 260929-mqy-PLAN.md (SR-009)
+Last session: 2026-09-29T15:22:52.215Z
+Stopped at: Completed 260929-n7w-PLAN.md (SR-013)
 Resume file: None
 
 ## Performance Metrics
@@ -177,3 +179,4 @@ Resume file: None
 | Phase 260929-lni P01 | 9min | 3 tasks | 12 files |
 | Phase 260929-m5a P01 | 11min | 3 tasks | 13 files |
 | Phase 260929-mqy P01 | 8min | 3 tasks | 17 files |
+| Phase 260929-n7w P01 | 15min | 3 tasks | 23 files |

@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
 from pathlib import Path
-from typing import Any, Literal, NamedTuple, TypedDict
+from typing import Any, Literal, NamedTuple
 
 from langgraph.graph import END, START, StateGraph
 
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig, ClassificationConfig
 from compliance.llm.chat import ChatFn
-from compliance.llm.checker import Checker, CheckerMode, CheckOutcome
+from compliance.llm.checker import CheckerMode, CheckOutcome
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
 from compliance.models.claim import GroundTruth
 from compliance.models.decisions import (
@@ -19,7 +18,15 @@ from compliance.models.decisions import (
     DECISION_DENY,
     DECISION_UNCERTAIN,
 )
-from compliance.policy import CoverageBranch, RoutedCoverage, route_coverage
+from compliance.policy import (
+    ClaimAnalysisState,
+    CoverageBranch,
+    RoutedCoverage,
+    checker_state_updates,
+    route_coverage,
+    rule_set_for_claim,
+    run_checks,
+)
 from compliance.preprocessing.claim_batch import (
     _discover_claim_folders,
     _is_claim_folder,
@@ -33,114 +40,11 @@ from compliance.workflows.artifact_publication import (
     publish_claim_generation,
     write_failed_run_manifest,
 )
-from compliance.workflows.claim_dates import (
-    _departure_beyond_days,
-    _reference_today,
-    _suspicious_dating,
-)
 from compliance.workflows.predicted_answer_io import analysis_predicted_answer_text
 
 logger = logging.getLogger(__name__)
 
 CoverageNextNode = Literal["classify_reason", "classify_pe_document", "classify_missed_document", "persist"]
-
-# Checks whose semantics are specific to a medical document (rule matrix D-01).
-GatedCheck = Literal[
-    "identity",
-    "signature",
-    "healthy",
-    "not_authentic",
-    "incomplete",
-    "suspicious_dating",
-    "departure",
-]
-_GATED_CHECKS: tuple[GatedCheck, ...] = (
-    "identity",
-    "signature",
-    "healthy",
-    "not_authentic",
-    "incomplete",
-    "suspicious_dating",
-    "departure",
-)
-
-# Code-group → gated checks they enable on the cancellation branch (P-03).
-# Producer pairs each entry with the matching RequiredDocumentsConfig list.
-_IDENTITY_GROUP_CHECKS: frozenset[GatedCheck] = frozenset({"identity"})
-_SIGNATURE_GROUP_CHECKS: frozenset[GatedCheck] = frozenset({
-    "signature",
-    "healthy",
-    "not_authentic",
-    "incomplete",
-    "suspicious_dating",
-    "departure",
-})
-_RULE_SET_CODE_GROUPS: tuple[frozenset[GatedCheck], ...] = (
-    _IDENTITY_GROUP_CHECKS,
-    _SIGNATURE_GROUP_CHECKS,
-)
-
-
-class CheckerRuleSet(NamedTuple):
-    """Per-claim set of medical checks that apply (SR-010).
-
-    Rule matrix (routed path → applicable gated checks):
-
-    - ``cancellation_medical`` — all seven when classified codes hit the
-      configured identity/signature required-document lists
-    - ``cancellation_non_medical`` — none (police report, jury summons, …)
-    - ``personal_effects_non_medical`` — none
-    - ``missed_departure_non_medical`` — none
-
-    Ungated always: missing_documentation, containment, contradicts.
-
-    :param name: Rule-set identifier written to ``checker_rule_set``.
-    :param applicable: Gated checks that run and record a result.
-    """
-
-    name: str
-    applicable: frozenset[GatedCheck]
-
-    @property
-    def skipped(self) -> tuple[GatedCheck, ...]:
-        """Gated checks absent from ``applicable``, in canonical order.
-
-        :return: ``_GATED_CHECKS`` members not in ``applicable``.
-        """
-        return tuple(check for check in _GATED_CHECKS if check not in self.applicable)
-
-
-def _legacy_booleans_from_outcomes(
-    outcomes: dict[CheckerMode, CheckOutcome],
-) -> dict[str, bool]:
-    """Derive analysis_result.json boolean keys from typed checker outcomes.
-
-    Polarity is already resolved inside ``Checker``; this only maps outcome →
-    the legacy boolean contract (P-02 / P-03 of SR-008).
-
-    :param outcomes: Modes that actually ran, keyed by CheckerMode.
-    :return: Legacy boolean flags for persistence and DENY explanations.
-    """
-    flags: dict[str, bool] = {}
-    if "containment" in outcomes:
-        flags["checker_containment"] = outcomes["containment"] is CheckOutcome.PASS
-    if "contradicts" in outcomes:
-        flags["checker_contradicts"] = outcomes["contradicts"] is CheckOutcome.VIOLATION
-    if "identity" in outcomes:
-        identity = outcomes["identity"]
-        flags["identity_check"] = identity is CheckOutcome.PASS
-        flags["identity_unclear"] = identity in (CheckOutcome.ABSTAIN, CheckOutcome.ERROR)
-    else:
-        flags["identity_check"] = True
-        flags["identity_unclear"] = False
-    if "healthy" in outcomes:
-        flags["healthy_check"] = outcomes["healthy"] is CheckOutcome.VIOLATION
-    if "not_authentic" in outcomes:
-        flags["checker_document_not_authentic"] = outcomes["not_authentic"] is CheckOutcome.VIOLATION
-    if "incomplete" in outcomes:
-        flags["checker_incomplete_document"] = outcomes["incomplete"] is CheckOutcome.VIOLATION
-    return flags
-
 
 _COVERAGE_BRANCH_NEXT_NODE: dict[CoverageBranch, CoverageNextNode] = {
     "cancellation": "classify_reason",
@@ -186,23 +90,6 @@ _ERROR_DECISION_MODES: frozenset[CheckerMode] = frozenset({
 })
 
 
-class CheckerRunResult(NamedTuple):
-    """Structured output of ``_checker_results`` (SR-008).
-
-    :param departure_within_days: Deterministic far-departure UNCERTAIN gate.
-    :param suspicious_dating: Deterministic suspicious-dating UNCERTAIN gate.
-    :param outcomes: Per-mode ``CheckOutcome`` for every LLM checker that ran
-        (empty when a date gate short-circuits before constructing ``Checker``).
-    :param legacy_booleans: Analysis-result-compatible booleans derived from
-        ``outcomes`` (empty when outcomes are empty).
-    """
-
-    departure_within_days: bool
-    suspicious_dating: bool
-    outcomes: dict[CheckerMode, CheckOutcome]
-    legacy_booleans: dict[str, bool]
-
-
 class BatchAnalysisResult(NamedTuple):
     """Structured result of a soft-fail analysis batch.
 
@@ -212,88 +99,6 @@ class BatchAnalysisResult(NamedTuple):
 
     paths: list[Path]
     outcomes: tuple[ClaimRunOutcome, ...]
-
-
-class ClaimAnalysisState(TypedDict, total=False):
-    """LangGraph state for one-shot claim analysis.
-
-    :param claim_id: Safe claim folder segment (validated at analyze_claim boundary).
-    :param input_root: Absolute path to the preprocessed claim folder to load from.
-    :param description_text: Contents of the configured description artifact.
-    :param supporting_document_text: Docling markdown for the primary supporting document.
-    :param supporting_documents_text: Booking/internal markdown artifact text.
-    :param coverage_labels: Raw labels from the coverage classifier stage
-        (selection order; not the routing decision).
-    :param coverage_probabilities: Per-label probability estimates from the
-        coverage classifier stage, keyed by coverage code.
-    :param routed_coverage: Single authoritative coverage routing decision
-        (SR-004), computed once in ``_classify_coverage_node`` from
-        ``coverage_labels`` + ``coverage_probabilities``. Every branch-specific
-        rule reads this instead of the raw coverage label list.
-    :param reason_labels: Labels from the cancellation-reason stage.
-    :param document_labels: Labels from the cancellation-document stage.
-    :param checker_outcomes: Per-mode ``CheckOutcome`` for every Checker mode
-        that ran (SR-008). Legacy boolean keys below are derived from this map.
-    :param checker_rule_set: Name of the per-claim medical rule set that ran
-        (SR-010); paired with ``checker_skipped``.
-    :param checker_skipped: Gated check names that did not run; a listed check
-        has no recorded result (P-02).
-    :param checker_containment: True when containment outcome is PASS.
-    :param checker_contradicts: True when contradicts outcome is VIOLATION.
-    :param identity_check: True when identity outcome is PASS, or identity was
-        skipped (non-medical document).
-    :param identity_unclear: True when identity outcome is ABSTAIN or ERROR.
-    :param document_has_signature: True when document_metadata reports has_signature.
-    :param signature_check: True when signature requirement passes; absent when
-        the signature check is skipped.
-    :param healthy_check: True when healthy outcome is VIOLATION; absent when
-        the healthy check is skipped.
-    :param checker_document_not_authentic: True when not_authentic outcome is
-        VIOLATION (medical/hospital docs only).
-    :param checker_incomplete_document: True when incomplete outcome is VIOLATION
-        (medical/hospital docs only).
-    :param departure_within_days: True on the medical path when departure is
-        farther than the configured day window from reference today
-        (deterministic UNCERTAIN — recovery / ability-to-fly still unclear);
-        absent when the departure check is skipped.
-    :param checker_suspicious_dating: True when OCR dating is implausible
-        (year skew vs reference today, or issue/stamp before care window);
-        absent when the suspicious-dating check is skipped.
-    :param human_in_the_loop: True when OCR metadata already flagged review for
-        this run's inputs. Analysis-driven HITL (classifier ``False`` or
-        UNCERTAIN) is resolved at persist time and recorded on the published
-        artifacts via ``human_in_the_loop_source`` — it is not written back into
-        the preprocessed tree.
-    :param run_id: Generation id stamped into every artifact published for this
-        claim in the current run.
-    """
-
-    claim_id: str
-    input_root: str
-    description_text: str
-    supporting_document_text: str
-    supporting_documents_text: str
-    coverage_labels: list[str]
-    coverage_probabilities: dict[str, float]
-    routed_coverage: RoutedCoverage
-    reason_labels: list[str]
-    document_labels: list[str]
-    checker_outcomes: dict[CheckerMode, CheckOutcome]
-    checker_rule_set: str
-    checker_skipped: list[str]
-    checker_containment: bool
-    checker_contradicts: bool
-    identity_check: bool
-    identity_unclear: bool
-    document_has_signature: bool
-    signature_check: bool
-    healthy_check: bool
-    checker_document_not_authentic: bool
-    checker_incomplete_document: bool
-    departure_within_days: bool
-    checker_suspicious_dating: bool
-    human_in_the_loop: bool
-    run_id: str
 
 
 class ClaimPipeline:
@@ -579,12 +384,18 @@ class ClaimPipeline:
         return {"document_labels": list(result.labels)}
 
     def _run_checker_node(self, state: ClaimAnalysisState) -> dict[str, object]:
-        rule_set = self._checker_rule_set(state)
-        results = self._checker_results(
-            state["description_text"],
-            state["supporting_document_text"],
-            state.get("supporting_documents_text") or "",
+        rule_set = rule_set_for_claim(
+            branch=state["routed_coverage"].branch,
+            classified_codes=self._classified_document_codes(state),
+            required_documents=self._config.analysis.required_documents,
+        )
+        results = run_checks(
+            description_text=state["description_text"],
+            supporting_document_text=state["supporting_document_text"],
+            supporting_documents_text=state.get("supporting_documents_text") or "",
             rule_set=rule_set,
+            checking=self._config.checking,
+            chat_fn=self._chat_fn,
         )
         early_uncertain = results.departure_within_days or results.suspicious_dating
         skipped = ",".join(rule_set.skipped)
@@ -605,38 +416,11 @@ class ClaimPipeline:
             departure_within_days=results.departure_within_days,
             checker_suspicious_dating=results.suspicious_dating,
         )
-        return self._checker_node_payload(state, rule_set, results)
-
-    def _checker_node_payload(
-        self,
-        state: ClaimAnalysisState,
-        rule_set: CheckerRuleSet,
-        results: CheckerRunResult,
-    ) -> dict[str, object]:
-        """Assemble run_checker state updates from the rule set and checker results.
-
-        :param state: Graph state after document classification.
-        :param rule_set: Per-claim medical rule set that gated the run.
-        :param results: Structured checker/date-gate output.
-        :return: Payload with rule-set trace keys and applicable result fields only.
-        """
-        early_uncertain = results.departure_within_days or results.suspicious_dating
-        payload: dict[str, object] = {
-            "checker_rule_set": rule_set.name,
-            "checker_skipped": list(rule_set.skipped),
-        }
-        if "departure" in rule_set.applicable:
-            payload["departure_within_days"] = results.departure_within_days
-        if "signature" in rule_set.applicable:
-            payload["signature_check"] = bool(state.get("document_has_signature"))
-        if results.suspicious_dating and "suspicious_dating" in rule_set.applicable:
-            payload["checker_suspicious_dating"] = True
-        if not early_uncertain:
-            payload["checker_outcomes"] = results.outcomes
-            payload.update(results.legacy_booleans)
-            if "suspicious_dating" in rule_set.applicable:
-                payload["checker_suspicious_dating"] = results.suspicious_dating
-        return payload
+        return checker_state_updates(
+            rule_set,
+            results,
+            document_has_signature=bool(state.get("document_has_signature")),
+        )
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         hitl = self._resolved_human_in_the_loop(state)
@@ -812,44 +596,6 @@ class ClaimPipeline:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else None
 
-    def _checker_rule_set(self, state: ClaimAnalysisState) -> CheckerRuleSet:
-        """Compute the single per-claim medical rule set from branch + document codes.
-
-        Non-cancellation branches yield an empty applicable set named
-        ``{branch}_non_medical``. On cancellation, each configured code group
-        (identity / signature required codes) enables its gated checks when any
-        classified document code intersects that group; the set is named
-        ``cancellation_medical`` when anything applies, else
-        ``cancellation_non_medical``.
-
-        :param state: Graph state with routed coverage and document_labels.
-        :return: Named rule set deciding which gated checks run.
-        """
-        branch = state["routed_coverage"].branch
-        if not self._is_cancellation_coverage(state):
-            return CheckerRuleSet(name=f"{branch}_non_medical", applicable=frozenset())
-
-        required = self._config.analysis.required_documents
-        code_lists = (
-            required.identity_required_codes,
-            required.signature_required_codes,
-        )
-        classified = self._classified_document_codes(state)
-        applicable: set[GatedCheck] = set()
-        for codes, checks in zip(code_lists, _RULE_SET_CODE_GROUPS, strict=True):
-            if codes and classified & set(codes):
-                applicable |= checks
-        name = "cancellation_medical" if applicable else "cancellation_non_medical"
-        return CheckerRuleSet(name=name, applicable=frozenset(applicable))
-
-    def _is_cancellation_coverage(self, state: ClaimAnalysisState) -> bool:
-        """True when the routed coverage branch is trip cancellation / rescheduling.
-
-        :param state: Graph state with routed_coverage.
-        :return: Whether the cancellation document taxonomy applies.
-        """
-        return state["routed_coverage"].branch == "cancellation"
-
     def _coverage_classification(self, description_text: str) -> ClassificationResult:
         return self._stage_classifier(self._config.analysis.coverage).classify(description_text)
 
@@ -868,136 +614,6 @@ class ClaimPipeline:
         return self._stage_classifier(self._config.analysis.missed_departure_document).classify(
             supporting_document_text
         )
-
-    def _checker_results(
-        self,
-        description_text: str,
-        supporting_document_text: str,
-        supporting_documents_text: str,
-        *,
-        rule_set: CheckerRuleSet,
-    ) -> CheckerRunResult:
-        """Run deterministic date checks, then Checker LLM modes when needed.
-
-        Computes ``departure_within_days`` and ``suspicious_dating`` only when
-        those checks are in ``rule_set.applicable`` (and departure also requires
-        ``departure_uncertain_enabled``). When either flag is True, returns early
-        without constructing ``Checker`` / calling chat — ``outcomes`` stays empty.
-
-        :param description_text: Claim narrative for containment / contradicts.
-        :param supporting_document_text: Medical/supporting OCR markdown.
-        :param supporting_documents_text: Booking/internal markdown with ``name``.
-        :param rule_set: Per-claim medical rule set gating date checks and modes.
-        :return: Date flags, per-mode outcomes, and derived legacy booleans.
-        """
-        checking = self._config.checking
-        today = _reference_today(supporting_documents_text, fallback=date.today())
-        departure_flag = (
-            "departure" in rule_set.applicable
-            and checking.departure_uncertain_enabled
-            and _departure_beyond_days(
-                supporting_documents_text=supporting_documents_text,
-                description_text=description_text,
-                today=today,
-                within_days=checking.departure_uncertain_within_days,
-            )
-        )
-        suspicious_dating_flag = "suspicious_dating" in rule_set.applicable and _suspicious_dating(
-            supporting_document_text,
-            today=today,
-            max_month_delta=checking.suspicious_dating_max_month_delta,
-            consider_within_years=checking.suspicious_dating_consider_within_years,
-        )
-        if departure_flag or suspicious_dating_flag:
-            return CheckerRunResult(
-                departure_within_days=departure_flag,
-                suspicious_dating=suspicious_dating_flag,
-                outcomes={},
-                legacy_booleans={},
-            )
-
-        outcomes = self._checker_outcomes(
-            description_text,
-            supporting_document_text,
-            supporting_documents_text,
-            rule_set=rule_set,
-        )
-        return CheckerRunResult(
-            departure_within_days=False,
-            suspicious_dating=False,
-            outcomes=outcomes,
-            legacy_booleans=_legacy_booleans_from_outcomes(outcomes),
-        )
-
-    def _build_checker(self) -> Checker:
-        """Construct a ``Checker`` from checking config and the shared chat seam.
-
-        :return: Configured Checker instance for this pipeline run.
-        """
-        checking = self._config.checking
-        return Checker(
-            model_name=checking.model,
-            containment_prompt=checking.containment_prompt,
-            contradicts_prompt=checking.contradicts_prompt,
-            identity_prompt=checking.identity_prompt,
-            healthy_prompt=checking.healthy_prompt,
-            authenticity_prompt=checking.authenticity_prompt,
-            incomplete_prompt=checking.incomplete_prompt,
-            chat_fn=self._chat_fn,
-            identity_max_edit_distance=checking.identity_max_edit_distance,
-            transport_retry=checking.transport_retry,
-        )
-
-    def _checker_outcomes(
-        self,
-        description_text: str,
-        supporting_document_text: str,
-        supporting_documents_text: str,
-        *,
-        rule_set: CheckerRuleSet,
-    ) -> dict[CheckerMode, CheckOutcome]:
-        """Run Checker modes in fixed order; record only modes that ran.
-
-        Order: containment → contradicts → identity (optional) → healthy
-        (optional) → not_authentic / incomplete (optional). Do not reorder —
-        MagicMock side_effect sequences in tests depend on it. Containment and
-        contradicts are never gated (P-06).
-
-        :param description_text: Claim narrative text.
-        :param supporting_document_text: Supporting OCR markdown.
-        :param supporting_documents_text: Booking/internal markdown.
-        :param rule_set: Per-claim medical rule set gating optional modes.
-        :return: Mode → CheckOutcome for every mode that executed.
-        """
-        checker = self._build_checker()
-        outcomes: dict[CheckerMode, CheckOutcome] = {
-            "containment": checker.check(description_text, supporting_document_text, mode="containment"),
-            "contradicts": checker.check(description_text, supporting_document_text, mode="contradicts"),
-        }
-        if "identity" in rule_set.applicable:
-            outcomes["identity"] = checker.check_identity(
-                supporting_documents_text,
-                supporting_document_text,
-            )
-        if "healthy" in rule_set.applicable:
-            outcomes["healthy"] = checker.check(
-                description_text,
-                supporting_document_text,
-                mode="healthy",
-            )
-        if "not_authentic" in rule_set.applicable:
-            outcomes["not_authentic"] = checker.check(
-                description_text,
-                supporting_document_text,
-                mode="not_authentic",
-            )
-        if "incomplete" in rule_set.applicable:
-            outcomes["incomplete"] = checker.check(
-                description_text,
-                supporting_document_text,
-                mode="incomplete",
-            )
-        return outcomes
 
     @staticmethod
     def _state_boolean_flags(state: ClaimAnalysisState) -> dict[str, bool]:

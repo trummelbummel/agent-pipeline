@@ -448,3 +448,209 @@ analysis:
     )
     with pytest.raises(ValidationError, match=r"branches"):
         load_config(config_path)
+
+
+def _write_full_minimal_config(tmp_path: Path, *, extra_yaml: str = "") -> Path:
+    """Write a loadable minimal AppConfig YAML, optionally appending extra YAML."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+preprocessing:
+  data_dir: data
+  document_formats: [webp]
+  confidence_threshold: 0.7
+  preprocessed_dir: data/preprocessed
+  results_dir: data/results
+extraction:
+  model: test-model
+  prompt: extract
+classification:
+  labels: ["1", "2", "3"]
+  other_label: "False"
+  model: test-model
+  prompt: classify
+"""
+        + _MINIMAL_CHECKING_YAML
+        + _MINIMAL_ANALYSIS_YAML
+        + _MINIMAL_EVALUATION_YAML
+        + extra_yaml,
+        encoding="utf-8",
+    )
+    return config_path
+
+
+@pytest.mark.parametrize(
+    ("extra_yaml", "match"),
+    [
+        pytest.param("\nanalysys: {}\n", r"analysys", id="root_extra"),
+        pytest.param(
+            """
+preprocessing:
+  data_dir: data
+  document_formats: [webp]
+  confidence_threshold: 0.7
+  preprocessed_dir: data/preprocessed
+  results_dir: data/results
+  artifacts:
+    description: description.txt
+    answer: answer.json
+    predicted_answer: predicted_answer.json
+    analysis_result: analysis_result.json
+    supporting_document: supporting_document.md
+    supporting_documents: supporting_documents.md
+    document_metadata: document_metadata.json
+    answr: wrong
+extraction:
+  model: test-model
+  prompt: extract
+classification:
+  labels: ["1", "2", "3"]
+  other_label: "False"
+  model: test-model
+  prompt: classify
+"""
+            + _MINIMAL_CHECKING_YAML
+            + _MINIMAL_ANALYSIS_YAML
+            + _MINIMAL_EVALUATION_YAML,
+            r"answr",
+            id="nested_artifacts_extra",
+        ),
+        pytest.param(
+            """
+preprocessing:
+  data_dir: data
+  document_formats: [webp]
+  confidence_threshold: 0.7
+  preprocessed_dir: data/preprocessed
+  results_dir: data/results
+extraction:
+  model: test-model
+  prompt: extract
+classification:
+  labels: ["1", "2", "3"]
+  other_label: "False"
+  model: test-model
+  prompt: classify
+checking:
+  model: test-model
+  containment_prompt: check containment
+  contradicts_prompt: check contradicts
+  identity_prompt: check identity
+  healthy_prompt: check healthy
+  authenticity_prompt: check authenticity
+  incomplete_prompt: check incomplete
+  transport_retry:
+    max_retries: 2
+    backoff_seconds: 1.0
+    max_retrys: 9
+"""
+            + _MINIMAL_ANALYSIS_YAML
+            + _MINIMAL_EVALUATION_YAML,
+            r"max_retrys",
+            id="nested_transport_retry_extra",
+        ),
+    ],
+)
+def test_unknown_config_key_rejected(tmp_path: Path, extra_yaml: str, match: str) -> None:
+    """Unknown keys at root or nested models fail load (D-02)."""
+    if match == "analysys":
+        config_path = _write_full_minimal_config(tmp_path, extra_yaml=extra_yaml)
+    else:
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(extra_yaml, encoding="utf-8")
+    with pytest.raises(ValidationError, match=match):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        pytest.param(
+            {"labels": ["1", "2", "1"], "other_label": "False", "model": "m", "prompt": "p"},
+            r"Duplicate|1",
+            id="duplicate_labels",
+        ),
+        pytest.param(
+            {
+                "labels": ["1"],
+                "other_label": "False",
+                "model": "m",
+                "prompt": "p",
+                "label_names": {"9": "unknown"},
+            },
+            r"Unknown label_names|9",
+            id="unknown_label_names_key",
+        ),
+        pytest.param(
+            {"labels": [], "other_label": "False", "model": "m", "prompt": "p"},
+            r"non-empty|empty",
+            id="empty_labels",
+        ),
+    ],
+)
+def test_invalid_label_vocabulary_rejected(kwargs: dict[str, object], match: str) -> None:
+    """Duplicate, unknown label_names, and empty labels fail validation."""
+    with pytest.raises(ValidationError, match=match):
+        ClassificationConfig(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("factory", "kwargs"),
+    [
+        pytest.param(
+            "preprocessing",
+            {
+                "data_dir": "d",
+                "document_formats": ["webp"],
+                "confidence_threshold": 1.5,
+                "preprocessed_dir": "p",
+                "results_dir": "r",
+            },
+            id="confidence_above_one",
+        ),
+        pytest.param(
+            "preprocessing",
+            {
+                "data_dir": "d",
+                "document_formats": ["webp"],
+                "confidence_threshold": -0.1,
+                "preprocessed_dir": "p",
+                "results_dir": "r",
+            },
+            id="confidence_negative",
+        ),
+        pytest.param("ocr_retry", {"signature_confidence": 2.0}, id="signature_confidence_high"),
+        pytest.param("benford", {"block_size": 0}, id="block_size_zero"),
+        pytest.param("benford", {"chi_squared_threshold": 0}, id="chi_squared_zero"),
+        pytest.param("checking", {"identity_max_edit_distance": -1}, id="identity_distance_negative"),
+        pytest.param("extraction_failure", {"min_words": -1}, id="min_words_negative"),
+    ],
+)
+def test_out_of_range_config_values_rejected(factory: str, kwargs: dict[str, object]) -> None:
+    """Out-of-range numeric settings fail at model construction."""
+    from compliance.config.settings import (
+        BenfordConfig,
+        CheckingConfig,
+        ExtractionFailureConfig,
+        OcrRetryConfig,
+        PreprocessingConfig,
+    )
+
+    builders = {
+        "preprocessing": PreprocessingConfig,
+        "ocr_retry": OcrRetryConfig,
+        "benford": BenfordConfig,
+        "checking": lambda **kw: CheckingConfig(
+            model="m",
+            containment_prompt="c",
+            contradicts_prompt="x",
+            identity_prompt="i",
+            healthy_prompt="h",
+            authenticity_prompt="a",
+            incomplete_prompt="n",
+            **kw,
+        ),
+        "extraction_failure": ExtractionFailureConfig,
+    }
+    with pytest.raises(ValidationError):
+        builders[factory](**kwargs)  # type: ignore[operator]

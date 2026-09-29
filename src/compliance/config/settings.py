@@ -4,13 +4,23 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Shared vocabulary between the config contract and pipeline routing branches so the two cannot drift.
 CoverageRoute = Literal["cancellation", "personal_effects", "missed_departure"]
 
 
-class PreprocessedArtifactNames(BaseModel):
+class StrictConfigModel(BaseModel):
+    """Base for AppConfig tree models that reject unknown keys (D-02).
+
+    An unknown key in config.yaml is a policy typo or a stale setting and must
+    fail at startup rather than be silently ignored.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PreprocessedArtifactNames(StrictConfigModel):
     """Filenames written under each mirrored claim output directory.
 
     :param description: Claim letter text artifact.
@@ -31,7 +41,7 @@ class PreprocessedArtifactNames(BaseModel):
     document_metadata: str = "document_metadata.json"
 
 
-class PreprocessingConfig(BaseModel):
+class PreprocessingConfig(StrictConfigModel):
     """Preprocessing pipeline settings loaded from config.yaml.
 
     :param data_dir: Root directory containing claim folders.
@@ -44,13 +54,13 @@ class PreprocessingConfig(BaseModel):
 
     data_dir: str
     document_formats: list[str]
-    confidence_threshold: float
+    confidence_threshold: float = Field(ge=0.0, le=1.0)
     preprocessed_dir: str
     results_dir: str
     artifacts: PreprocessedArtifactNames = Field(default_factory=PreprocessedArtifactNames)
 
 
-class ExtractionConfig(BaseModel):
+class ExtractionConfig(StrictConfigModel):
     """LLM extraction settings for InformationExtractor.
 
     :param model: LLM model name used for structured field extraction.
@@ -61,8 +71,12 @@ class ExtractionConfig(BaseModel):
     prompt: str
 
 
-class ClassificationConfig(BaseModel):
+class ClassificationConfig(StrictConfigModel):
     """LLM case-classification settings for CaseClassifier.
+
+    ``other_label`` is NOT required to be a member of ``labels`` (P-04): fixtures
+    may omit ``False`` from ``labels`` while setting ``other_label: "False"``, and
+    ``abstention_labels()`` already treats both as abstention.
 
     :param labels: Numeric (or other) class codes the classifier may return.
     :param other_label: Fallback label when no coverage class fits.
@@ -76,6 +90,28 @@ class ClassificationConfig(BaseModel):
     model: str
     prompt: str
     label_names: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validated_label_vocabulary(self) -> ClassificationConfig:
+        """Reject empty, duplicate, or unknown label vocabulary entries.
+
+        :return: Self after the label vocabulary passes all checks.
+        """
+        if not self.labels:
+            raise EmptyConfigLabelsError()
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for label in self.labels:
+            if label in seen and label not in duplicates:
+                duplicates.append(label)
+            seen.add(label)
+        if duplicates:
+            raise DuplicateConfigLabelsError(duplicates=duplicates)
+        allowed = set(self.labels) | {self.other_label}
+        unknown = sorted(set(self.label_names) - allowed)
+        if unknown:
+            raise UnknownLabelNameKeysError(unknown=unknown, allowed=sorted(allowed))
+        return self
 
     def resolve_label_names(self, codes: list[str]) -> list[str]:
         """Map classifier codes to semantic names; unknown codes pass through.
@@ -136,7 +172,7 @@ class CoverageClassificationConfig(ClassificationConfig):
         return self
 
 
-class TransportRetryConfig(BaseModel):
+class TransportRetryConfig(StrictConfigModel):
     """Bounded retry for checker chat transport failures (SR-008).
 
     :param max_retries: Extra attempts after the first try (total attempts =
@@ -149,7 +185,7 @@ class TransportRetryConfig(BaseModel):
     backoff_seconds: float = Field(default=1.0, ge=0.0)
 
 
-class CheckingConfig(BaseModel):
+class CheckingConfig(StrictConfigModel):
     """LLM claim-checking settings for Checker modes.
 
     :param model: LLM model name used when deterministic containment misses.
@@ -189,15 +225,15 @@ class CheckingConfig(BaseModel):
     healthy_prompt: str
     authenticity_prompt: str
     incomplete_prompt: str
-    identity_max_edit_distance: int = 3
+    identity_max_edit_distance: int = Field(default=3, ge=0)
     departure_uncertain_enabled: bool = False
-    departure_uncertain_within_days: int = 14
-    suspicious_dating_max_month_delta: int = 1
-    suspicious_dating_consider_within_years: int = 2
+    departure_uncertain_within_days: int = Field(default=14, ge=0)
+    suspicious_dating_max_month_delta: int = Field(default=1, ge=0)
+    suspicious_dating_consider_within_years: int = Field(default=2, ge=0)
     transport_retry: TransportRetryConfig = Field(default_factory=TransportRetryConfig)
 
 
-class RequiredDocumentsConfig(BaseModel):
+class RequiredDocumentsConfig(StrictConfigModel):
     """Acceptable supporting-document codes per coverage / cancellation reason.
 
     Codes match ``analysis.*.labels`` (numeric strings). Missing documentation
@@ -221,7 +257,7 @@ class RequiredDocumentsConfig(BaseModel):
     identity_required_codes: list[str] = Field(default_factory=list)
 
 
-class AnalysisConfig(BaseModel):
+class AnalysisConfig(StrictConfigModel):
     """Multi-stage claim-analysis classifier settings for ClaimPipeline.
 
     Each stage reuses ClassificationConfig (labels, other_label, model, prompt).
@@ -244,7 +280,7 @@ class AnalysisConfig(BaseModel):
     required_documents: RequiredDocumentsConfig = Field(default_factory=RequiredDocumentsConfig)
 
 
-class BenfordConfig(BaseModel):
+class BenfordConfig(StrictConfigModel):
     """Benford's Law analysis settings for image forensic checks.
 
     :param enabled: When False, DocumentReader skips Benford entirely (default for
@@ -254,22 +290,22 @@ class BenfordConfig(BaseModel):
     """
 
     enabled: bool = False
-    block_size: int = 8
-    chi_squared_threshold: float = 15.51
+    block_size: int = Field(default=8, ge=2)
+    chi_squared_threshold: float = Field(default=15.51, gt=0)
 
 
-class ExtractionFailureConfig(BaseModel):
+class ExtractionFailureConfig(StrictConfigModel):
     """Thresholds for detecting unusable Docling OCR text.
 
     :param min_substantive_chars: Minimum non-noise characters required for usable OCR.
     :param min_words: Minimum alphabetic word tokens (length ≥ 3) required.
     """
 
-    min_substantive_chars: int = 40
-    min_words: int = 5
+    min_substantive_chars: int = Field(default=40, ge=0)
+    min_words: int = Field(default=5, ge=0)
 
 
-class LoggingConfig(BaseModel):
+class LoggingConfig(StrictConfigModel):
     """Application logging defaults for the CLI entrypoint.
 
     :param level: Logging level name (e.g. ``INFO``, ``DEBUG``).
@@ -280,7 +316,7 @@ class LoggingConfig(BaseModel):
     format: str = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 
 
-class EvaluationConfig(BaseModel):
+class EvaluationConfig(StrictConfigModel):
     """Prediction-evaluation settings for scoring predicted vs ground-truth answers.
 
     :param labels: Decision vocabulary for confusion-matrix axes and macro F1.
@@ -299,7 +335,7 @@ class EvaluationConfig(BaseModel):
     analysis_visualization_artifact: str = "analysis_stats_visualization.png"
 
 
-class OcrRetryConfig(BaseModel):
+class OcrRetryConfig(StrictConfigModel):
     """Vision-model OCR retry and YOLO signature verify (preprocess only).
 
     Retry triggers are independent flags. ``DocumentReader`` retries text once when
@@ -335,10 +371,10 @@ class OcrRetryConfig(BaseModel):
     on_missing_signature: bool = True
     signature_model: str = "tech4humans/yolov8s-signature-detector"
     signature_weights: str = "yolov8s.pt"
-    signature_confidence: float = 0.25
+    signature_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
 
 
-class AppConfig(BaseModel):
+class AppConfig(StrictConfigModel):
     """Top-level application configuration.
 
     :param preprocessing: Document discovery and Docling-related settings.
@@ -404,6 +440,37 @@ class DuplicateCoverageBranchError(ValueError):
         :param codes: Coverage codes that all map to ``branch``.
         """
         super().__init__(f"Duplicate coverage branch {branch!r} shared by codes {codes}")
+
+
+class DuplicateConfigLabelsError(ValueError):
+    """A classification stage declares the same label code more than once."""
+
+    def __init__(self, duplicates: list[str]) -> None:
+        """Name the duplicated label codes.
+
+        :param duplicates: Label codes that appear more than once in ``labels``.
+        """
+        super().__init__(f"Duplicate config labels: {duplicates}")
+
+
+class EmptyConfigLabelsError(ValueError):
+    """A classification stage declares an empty ``labels`` list."""
+
+    def __init__(self) -> None:
+        """Build the empty-labels message."""
+        super().__init__("Classification labels must be a non-empty list")
+
+
+class UnknownLabelNameKeysError(ValueError):
+    """``label_names`` contains keys outside the stage vocabulary."""
+
+    def __init__(self, unknown: list[str], allowed: list[str]) -> None:
+        """Name unknown ``label_names`` keys and the allowed set.
+
+        :param unknown: Keys present in ``label_names`` but not in labels/other_label.
+        :param allowed: The set of labels plus ``other_label``.
+        """
+        super().__init__(f"Unknown label_names keys {unknown} (allowed {allowed})")
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:

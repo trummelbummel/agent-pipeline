@@ -5,11 +5,11 @@ current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
 current_plan: 4
 status: executing
-stopped_at: Completed 260929-l16-PLAN.md (SR-005)
-last_updated: "2026-09-29T13:34:58.329Z"
+stopped_at: Completed 260929-lni-PLAN.md (SR-006)
+last_updated: "2026-09-29T13:56:13Z"
 last_activity: 2026-09-29
-last_activity_desc: Completed quick task 260929-l16 (SR-005)
-state_head: a2ad6c2
+last_activity_desc: Completed quick task 260929-lni (SR-006)
+state_head: 794151378f28ea5319258809dcba03742dd4c088
 progress:
   total_phases: 8
   completed_phases: 4
@@ -32,7 +32,7 @@ Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
 Current Plan: 4
 Total Plans in Phase: 5
 Status: Ready to execute
-Last activity: 2026-09-29 - Completed quick task 260929-kia: SR-010 per-coverage medical rule gating
+Last activity: 2026-09-29 - Completed quick task 260929-lni: SR-006 ground-truth-first evaluation
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -112,6 +112,7 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 07]: SR-011: coverage.branches keyed routing; StrictConfigModel extra=forbid; load-time taxonomy cross-refs
 - [Phase 07]: SR-005: stage under results_dir/.staging/{run_id}/{claim}/; os.replace; run_manifest.json last as commit point
 - [Phase 07]: SR-005: HITL clears per run via provenance on analysis artifacts; analysis never mutates document_metadata.json
+- [Phase 07]: SR-006: GT-first eval; missing pred=incorrect + coverage_rate; raw vs policy named metrics
 
 ### Blockers/Concerns
 
@@ -137,8 +138,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-29T13:34:57.875Z
-Stopped at: Completed 260929-l16-PLAN.md (SR-005)
+Last session: 2026-09-29T13:56:12.967Z
+Stopped at: Completed 260929-lni-PLAN.md (SR-006)
 Resume file: None
 
 ## Performance Metrics
@@ -168,3 +169,4 @@ Resume file: None
 | Phase 260929-k1p P01 | 7min | 3 tasks | 11 files |
 | Phase 260929-kia P01 | 8min | 3 tasks | 5 files |
 | Phase 260929-l16 P01 | 11min | 3 tasks | 15 files |
+| Phase 260929-lni P01 | 9min | 3 tasks | 12 files |

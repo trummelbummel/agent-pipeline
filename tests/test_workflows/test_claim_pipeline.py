@@ -252,11 +252,9 @@ _COVERAGE_WINNER_TAILS: dict[str, list[dict[str, Any]]] = {
     PERSONAL_EFFECTS: [
         {"labels": [PROOF_OF_THEFT], "probabilities": {PROOF_OF_THEFT: 0.8, "False": 0.2}},
         {"result": False},
-        {"result": False},
     ],
     MISSED_DEPARTURE: [
         {"labels": [INCIDENT_REPORT], "probabilities": {INCIDENT_REPORT: 0.8, "False": 0.2}},
-        {"result": False},
         {"result": False},
     ],
     COVERAGE_FALSE: [],
@@ -281,7 +279,7 @@ _COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
         "decision": "APPROVE",
         "decision_explanation": "checker_consistent",
         "human_in_the_loop": False,
-        "call_count": 4,
+        "call_count": 3,
         "not_authentic_present": False,
     },
     MISSED_DEPARTURE: {
@@ -291,7 +289,7 @@ _COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
         "decision": "APPROVE",
         "decision_explanation": "checker_consistent",
         "human_in_the_loop": False,
-        "call_count": 4,
+        "call_count": 3,
         "not_authentic_present": False,
     },
     COVERAGE_FALSE: {
@@ -442,6 +440,8 @@ def test_analyze_claim_cancellation_path_writes_analysis_result(
     assert payload["signature_check"] is True
     assert payload["decision"] == "APPROVE"
     assert payload["decision_explanation"] == "checker_consistent"
+    assert payload["checker_rule_set"] == "cancellation_medical"
+    assert payload["checker_skipped"] == []
     predicted_path = (
         Path(config.preprocessing.results_dir) / claim_dir.name / config.preprocessing.artifacts.predicted_answer
     )
@@ -673,8 +673,8 @@ def test_identity_skipped_for_non_medical_document(tmp_path: Path) -> None:
 
     assert payload["identity_check"] is True
     assert payload["identity_unclear"] is False
-    # coverage + document + contradicts + healthy (no identity call)
-    assert chat_fn.call_count == 4
+    # coverage + document + contradicts (no identity / healthy call)
+    assert chat_fn.call_count == 3
     system_prompts = [call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list]
     assert not any("identity" in prompt for prompt in system_prompts)
 
@@ -945,7 +945,7 @@ def test_unit_path_uses_injected_chat_fn(
 
 
 def _pe_chat_fn() -> MagicMock:
-    """Injected chat_fn: coverage PE → PE document → checker contradicts."""
+    """Injected chat_fn: coverage PE → PE document → checker contradicts (no healthy)."""
     coverage = _chat_response({
         "labels": [PERSONAL_EFFECTS],
         "probabilities": {PERSONAL_EFFECTS: 0.9, "False": 0.1},
@@ -955,12 +955,11 @@ def _pe_chat_fn() -> MagicMock:
         "probabilities": {PROOF_OF_THEFT: 0.85, "False": 0.15},
     })
     contradicts = _chat_response({"result": False})
-    healthy = _chat_response({"result": False})
-    return MagicMock(side_effect=[coverage, document, contradicts, healthy])
+    return MagicMock(side_effect=[coverage, document, contradicts])
 
 
 def _missed_chat_fn() -> MagicMock:
-    """Injected chat_fn: coverage missed → missed document → checker (no identity)."""
+    """Injected chat_fn: coverage missed → missed document → checker (no identity/healthy)."""
     coverage = _chat_response({
         "labels": [MISSED_DEPARTURE],
         "probabilities": {MISSED_DEPARTURE: 0.9, "False": 0.1},
@@ -974,8 +973,7 @@ def _missed_chat_fn() -> MagicMock:
         },
     })
     contradicts = _chat_response({"result": False})
-    healthy = _chat_response({"result": False})
-    return MagicMock(side_effect=[coverage, document, contradicts, healthy])
+    return MagicMock(side_effect=[coverage, document, contradicts])
 
 
 def test_routes_personal_effects(tmp_path: Path) -> None:
@@ -1003,7 +1001,7 @@ def test_routes_personal_effects(tmp_path: Path) -> None:
     assert payload["checker_contradicts"] is False
     assert payload["identity_check"] is True
     assert payload["identity_unclear"] is False
-    assert chat_fn.call_count == 4
+    assert chat_fn.call_count == 3
 
 
 def test_routes_missed_departure(tmp_path: Path) -> None:
@@ -1033,7 +1031,7 @@ def test_routes_missed_departure(tmp_path: Path) -> None:
     assert payload["checker_contradicts"] is False
     assert payload["identity_check"] is True
     assert payload["identity_unclear"] is False
-    assert chat_fn.call_count == 4
+    assert chat_fn.call_count == 3
 
 
 def _other_coverage_chat_fn() -> MagicMock:
@@ -1043,6 +1041,86 @@ def _other_coverage_chat_fn() -> MagicMock:
         "probabilities": {COVERAGE_OTHER: 0.95},
     })
     return MagicMock(side_effect=[coverage])
+
+
+_GATED_CHECK_NAMES = (
+    "identity",
+    "signature",
+    "healthy",
+    "not_authentic",
+    "incomplete",
+    "suspicious_dating",
+    "departure",
+)
+
+
+def _seed_pe_hostile_medical_claim(config: AppConfig, claim_name: str = "claim pe hostile medical") -> Path:
+    """PE claim whose OCR would trip healthy + suspicious dating if those rules ran.
+
+    Description is *not* embedded in the supporting document so containment reaches
+    the LLM. Booking reference date is far from the certificate issue date.
+    """
+    claim_dir = _seed_preprocessed_claim(config, claim_name=claim_name)
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.description).write_text(
+        "My suitcase was stolen from the hotel lobby during the trip.",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        "# Supporting document\n\n"
+        "Police report filed for stolen luggage.\n"
+        "Patient is clinically healthy and fit to travel.\n"
+        "Certificate issue date 2021-01-01.\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_documents).write_text(
+        "# Supporting documents\n\n"
+        "**current date**: 2022-06-01\n"
+        "**name**: Ada Lovelace\n"
+        "**departure**: 2022-09-01 10:00 (local)\n",
+        encoding="utf-8",
+    )
+    return claim_dir
+
+
+def test_non_medical_branch_cannot_deny_for_medical_semantics(tmp_path: Path) -> None:
+    """SR-010 tracer: PE claim with hostile medical OCR must APPROVE without medical prompts."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_pe_hostile_medical_claim(config)
+    coverage = _chat_response({
+        "labels": [PERSONAL_EFFECTS],
+        "probabilities": {PERSONAL_EFFECTS: 0.9, "False": 0.1},
+    })
+    document = _chat_response({
+        "labels": [PROOF_OF_THEFT],
+        "probabilities": {PROOF_OF_THEFT: 0.85, "False": 0.15},
+    })
+    containment = _chat_response({"result": True})
+    contradicts = _chat_response({"result": False})
+    # Hostile medical responses that must never be consumed.
+    healthy = _chat_response({"result": True})
+    authenticity = _chat_response({"result": True})
+    incomplete = _chat_response({"result": True})
+    chat_fn = MagicMock(side_effect=[coverage, document, containment, contradicts, healthy, authenticity, incomplete])
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["decision"] == "APPROVE"
+    assert payload["decision_explanation"] == "checker_consistent"
+    assert payload["checker_rule_set"] == "personal_effects_non_medical"
+    assert payload["checker_skipped"] == list(_GATED_CHECK_NAMES)
+    assert set(payload["checker_outcomes"]) == {"containment", "contradicts"}
+    assert "healthy_check" not in payload
+    assert "signature_check" not in payload
+    assert "checker_suspicious_dating" not in payload
+    assert "departure_within_days" not in payload
+    system_prompts = {call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list}
+    assert system_prompts >= {"containment", "contradicts"}
+    assert system_prompts.isdisjoint({"identity", "healthy", "authenticity", "incomplete"})
+    assert chat_fn.call_count == 4
 
 
 def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:

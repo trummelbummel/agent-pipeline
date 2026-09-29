@@ -465,15 +465,12 @@ def test_analyze_claim_cancellation_path_writes_analysis_result(
     }
 
 
-def test_failed_rerun_keeps_last_successful_generation(
-    tmp_path: Path,
-    cancellation_chat_factory: CancellationChatFactory,
-) -> None:
+def test_failed_rerun_keeps_last_successful_generation(tmp_path: Path) -> None:
     """D-02: a failed rerun publishes nothing; last successful generation stays intact."""
     ClaimPipeline = _claim_pipeline_cls()
     config = _config(tmp_path)
     claim_dir = _seed_preprocessed_claim(config)
-    chat_fn = _cancellation_chat_fn(cancellation_chat_factory)
+    chat_fn = _repeating_cancellation_chat_fn()
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
     pipeline.analyze_claim(claim_dir)
 

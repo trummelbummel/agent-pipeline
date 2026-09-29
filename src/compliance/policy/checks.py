@@ -9,15 +9,15 @@ from __future__ import annotations
 from datetime import date
 from typing import NamedTuple
 
-from compliance.config.settings import CheckingConfig
-from compliance.llm.chat import ChatFn
-from compliance.llm.checker import Checker, CheckerMode, CheckOutcome
-from compliance.policy.rules import CheckerRuleSet
-from compliance.workflows.claim_dates import (
+from compliance.claim_dates import (
     _departure_beyond_days,
     _reference_today,
     _suspicious_dating,
 )
+from compliance.config.settings import CheckingConfig
+from compliance.llm.chat import ChatFn
+from compliance.llm.checker import Checker, CheckerMode, CheckOutcome
+from compliance.policy.rules import CheckerRuleSet
 
 __all__ = [
     "CheckerRunResult",

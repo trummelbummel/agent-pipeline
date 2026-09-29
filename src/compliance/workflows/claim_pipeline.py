@@ -9,7 +9,7 @@ from typing import Any, Literal, NamedTuple, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from compliance.branch_log import log_branch_decision
-from compliance.config.settings import AppConfig, ClassificationConfig, CoverageRoute
+from compliance.config.settings import AppConfig, ClassificationConfig
 from compliance.llm.chat import ChatFn
 from compliance.llm.checker import Checker, CheckerMode, CheckOutcome
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
@@ -19,6 +19,7 @@ from compliance.models.decisions import (
     DECISION_DENY,
     DECISION_UNCERTAIN,
 )
+from compliance.policy import CoverageBranch, RoutedCoverage, route_coverage
 from compliance.preprocessing.claim_batch import (
     _discover_claim_folders,
     _is_claim_folder,
@@ -41,7 +42,6 @@ from compliance.workflows.predicted_answer_io import analysis_predicted_answer_t
 
 logger = logging.getLogger(__name__)
 
-CoverageBranch = CoverageRoute | Literal["abstention"]
 CoverageNextNode = Literal["classify_reason", "classify_pe_document", "classify_missed_document", "persist"]
 
 # Checks whose semantics are specific to a medical document (rule matrix D-01).
@@ -108,17 +108,6 @@ class CheckerRuleSet(NamedTuple):
         :return: ``_GATED_CHECKS`` members not in ``applicable``.
         """
         return tuple(check for check in _GATED_CHECKS if check not in self.applicable)
-
-
-class RoutedCoverage(NamedTuple):
-    """Single authoritative coverage routing decision (SR-004).
-
-    :param branch: Which coverage-specific policy path this claim follows.
-    :param label: The winning coverage classifier code (may be an abstention code).
-    """
-
-    branch: CoverageBranch
-    label: str
 
 
 def _legacy_booleans_from_outcomes(
@@ -529,7 +518,7 @@ class ClaimPipeline:
 
     def _classify_coverage_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         result = self._coverage_classification(state["description_text"])
-        routed = self._routed_coverage(result)
+        routed = route_coverage(result, self._config.analysis.coverage)
         log_branch_decision(
             logger,
             branch="classify_coverage",
@@ -860,60 +849,6 @@ class ClaimPipeline:
         :return: Whether the cancellation document taxonomy applies.
         """
         return state["routed_coverage"].branch == "cancellation"
-
-    def _routed_coverage(self, result: ClassificationResult) -> RoutedCoverage:
-        """Compute the single authoritative coverage route from classifier output.
-
-        With multiple selected labels (D-01) or a positive-vs-abstention conflict
-        (D-02), the label with the highest probability wins (missing entries count
-        as 0.0, D-06). Exact ties break by config order — positive labels first,
-        then ``other_label``, then ``False`` (D-05) — so a positive label beats
-        abstention on a tie. The winning label picks the branch; a winner outside
-        the configured positive labels routes to abstention (P-03).
-
-        :param result: Classifier output with selected labels and probabilities.
-        :return: The routed branch and its winning coverage code.
-        """
-        label = self._winning_coverage_label(result)
-        return RoutedCoverage(branch=self._coverage_branch(label), label=label)
-
-    def _winning_coverage_label(self, result: ClassificationResult) -> str:
-        """Pick the highest-probability selected label, ties by config order.
-
-        Only labels the classifier selected (``result.labels``) are candidates
-        (D-04); a selected label with no probability entry counts as 0.0 (D-06).
-
-        :param result: Classifier output; ``result.labels`` are the candidates.
-        :return: The winning coverage code.
-        """
-        rank = self._coverage_label_rank()
-        return min(
-            result.labels,
-            key=lambda label: (-result.probabilities.get(label, 0.0), rank.get(label, len(rank))),
-        )
-
-    def _coverage_label_rank(self) -> dict[str, int]:
-        """Config-order tie-break rank: positive labels, then other_label, then False.
-
-        :return: Map from coverage code to rank (lower rank wins an exact-probability tie).
-        """
-        coverage = self._config.analysis.coverage
-        ordered: list[str] = []
-        for label in [*coverage.positive_labels(), coverage.other_label, "False"]:
-            if label not in ordered:
-                ordered.append(label)
-        return {label: index for index, label in enumerate(ordered)}
-
-    def _coverage_branch(self, label: str) -> CoverageBranch:
-        """Map a winning coverage code to its routing branch from config (D-01).
-
-        The branch comes from the configured ``analysis.coverage.branches`` map.
-        Unmapped or abstention codes route to abstention.
-
-        :param label: Winning coverage code from ``_winning_coverage_label``.
-        :return: The routed branch; a code outside the map abstains.
-        """
-        return self._config.analysis.coverage.branches.get(label, "abstention")
 
     def _coverage_classification(self, description_text: str) -> ClassificationResult:
         return self._stage_classifier(self._config.analysis.coverage).classify(description_text)

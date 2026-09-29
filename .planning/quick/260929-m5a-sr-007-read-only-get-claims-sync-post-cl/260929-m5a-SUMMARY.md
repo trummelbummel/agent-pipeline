@@ -17,7 +17,7 @@ affects: [SR-009, SR-013]
 actuals:
   tokens: 14959
   tasks: 3
-  commits: 5
+  commits: 7
 
 plan_head_before: 87e66604372b3631889a0522d1a3c2df6567aa27
 
@@ -180,7 +180,7 @@ status: complete
 3. **Rule 1 fix (Task 3 gate):** `753fe73` — fix(SR-007): keep tests/test_api mypy at the 8-error baseline
 4. **Task 3:** `ec03fa8` — feat(SR-007): document the read-only decision GET and the locked analysis POST
 
-**Plan metadata:** `63c263d` (docs: complete plan)
+**Plan metadata:** `63c263d`, `0428029` (docs: complete plan + activity refresh)
 
 ## Files Created/Modified
 

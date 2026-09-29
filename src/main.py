@@ -10,8 +10,9 @@ from pydantic import BaseModel, Field
 from compliance.config.logging_setup import configure_logging
 from compliance.config.settings import AppConfig, load_config
 from compliance.preprocessing.claim_batch import _validate_claim_dir_name
+from compliance.workflows.artifact_publication import ClaimAnalysisBusyError
 from compliance.workflows.claim_pipeline import ClaimPipeline
-from compliance.workflows.orchestration import process_then_analyze
+from compliance.workflows.orchestration import analyze_claim_exclusively
 from compliance.workflows.pipeline import PreprocessingPipeline
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,8 @@ class CliArgs(BaseModel):
 
     :param config: Path to application YAML config.
     :param mode: Workflow to run — preprocess, analyze, or both (default preprocess).
-    :param claim_id: Optional single claim folder segment under data_dir for
-        end-to-end ``process_then_analyze`` (R020).
+    :param claim_id: Optional single claim folder segment under data_dir for an
+        exclusive end-to-end ``analyze_claim_exclusively`` run (R020 / SR-007).
     """
 
     config: str = Field(
@@ -38,7 +39,7 @@ class CliArgs(BaseModel):
     )
     claim_id: str | None = Field(
         default=None,
-        description="Optional claim folder name under data_dir for single-claim e2e",
+        description="Optional claim folder name under data_dir for exclusive single-claim e2e",
     )
 
 
@@ -74,7 +75,7 @@ def _cli_args(argv: list[str] | None) -> CliArgs:
     parser.add_argument(
         "--claim-id",
         default=None,
-        help="Single claim folder under data_dir; runs process_then_analyze (R020)",
+        help="Single claim folder under data_dir; exclusive analyze_claim_exclusively (SR-007)",
     )
     return CliArgs.model_validate(vars(parser.parse_args(argv)))
 
@@ -96,11 +97,11 @@ def _workflow_exit_code(config: AppConfig, *, mode: CliMode, claim_id: str | Non
 
 
 def _single_claim_exit_code(config: AppConfig, *, claim_id: str) -> int:
-    """Resolve ``claim_id`` under data_dir and run shared process_then_analyze.
+    """Resolve ``claim_id`` under data_dir and run exclusive analyze_claim_exclusively.
 
     :param config: Loaded application configuration.
     :param claim_id: Safe claim folder segment (validated before join).
-    :return: ``0`` on success; ``1`` when the claim folder name is unsafe.
+    :return: ``0`` on success; ``1`` when the claim folder name is unsafe or busy.
     """
     try:
         _validate_claim_dir_name(claim_id)
@@ -108,12 +109,16 @@ def _single_claim_exit_code(config: AppConfig, *, claim_id: str) -> int:
         logger.exception("Unsafe claim id rejected: %s", claim_id)
         return 1
     claim_dir = Path(config.preprocessing.data_dir) / claim_id
-    process_then_analyze(
-        claim_dir,
-        PreprocessingPipeline(config),
-        ClaimPipeline(config),
-    )
-    logger.info("Single-claim process_then_analyze complete (%s)", claim_id)
+    try:
+        analyze_claim_exclusively(
+            claim_dir,
+            PreprocessingPipeline(config),
+            ClaimPipeline(config),
+        )
+    except ClaimAnalysisBusyError:
+        logger.exception("Analysis already in progress for claim id: %s", claim_id)
+        return 1
+    logger.info("Single-claim analyze_claim_exclusively complete (%s)", claim_id)
     return 0
 
 

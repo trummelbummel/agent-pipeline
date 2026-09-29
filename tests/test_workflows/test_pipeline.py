@@ -728,8 +728,92 @@ def test_cli_or_api_passes_path_from_outside(
         captured["data_dir"] = preprocessing._config.preprocessing.data_dir
         return results / "claim 1" / "analysis_result.json"
 
-    monkeypatch.setattr("main.process_then_analyze", _fake_pta)
+    monkeypatch.setattr("main.analyze_claim_exclusively", _fake_pta)
 
     assert main(["--config", str(cfg_path), "--claim-id", "claim 1"]) == 0
     assert captured["claim_dir"] == data_dir / "claim 1"
     assert captured["data_dir"] == str(data_dir)
+
+
+def test_cli_claim_id_exits_1_when_lock_held(
+    tmp_path: Path,
+) -> None:
+    """CLI --claim-id returns 1 when another analysis holds the per-claim lock."""
+    from compliance.workflows.artifact_publication import claim_analysis_lock
+    from main import main
+
+    cfg_path = tmp_path / "config.yaml"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "claim 1").mkdir()
+    output_root = tmp_path / "preprocessed_out"
+    results = tmp_path / "results_out"
+    cfg_path.write_text(
+        "\n".join([
+            "preprocessing:",
+            f"  data_dir: {data_dir}",
+            "  document_formats: [webp, jpg, jpeg, png, pdf]",
+            "  confidence_threshold: 0.7",
+            f"  preprocessed_dir: {output_root}",
+            f"  results_dir: {results}",
+            "  artifacts:",
+            "    description: description.txt",
+            "    answer: answer.json",
+            "    supporting_document: supporting_document.md",
+            "    supporting_documents: supporting_documents.md",
+            "    document_metadata: document_metadata.json",
+            "extraction:",
+            "  model: test-model",
+            "  prompt: extract",
+            "classification:",
+            '  labels: ["1"]',
+            '  other_label: "False"',
+            "  model: test-model",
+            "  prompt: classify",
+            "checking:",
+            "  model: test-model",
+            "  containment_prompt: check containment",
+            "  contradicts_prompt: check contradicts",
+            "  identity_prompt: check identity",
+            "  healthy_prompt: check healthy",
+            "  authenticity_prompt: authenticity",
+            "  incomplete_prompt: incomplete",
+            "analysis:",
+            "  coverage:",
+            '    labels: ["1"]',
+            "    branches:",
+            '      "1": cancellation',
+            '    other_label: "False"',
+            "    model: test-model",
+            "    prompt: classify",
+            "  cancellation_reason:",
+            '    labels: ["1"]',
+            '    other_label: "False"',
+            "    model: test-model",
+            "    prompt: classify",
+            "  cancellation_document:",
+            '    labels: ["1"]',
+            '    other_label: "False"',
+            "    model: test-model",
+            "    prompt: classify",
+            "  personal_effects_document:",
+            '    labels: ["1"]',
+            '    other_label: "False"',
+            "    model: test-model",
+            "    prompt: classify",
+            "  missed_departure_document:",
+            '    labels: ["1"]',
+            '    other_label: "False"',
+            "    model: test-model",
+            "    prompt: classify",
+            "ocr_retry:",
+            "  enabled: false",
+            "  model: test-vision",
+            "  prompt: ocr",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    with claim_analysis_lock(results, "claim 1"):
+        assert main(["--config", str(cfg_path), "--claim-id", "claim 1"]) == 1

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -12,6 +15,7 @@ from api.app import create_app
 from compliance.config.settings import AnalysisConfig, AppConfig
 
 TRIP_CANCELLATION = "1"
+_CONCURRENCY_WAIT_S = 15.0
 
 
 def _seed_raw_claim(data_dir: Path, claim_id: str = "claim 1") -> Path:
@@ -119,3 +123,64 @@ def test_post_analysis_lock_held_returns_409_in_progress(
     assert response.json()["detail"] == "analysis_in_progress"
     assert cancellation_chat_fn.call_count == 0
     assert not analysis_path.is_file()
+
+
+def test_concurrent_post_analysis_one_success_one_conflict(
+    tmp_path: Path,
+    api_config_factory: Callable[..., AppConfig],
+    cancellation_analysis_config: AnalysisConfig,
+    cancellation_chat_fn: MagicMock,
+) -> None:
+    """Two simultaneous POSTs yield one 200 and one 409 with a single LLM pass."""
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    _seed_raw_claim(data_dir, "claim 1")
+    config = api_config_factory(data_dir, analysis=cancellation_analysis_config)
+    results_dir = Path(config.preprocessing.results_dir)
+    artifacts = config.preprocessing.artifacts
+
+    started = threading.Event()
+    release = threading.Event()
+    original = cancellation_chat_fn.side_effect
+    assert original is not None
+    responses = list(original)
+    expected_calls = len(responses)
+    call_gate = {"first": True}
+    response_iter = iter(responses)
+
+    def _gated_chat(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        if call_gate["first"]:
+            call_gate["first"] = False
+            started.set()
+            assert release.wait(timeout=_CONCURRENCY_WAIT_S), "release event timed out"
+        return next(response_iter)
+
+    cancellation_chat_fn.side_effect = _gated_chat
+    app = create_app(config=config, chat_fn=cancellation_chat_fn)
+
+    with TestClient(app) as client:
+
+        def _post() -> object:
+            return client.post("/claims/claim%201/analysis")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(_post)
+            assert started.wait(timeout=_CONCURRENCY_WAIT_S), "pipeline never entered chat seam"
+            second = pool.submit(_post)
+            conflict = second.result(timeout=_CONCURRENCY_WAIT_S)
+            assert conflict.status_code == 409, conflict.text
+            assert conflict.json()["detail"] == "analysis_in_progress"
+            release.set()
+            success = first.result(timeout=_CONCURRENCY_WAIT_S)
+
+    assert success.status_code == 200, success.text
+    claim_results = results_dir / "claim 1"
+    manifest = json.loads((claim_results / artifacts.run_manifest).read_text(encoding="utf-8"))
+    analysis = json.loads((claim_results / artifacts.analysis_result).read_text(encoding="utf-8"))
+    predicted = json.loads((claim_results / artifacts.predicted_answer).read_text(encoding="utf-8"))
+    assert manifest["run_id"] == analysis["run_id"] == predicted["run_id"]
+    # One analysis consumes a prefix of the seam; a duplicate pass would approach 2x.
+    assert 0 < cancellation_chat_fn.call_count <= expected_calls
+    assert cancellation_chat_fn.call_count < expected_calls * 2
+    assert not (results_dir / ".staging").exists()

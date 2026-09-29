@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.deps import get_claims, get_config, get_preprocessing
 from api.schemas import ClaimCreated, ClaimDecision, ClaimListItem
+from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
 from compliance.preprocessing.claim_batch import (
     _claim_number,
@@ -161,6 +162,52 @@ def _claim_decision_from_results(
     )
 
 
+def _claim_list_item(
+    folder: Path,
+    *,
+    analysis_name: str,
+    predicted_name: str,
+    manifest_name: str,
+) -> ClaimListItem:
+    """Build one ClaimListItem from a results folder, collecting read errors.
+
+    :param folder: Claim results directory under results_dir.
+    :param analysis_name: Configured analysis_result filename.
+    :param predicted_name: Configured predicted_answer filename.
+    :param manifest_name: Configured run_manifest filename.
+    :return: List item with null artifacts and reason codes when unreadable.
+    """
+    analysis = _artifact_read(folder, analysis_name, manifest_name)
+    predicted = _artifact_read(folder, predicted_name, manifest_name)
+    errors: dict[str, str] = {}
+    if analysis.error is not None:
+        errors[analysis_name] = analysis.error
+        log_branch_decision(
+            logger,
+            branch="claim_list_artifact",
+            outcome="UNREADABLE",
+            reason=analysis.error,
+            level=logging.WARNING,
+            claim=folder.name,
+        )
+    if predicted.error is not None:
+        errors[predicted_name] = predicted.error
+        log_branch_decision(
+            logger,
+            branch="claim_list_artifact",
+            outcome="UNREADABLE",
+            reason=predicted.error,
+            level=logging.WARNING,
+            claim=folder.name,
+        )
+    return ClaimListItem(
+        claim_id=folder.name,
+        analysis_result=analysis.payload if analysis.error is None else None,
+        predicted_answer=predicted.payload if predicted.error is None else None,
+        errors=errors or None,
+    )
+
+
 @router.post("/claims", response_model=ClaimCreated, status_code=201)
 def create_claim(
     description: UploadFile = File(...),
@@ -231,19 +278,15 @@ def list_claims(
     folders = [path for path in results_root.iterdir() if path.is_dir() and path.name.lower().startswith("claim")]
     folders = sorted(folders, key=_claim_sort_key)
     artifacts = config.preprocessing.artifacts
-    items: list[ClaimListItem] = []
-    for folder in folders:
-        analysis = _artifact_read(folder, artifacts.analysis_result, artifacts.run_manifest)
-        predicted = _artifact_read(folder, artifacts.predicted_answer, artifacts.run_manifest)
-        # Task 1 keeps list payloads; Task 2 adds errors. Prefer reader over raw json.loads.
-        items.append(
-            ClaimListItem(
-                claim_id=folder.name,
-                analysis_result=analysis.payload if analysis.error is None else None,
-                predicted_answer=predicted.payload if predicted.error is None else None,
-            )
+    return [
+        _claim_list_item(
+            folder,
+            analysis_name=artifacts.analysis_result,
+            predicted_name=artifacts.predicted_answer,
+            manifest_name=artifacts.run_manifest,
         )
-    return items
+        for folder in folders
+    ]
 
 
 @router.get("/claims/{claim_id}", response_model=ClaimDecision)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
@@ -13,16 +12,18 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from api.deps import get_claims, get_config, get_preprocessing
 from api.schemas import ClaimCreated, ClaimDecision, ClaimListItem
 from compliance.config.settings import AppConfig
-from compliance.preprocessing.claim_batch import _claim_sort_key
+from compliance.preprocessing.claim_batch import (
+    _claim_number,
+    _claim_sort_key,
+    _validate_claim_dir_name,
+)
 from compliance.workflows.claim_pipeline import ClaimPipeline
 from compliance.workflows.orchestration import process_then_analyze
-from compliance.workflows.pipeline import PreprocessingPipeline, _validate_claim_dir_name
+from compliance.workflows.pipeline import PreprocessingPipeline
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_CLAIM_NUM = re.compile(r"(\d+)")
 
 
 def _next_claim_id(data_dir: Path) -> str:
@@ -33,17 +34,11 @@ def _next_claim_id(data_dir: Path) -> str:
     """
     if not data_dir.is_dir():
         return "claim 1"
-    folders = [
-        path
-        for path in data_dir.iterdir()
-        if path.is_dir() and path.name.lower().startswith("claim")
-    ]
+    folders = [path for path in data_dir.iterdir() if path.is_dir() and path.name.lower().startswith("claim")]
     if not folders:
         return "claim 1"
     last = max(folders, key=_claim_sort_key)
-    match = _CLAIM_NUM.search(last.name)
-    number = int(match.group(1)) if match else 0
-    return f"claim {number + 1}"
+    return f"claim {_claim_number(last.name) + 1}"
 
 
 def _allowed_image_suffix(filename: str | None, document_formats: list[str]) -> str:
@@ -87,9 +82,7 @@ def _write_claim_upload(
     :param image_basename: Path-safe basename for the image file.
     """
     (claim_dir / artifacts_description).write_bytes(description.file.read())
-    (claim_dir / artifacts_supporting_documents).write_bytes(
-        supporting_documents.file.read()
-    )
+    (claim_dir / artifacts_supporting_documents).write_bytes(supporting_documents.file.read())
     (claim_dir / image_basename).write_bytes(image.file.read())
 
 
@@ -172,11 +165,7 @@ def list_claims(
     if not results_root.is_dir():
         return []
 
-    folders = [
-        path
-        for path in results_root.iterdir()
-        if path.is_dir() and path.name.lower().startswith("claim")
-    ]
+    folders = [path for path in results_root.iterdir() if path.is_dir() and path.name.lower().startswith("claim")]
     folders = sorted(folders, key=_claim_sort_key)
     artifacts = config.preprocessing.artifacts
     items: list[ClaimListItem] = []
@@ -184,12 +173,8 @@ def list_claims(
         items.append(
             ClaimListItem(
                 claim_id=folder.name,
-                analysis_result=_load_optional_json(
-                    folder / artifacts.analysis_result
-                ),
-                predicted_answer=_load_optional_json(
-                    folder / artifacts.predicted_answer
-                ),
+                analysis_result=_load_optional_json(folder / artifacts.analysis_result),
+                predicted_answer=_load_optional_json(folder / artifacts.predicted_answer),
             )
         )
     return items
@@ -222,7 +207,7 @@ def get_claim(
     try:
         analysis_path = process_then_analyze(claim_dir, preprocessing, claims)
     except Exception as exc:
-        logger.error(
+        logger.exception(
             "process_then_analyze failed claim_id=%s error=%s",
             claim_id,
             type(exc).__name__,
@@ -231,9 +216,7 @@ def get_claim(
 
     analysis_result = json.loads(analysis_path.read_text(encoding="utf-8"))
     artifacts = config.preprocessing.artifacts
-    predicted_path = (
-        Path(config.preprocessing.results_dir) / claim_id / artifacts.predicted_answer
-    )
+    predicted_path = Path(config.preprocessing.results_dir) / claim_id / artifacts.predicted_answer
     predicted_answer = _load_optional_json(predicted_path)
     return ClaimDecision(
         claim_id=claim_id,

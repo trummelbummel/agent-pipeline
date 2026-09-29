@@ -228,6 +228,143 @@ def _seed_preprocessed_claim(config: AppConfig, claim_name: str = "claim 1") -> 
     return claim_dir
 
 
+# --- SR-004: single authoritative coverage route (routed_coverage) ---
+
+# Path tail keyed by winning coverage code (DRY): classification payloads then
+# checker boolean payloads, consumed after the coverage classification response.
+_COVERAGE_WINNER_TAILS: dict[str, list[dict[str, Any]]] = {
+    TRIP_CANCELLATION: [
+        {"labels": [MEDICAL_EMERGENCY], "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15}},
+        {"labels": [MEDICAL_CERTIFICATE], "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2}},
+        {"result": False},
+        {"result": False},
+        {"result": False},
+        {"result": False},
+    ],
+    PERSONAL_EFFECTS: [
+        {"labels": [PROOF_OF_THEFT], "probabilities": {PROOF_OF_THEFT: 0.8, "False": 0.2}},
+        {"result": False},
+        {"result": False},
+    ],
+    MISSED_DEPARTURE: [
+        {"labels": [INCIDENT_REPORT], "probabilities": {INCIDENT_REPORT: 0.8, "False": 0.2}},
+        {"result": False},
+        {"result": False},
+    ],
+    COVERAGE_FALSE: [],
+}
+
+# Full expectation per winning coverage code, asserted by test_coverage_route_by_probability.
+_COVERAGE_WINNER_EXPECTATIONS: dict[str, dict[str, Any]] = {
+    TRIP_CANCELLATION: {
+        "routed_coverage_label": "Trip cancellation or rescheduling",
+        "document_labels": ["medical certificate"],
+        "reason_label_codes": [MEDICAL_EMERGENCY],
+        "decision": "APPROVE",
+        "decision_explanation": "checker_consistent",
+        "human_in_the_loop": False,
+        "call_count": 7,
+        "not_authentic_present": True,
+    },
+    PERSONAL_EFFECTS: {
+        "routed_coverage_label": "Personal Effects",
+        "document_labels": ["Proof of theft, loss, or damage"],
+        "reason_label_codes": [],
+        "decision": "APPROVE",
+        "decision_explanation": "checker_consistent",
+        "human_in_the_loop": False,
+        "call_count": 4,
+        "not_authentic_present": False,
+    },
+    MISSED_DEPARTURE: {
+        "routed_coverage_label": "Missed Departure or Missed Connection",
+        "document_labels": ["Incident report or documentation explaining the cause of delay"],
+        "reason_label_codes": [],
+        "decision": "APPROVE",
+        "decision_explanation": "checker_consistent",
+        "human_in_the_loop": False,
+        "call_count": 4,
+        "not_authentic_present": False,
+    },
+    COVERAGE_FALSE: {
+        "routed_coverage_label": "False",
+        "document_labels": [],
+        "reason_label_codes": [],
+        "decision": "UNCERTAIN",
+        "decision_explanation": "coverage_false_label",
+        "human_in_the_loop": True,
+        "call_count": 1,
+        "not_authentic_present": False,
+    },
+}
+
+
+def _coverage_route_chat_fn(labels: list[str], probabilities: dict[str, float], winner: str) -> MagicMock:
+    """Injected chat_fn: coverage selection, then the winner's path tail.
+
+    An unexpected extra LLM call beyond the tail raises StopIteration, which is
+    the mechanism that enforces exactly one path is followed (SR-004).
+    """
+    coverage = _chat_response({"labels": labels, "probabilities": probabilities})
+    tail = [_chat_response(payload) for payload in _COVERAGE_WINNER_TAILS[winner]]
+    return MagicMock(side_effect=[coverage, *tail])
+
+
+@pytest.mark.parametrize(
+    ("labels", "probabilities", "winner"),
+    [
+        pytest.param(["2", "3"], {"2": 0.4, "3": 0.8}, MISSED_DEPARTURE, id="tracer_23"),
+        pytest.param(["3", "2"], {"2": 0.4, "3": 0.8}, MISSED_DEPARTURE, id="tracer_32"),
+        pytest.param(["1", "2"], {"1": 0.4, "2": 0.8}, PERSONAL_EFFECTS, id="multi_positive_12_pe_wins"),
+        pytest.param(["2", "1"], {"1": 0.4, "2": 0.8}, PERSONAL_EFFECTS, id="multi_positive_21_pe_wins"),
+        pytest.param(["1", "2"], {"1": 0.8, "2": 0.4}, TRIP_CANCELLATION, id="multi_positive_12_cancel_wins"),
+        pytest.param(["2", "1"], {"1": 0.8, "2": 0.4}, TRIP_CANCELLATION, id="multi_positive_21_cancel_wins"),
+        pytest.param(["False", "1"], {"False": 0.7, "1": 0.3}, COVERAGE_FALSE, id="false_first_abstention_wins"),
+        pytest.param(["1", "False"], {"False": 0.7, "1": 0.3}, COVERAGE_FALSE, id="false_last_abstention_wins"),
+        pytest.param(["False", "1"], {"False": 0.3, "1": 0.7}, TRIP_CANCELLATION, id="false_first_positive_wins"),
+        pytest.param(["1", "False"], {"False": 0.3, "1": 0.7}, TRIP_CANCELLATION, id="false_last_positive_wins"),
+        pytest.param(["3", "2"], {"2": 0.5, "3": 0.5}, PERSONAL_EFFECTS, id="tie_positive_config_order"),
+        pytest.param(["False", "3"], {"False": 0.5, "3": 0.5}, MISSED_DEPARTURE, id="tie_positive_beats_abstention"),
+        pytest.param(["1", "3"], {"3": 0.2}, MISSED_DEPARTURE, id="missing_probability_counts_zero"),
+        pytest.param(["1", "3"], {"1": 0.6, "3": 0.8}, MISSED_DEPARTURE, id="overlap_missed_wins"),
+        pytest.param(["3", "1"], {"1": 0.8, "3": 0.6}, TRIP_CANCELLATION, id="overlap_cancel_wins"),
+    ],
+)
+def test_coverage_route_by_probability(
+    tmp_path: Path,
+    labels: list[str],
+    probabilities: dict[str, float],
+    winner: str,
+) -> None:
+    """SR-004: highest-probability selected coverage label wins (D-01..D-06, P-01..P-03).
+
+    The winning label alone determines branch, document stage, and decision —
+    order of ``labels`` never matters (order invariance, D-01), and a losing
+    ``False`` cannot skip stages (D-02).
+    """
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name=f"claim {'-'.join(labels)}-{winner}")
+    chat_fn = _coverage_route_chat_fn(labels, probabilities, winner)
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    expected = _COVERAGE_WINNER_EXPECTATIONS[winner]
+    assert payload["routed_coverage_label_code"] == winner
+    assert payload["routed_coverage_label"] == expected["routed_coverage_label"]
+    assert payload["coverage_label_codes"] == labels
+    assert payload["coverage_probabilities"][winner] == probabilities.get(winner, 0.0)
+    assert payload.get("document_labels", []) == expected["document_labels"]
+    assert payload.get("reason_label_codes", []) == expected["reason_label_codes"]
+    assert payload["decision"] == expected["decision"]
+    assert payload["decision_explanation"] == expected["decision_explanation"]
+    assert payload["human_in_the_loop"] is expected["human_in_the_loop"]
+    assert chat_fn.call_count == expected["call_count"]
+    assert ("checker_document_not_authentic" in payload) is expected["not_authentic_present"]
+
+
 def test_analyze_claim_cancellation_path_writes_analysis_result(
     tmp_path: Path,
     cancellation_chat_factory: CancellationChatFactory,

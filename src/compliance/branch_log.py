@@ -3,32 +3,33 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-_ALLOWED_FIELD_KEYS: Final[frozenset[str]] = frozenset(
-    {
-        "artifacts",
-        "chi_squared",
-        "claim",
-        "coefficients",
-        "confidence",
-        "decision",
-        "documents",
-        "error",
-        "extracted",
-        "faulty",
-        "file",
-        "fraud_deny",
-        "hitl",
-        "markdown",
-        "model",
-        "next_step",
-        "path",
-        "pictures",
-        "png",
-        "threshold",
-        "total",
-        "written",
-    }
-)
+_ALLOWED_FIELD_KEYS: Final[frozenset[str]] = frozenset({
+    "artifacts",
+    "chi_squared",
+    "claim",
+    "coefficients",
+    "confidence",
+    "decision",
+    "documents",
+    "error",
+    "extracted",
+    "faulty",
+    "file",
+    "fraud_deny",
+    "hitl",
+    "label",
+    "markdown",
+    "model",
+    "next_step",
+    "path",
+    "pictures",
+    "png",
+    "routed_branch",
+    "routed_label",
+    "threshold",
+    "total",
+    "written",
+})
 
 
 def log_branch_decision(

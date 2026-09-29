@@ -7,21 +7,23 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from compliance.config.logging_setup import configure_logging
 from compliance.config.settings import AppConfig, load_config
+from compliance.preprocessing.claim_batch import _validate_claim_dir_name
 from compliance.workflows.claim_pipeline import ClaimPipeline
 from compliance.workflows.orchestration import process_then_analyze
-from compliance.workflows.pipeline import PreprocessingPipeline, _validate_claim_dir_name
+from compliance.workflows.pipeline import PreprocessingPipeline
 
 logger = logging.getLogger(__name__)
 
-CliMode = Literal["preprocess", "analyze"]
+CliMode = Literal["preprocess", "analyze", "both"]
 
 
 class CliArgs(BaseModel):
     """CLI arguments for preprocess and claim-analysis entrypoints.
 
     :param config: Path to application YAML config.
-    :param mode: Workflow to run — preprocess (default) or analyze.
+    :param mode: Workflow to run — preprocess, analyze, or both (default preprocess).
     :param claim_id: Optional single claim folder segment under data_dir for
         end-to-end ``process_then_analyze`` (R020).
     """
@@ -32,7 +34,7 @@ class CliArgs(BaseModel):
     )
     mode: CliMode = Field(
         default="preprocess",
-        description="Workflow mode: preprocess or analyze",
+        description="Workflow mode: preprocess, analyze, or both",
     )
     claim_id: str | None = Field(
         default=None,
@@ -41,7 +43,7 @@ class CliArgs(BaseModel):
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Load config and run the selected workflow (preprocess or analyze).
+    """Load config and run the selected workflow (preprocess, analyze, or both).
 
     :param argv: Optional CLI arguments; defaults to ``sys.argv[1:]``.
     :return: ``0`` on success; ``2`` when the config file is missing.
@@ -50,16 +52,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = load_config(args.config)
     except FileNotFoundError:
-        logger.error("Config file not found: %s", args.config)
+        logger.exception("Config file not found: %s", args.config)
         return 2
-    _configure_logging(config)
+    configure_logging(config)
     return _workflow_exit_code(config, mode=args.mode, claim_id=args.claim_id)
-
-
-def _configure_logging(config: AppConfig) -> None:
-    level_name = config.logging.level.upper()
-    level = getattr(logging, level_name, logging.INFO)
-    logging.basicConfig(level=level, format=config.logging.format)
 
 
 def _cli_args(argv: list[str] | None) -> CliArgs:
@@ -71,9 +67,9 @@ def _cli_args(argv: list[str] | None) -> CliArgs:
     )
     parser.add_argument(
         "--mode",
-        choices=["preprocess", "analyze"],
+        choices=["preprocess", "analyze", "both"],
         default="preprocess",
-        help="Workflow to run (default: preprocess)",
+        help="Workflow to run: preprocess, analyze, or both (default: preprocess)",
     )
     parser.add_argument(
         "--claim-id",
@@ -83,16 +79,15 @@ def _cli_args(argv: list[str] | None) -> CliArgs:
     return CliArgs.model_validate(vars(parser.parse_args(argv)))
 
 
-def _workflow_exit_code(
-    config: AppConfig, *, mode: CliMode, claim_id: str | None = None
-) -> int:
+def _workflow_exit_code(config: AppConfig, *, mode: CliMode, claim_id: str | None = None) -> int:
     if claim_id is not None:
         return _single_claim_exit_code(config, claim_id=claim_id)
-    if mode == "preprocess":
+    if mode in ("preprocess", "both"):
         written = PreprocessingPipeline(config).run(None)
         logger.info("Preprocessing workflow complete (%d claims written)", len(written))
-        return 0
-    if mode == "analyze":
+        if mode == "preprocess":
+            return 0
+    if mode in ("analyze", "both"):
         written = ClaimPipeline(config).run(None)
         logger.info("Analysis workflow complete (%d claims written)", len(written))
         return 0
@@ -110,7 +105,7 @@ def _single_claim_exit_code(config: AppConfig, *, claim_id: str) -> int:
     try:
         _validate_claim_dir_name(claim_id)
     except ValueError:
-        logger.error("Unsafe claim id rejected: %s", claim_id)
+        logger.exception("Unsafe claim id rejected: %s", claim_id)
         return 1
     claim_dir = Path(config.preprocessing.data_dir) / claim_id
     process_then_analyze(

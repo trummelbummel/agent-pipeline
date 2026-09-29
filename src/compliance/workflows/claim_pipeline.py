@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NamedTuple, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -33,6 +33,28 @@ from compliance.workflows.predicted_answer_io import write_analysis_predicted_an
 
 logger = logging.getLogger(__name__)
 
+CoverageBranch = Literal["cancellation", "personal_effects", "missed_departure", "abstention"]
+CoverageNextNode = Literal["classify_reason", "classify_pe_document", "classify_missed_document", "persist"]
+
+
+class RoutedCoverage(NamedTuple):
+    """Single authoritative coverage routing decision (SR-004).
+
+    :param branch: Which coverage-specific policy path this claim follows.
+    :param label: The winning coverage classifier code (may be an abstention code).
+    """
+
+    branch: CoverageBranch
+    label: str
+
+
+_COVERAGE_BRANCH_NEXT_NODE: dict[CoverageBranch, CoverageNextNode] = {
+    "cancellation": "classify_reason",
+    "personal_effects": "classify_pe_document",
+    "missed_departure": "classify_missed_document",
+    "abstention": "persist",
+}
+
 # Checker and gate booleans copied into analysis_result.json, in payload key order.
 _STATE_BOOLEAN_KEYS: tuple[str, ...] = (
     "checker_containment",
@@ -57,7 +79,14 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param description_text: Contents of the configured description artifact.
     :param supporting_document_text: Docling markdown for the primary supporting document.
     :param supporting_documents_text: Booking/internal markdown artifact text.
-    :param coverage_labels: Labels from the coverage classifier stage.
+    :param coverage_labels: Raw labels from the coverage classifier stage
+        (selection order; not the routing decision).
+    :param coverage_probabilities: Per-label probability estimates from the
+        coverage classifier stage, keyed by coverage code.
+    :param routed_coverage: Single authoritative coverage routing decision
+        (SR-004), computed once in ``_classify_coverage_node`` from
+        ``coverage_labels`` + ``coverage_probabilities``. Every branch-specific
+        rule reads this instead of the raw coverage label list.
     :param reason_labels: Labels from the cancellation-reason stage.
     :param document_labels: Labels from the cancellation-document stage.
     :param checker_containment: Checker containment mode result.
@@ -77,9 +106,10 @@ class ClaimAnalysisState(TypedDict, total=False):
         (deterministic UNCERTAIN — recovery / ability-to-fly still unclear).
     :param checker_suspicious_dating: True when OCR dating is implausible
         (year skew vs reference today, or issue/stamp before care window).
-    :param human_in_the_loop: True when OCR metadata already flagged review, any
-        classifier returned ``False``, or analysis decision is UNCERTAIN
-        (checker dating / departure / identity unclear, coverage abstention).
+    :param human_in_the_loop: True when OCR metadata already flagged review, the
+        routed coverage label is ``False``, a raw reason/document classifier
+        label is ``False``, or analysis decision is UNCERTAIN (checker dating /
+        departure / identity unclear, coverage abstention).
     """
 
     claim_id: str
@@ -88,6 +118,8 @@ class ClaimAnalysisState(TypedDict, total=False):
     supporting_document_text: str
     supporting_documents_text: str
     coverage_labels: list[str]
+    coverage_probabilities: dict[str, float]
+    routed_coverage: RoutedCoverage
     reason_labels: list[str]
     document_labels: list[str]
     checker_containment: bool
@@ -252,67 +284,25 @@ class ClaimPipeline:
                 logger.exception("Failed to analyze %s: %s", claim_dir.name, type(exc).__name__)
         return written
 
-    def _route_after_coverage(
-        self, state: ClaimAnalysisState
-    ) -> Literal[
-        "classify_reason",
-        "classify_pe_document",
-        "classify_missed_document",
-        "persist",
-    ]:
-        """Route by exact config.analysis.coverage label strings (not ROADMAP Title Case).
+    def _route_after_coverage(self, state: ClaimAnalysisState) -> CoverageNextNode:
+        """Route to the next node from the single routed coverage decision (SR-004).
 
-        ``other_label`` / ``False`` (and unknown labels after CaseClassifier allow-list)
-        go to persist without reason, document classifiers, or Checker.
+        :param state: Graph state after ``classify_coverage`` (``routed_coverage``
+            is always set by that node before this router runs).
+        :return: Next node name for the routed branch.
         """
-        labels = state.get("coverage_labels") or []
-        primary = labels[0] if labels else None
-        coverage = self._config.analysis.coverage
-        positive = coverage.positive_labels()
-        cancellation_label = positive[0]
-        pe_label = positive[1]
-        missed_label = positive[2]
-        abstention = coverage.abstention_labels()
-        if primary == cancellation_label:
-            log_branch_decision(
-                logger,
-                branch="coverage_route",
-                outcome="ROUTE",
-                reason="cancellation",
-                claim=state.get("claim_id"),
-                next_step="classify_reason",
-            )
-            return "classify_reason"
-        if primary == pe_label:
-            log_branch_decision(
-                logger,
-                branch="coverage_route",
-                outcome="ROUTE",
-                reason="personal_effects",
-                claim=state.get("claim_id"),
-                next_step="classify_pe_document",
-            )
-            return "classify_pe_document"
-        if primary == missed_label:
-            log_branch_decision(
-                logger,
-                branch="coverage_route",
-                outcome="ROUTE",
-                reason="missed_departure",
-                claim=state.get("claim_id"),
-                next_step="classify_missed_document",
-            )
-            return "classify_missed_document"
-        # abstention (None / False) or unknown → persist-only (T-04-03 / A7)
+        routed = state["routed_coverage"]
+        next_node = _COVERAGE_BRANCH_NEXT_NODE[routed.branch]
         log_branch_decision(
             logger,
             branch="coverage_route",
             outcome="ROUTE",
-            reason="other_label" if primary in abstention else "unknown_as_other",
+            reason=routed.branch,
             claim=state.get("claim_id"),
-            next_step="persist",
+            next_step=next_node,
+            label=routed.label,
         )
-        return "persist"
+        return next_node
 
     def _load_artifacts_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         claim_id = state["claim_id"]
@@ -340,14 +330,21 @@ class ClaimPipeline:
 
     def _classify_coverage_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         result = self._coverage_classification(state["description_text"])
+        routed = self._routed_coverage(result)
         log_branch_decision(
             logger,
             branch="classify_coverage",
             outcome="CLASSIFIED",
             reason="coverage_stage",
             claim=state.get("claim_id"),
+            routed_label=routed.label,
+            routed_branch=routed.branch,
         )
-        return {"coverage_labels": list(result.labels)}
+        return {
+            "coverage_labels": list(result.labels),
+            "coverage_probabilities": dict(result.probabilities),
+            "routed_coverage": routed,
+        }
 
     def _classify_reason_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         result = self._reason_classification(state["description_text"])
@@ -523,12 +520,19 @@ class ClaimPipeline:
 
     @staticmethod
     def _classifier_returned_false(state: ClaimAnalysisState) -> bool:
-        """True when any stage classifier selected the confident-negative ``False`` label.
+        """True when the routed coverage label is ``False``, or a raw reason/document label is.
 
-        :param state: Graph state with coverage / reason / document label codes.
-        :return: Whether ``False`` appears in any classifier output.
+        Coverage follows the routed winner (P-01): a losing ``False`` in the
+        coverage selection has no HITL side effect. Reason and document stages
+        keep raw membership (SR-010/SR-004 out-of-scope precedence unchanged).
+
+        :param state: Graph state with routed_coverage and reason/document label codes.
+        :return: Whether the routed coverage label, or a raw reason/document
+            label, is the confident-negative ``False``.
         """
-        return any("False" in (state.get(key) or []) for key in ("coverage_labels", "reason_labels", "document_labels"))
+        if state["routed_coverage"].label == "False":
+            return True
+        return any("False" in (state.get(key) or []) for key in ("reason_labels", "document_labels"))
 
     def _resolved_human_in_the_loop(self, state: ClaimAnalysisState) -> bool:
         """HITL from preprocess, classifier ``False``, or any UNCERTAIN decision.
@@ -654,16 +658,12 @@ class ClaimPipeline:
         return bool(self._classified_document_codes(state) & required)
 
     def _is_cancellation_coverage(self, state: ClaimAnalysisState) -> bool:
-        """True when coverage primary label is trip cancellation / rescheduling.
+        """True when the routed coverage branch is trip cancellation / rescheduling.
 
-        :param state: Graph state with coverage_labels.
+        :param state: Graph state with routed_coverage.
         :return: Whether the cancellation document taxonomy applies.
         """
-        coverage_labels = self._config.analysis.coverage.positive_labels()
-        if not coverage_labels:
-            return False
-        coverage_codes = set(state.get("coverage_labels") or [])
-        return coverage_labels[0] in coverage_codes
+        return state["routed_coverage"].branch == "cancellation"
 
     def _signature_check_result(self, state: ClaimAnalysisState) -> bool:
         """Pass when signature is not required, or document_has_signature is True.
@@ -674,6 +674,61 @@ class ClaimPipeline:
         if not self._signature_required_applies(state):
             return True
         return bool(state.get("document_has_signature"))
+
+    def _routed_coverage(self, result: ClassificationResult) -> RoutedCoverage:
+        """Compute the single authoritative coverage route from classifier output.
+
+        With multiple selected labels (D-01) or a positive-vs-abstention conflict
+        (D-02), the label with the highest probability wins (missing entries count
+        as 0.0, D-06). Exact ties break by config order — positive labels first,
+        then ``other_label``, then ``False`` (D-05) — so a positive label beats
+        abstention on a tie. The winning label picks the branch; a winner outside
+        the configured positive labels routes to abstention (P-03).
+
+        :param result: Classifier output with selected labels and probabilities.
+        :return: The routed branch and its winning coverage code.
+        """
+        label = self._winning_coverage_label(result)
+        return RoutedCoverage(branch=self._coverage_branch(label), label=label)
+
+    def _winning_coverage_label(self, result: ClassificationResult) -> str:
+        """Pick the highest-probability selected label, ties by config order.
+
+        Only labels the classifier selected (``result.labels``) are candidates
+        (D-04); a selected label with no probability entry counts as 0.0 (D-06).
+
+        :param result: Classifier output; ``result.labels`` are the candidates.
+        :return: The winning coverage code.
+        """
+        rank = self._coverage_label_rank()
+        return min(
+            result.labels,
+            key=lambda label: (-result.probabilities.get(label, 0.0), rank.get(label, len(rank))),
+        )
+
+    def _coverage_label_rank(self) -> dict[str, int]:
+        """Config-order tie-break rank: positive labels, then other_label, then False.
+
+        :return: Map from coverage code to rank (lower rank wins an exact-probability tie).
+        """
+        coverage = self._config.analysis.coverage
+        ordered: list[str] = []
+        for label in [*coverage.positive_labels(), coverage.other_label, "False"]:
+            if label not in ordered:
+                ordered.append(label)
+        return {label: index for index, label in enumerate(ordered)}
+
+    def _coverage_branch(self, label: str) -> CoverageBranch:
+        """Map a winning coverage code to its routing branch (P-03).
+
+        :param label: Winning coverage code from ``_winning_coverage_label``.
+        :return: The routed branch; a code outside positive labels abstains.
+        """
+        branches: tuple[CoverageBranch, ...] = ("cancellation", "personal_effects", "missed_departure")
+        for code, branch in zip(self._config.analysis.coverage.positive_labels(), branches, strict=False):
+            if code == label:
+                return branch
+        return "abstention"
 
     def _coverage_classification(self, description_text: str) -> ClassificationResult:
         return self._stage_classifier(self._config.analysis.coverage).classify(description_text)
@@ -824,11 +879,15 @@ class ClaimPipeline:
         coverage_codes = list(state.get("coverage_labels") or [])
         reason_codes = list(state.get("reason_labels") or [])
         document_codes = list(state.get("document_labels") or [])
-        document_stage = self._document_stage_for_coverage(coverage_codes)
+        routed = state["routed_coverage"]
+        document_stage = self._document_stage_for_coverage(routed)
         payload: dict[str, object] = {
             "claim_id": state["claim_id"],
             "coverage_labels": analysis.coverage.resolve_label_names(coverage_codes),
             "coverage_label_codes": coverage_codes,
+            "routed_coverage_label": analysis.coverage.resolve_label_names([routed.label])[0],
+            "routed_coverage_label_code": routed.label,
+            "coverage_probabilities": dict(state.get("coverage_probabilities") or {}),
             "reason_labels": analysis.cancellation_reason.resolve_label_names(reason_codes),
             "reason_label_codes": reason_codes,
             "document_labels": document_stage.resolve_label_names(document_codes),
@@ -844,41 +903,50 @@ class ClaimPipeline:
         payload["decision_explanation"] = decision.explanation if isinstance(decision.explanation, str) else None
         return payload
 
-    def _document_stage_for_coverage(self, coverage_codes: list[str]) -> ClassificationConfig:
-        """Pick the document-stage config whose label_names match the coverage path.
+    def _document_stage_for_coverage(self, routed: RoutedCoverage) -> ClassificationConfig:
+        """Pick the document-stage config for the routed coverage branch.
 
-        :param coverage_codes: Coverage codes from the coverage classifier.
-        :return: Document ClassificationConfig for semantic name resolution.
+        :param routed: Single authoritative coverage routing decision.
+        :return: Document ClassificationConfig for semantic name resolution
+            (abstention has no document labels; it keeps today's cancellation
+            fallback for label-name resolution only).
         """
         analysis = self._config.analysis
-        coverage_labels = analysis.coverage.positive_labels()
-        if len(coverage_labels) > 1 and coverage_labels[1] in coverage_codes:
+        if routed.branch == "personal_effects":
             return analysis.personal_effects_document
-        if len(coverage_labels) > 2 and coverage_labels[2] in coverage_codes:
+        if routed.branch == "missed_departure":
             return analysis.missed_departure_document
         return analysis.cancellation_document
 
     def _acceptable_document_codes(self, state: ClaimAnalysisState) -> set[str]:
-        """Return document codes allowed for this claim's coverage / reason path.
+        """Return document codes allowed for this claim's routed coverage path.
 
-        :param state: Graph state with coverage and reason label codes.
+        :param state: Graph state with routed coverage and reason label codes.
         :return: Acceptable document-type codes from ``required_documents`` config
             (falls back to the document-stage label list when a mapping is empty).
         """
         analysis = self._config.analysis
         required = analysis.required_documents
-        coverage_codes = list(state.get("coverage_labels") or [])
-        coverage_labels = analysis.coverage.positive_labels()
-        stage = self._document_stage_for_coverage(coverage_codes)
+        routed = state["routed_coverage"]
+        stage = self._document_stage_for_coverage(routed)
         stage_positive = set(stage.positive_labels())
 
-        if len(coverage_labels) > 1 and coverage_labels[1] in coverage_codes:
-            acceptable = list(required.personal_effects) or list(stage_positive)
-            return set(acceptable)
-        if len(coverage_labels) > 2 and coverage_labels[2] in coverage_codes:
-            acceptable = list(required.missed_departure) or list(stage_positive)
-            return set(acceptable)
+        if routed.branch == "personal_effects":
+            return set(required.personal_effects) or stage_positive
+        if routed.branch == "missed_departure":
+            return set(required.missed_departure) or stage_positive
+        return self._cancellation_acceptable_codes(state, stage_positive)
 
+    def _cancellation_acceptable_codes(self, state: ClaimAnalysisState, stage_positive: set[str]) -> set[str]:
+        """Acceptable cancellation-document codes from the reason stage (or fallback).
+
+        :param state: Graph state with reason label codes.
+        :param stage_positive: Fallback codes when no reason-based mapping applies.
+        :return: Union of ``cancellation_by_reason`` codes for classified reasons;
+            else the union of every configured reason mapping; else stage positives.
+        """
+        analysis = self._config.analysis
+        required = analysis.required_documents
         reason_abstention = analysis.cancellation_reason.abstention_labels()
         reason_codes = [code for code in (state.get("reason_labels") or []) if code not in reason_abstention]
         by_reason = required.cancellation_by_reason
@@ -895,11 +963,10 @@ class ClaimPipeline:
     def _classified_document_codes(self, state: ClaimAnalysisState) -> set[str]:
         """Return non-abstention document codes from the document classifier stage.
 
-        :param state: Graph state with document_labels.
+        :param state: Graph state with routed coverage and document_labels.
         :return: Classified document codes excluding ``False`` / ``other_label``.
         """
-        coverage_codes = list(state.get("coverage_labels") or [])
-        stage = self._document_stage_for_coverage(coverage_codes)
+        stage = self._document_stage_for_coverage(state["routed_coverage"])
         abstention = stage.abstention_labels()
         return {code for code in (state.get("document_labels") or []) if code not in abstention}
 
@@ -957,7 +1024,7 @@ class ClaimPipeline:
 
         Precedence (locked):
         1. Preprocess OCR failure (``ocr_read_failure`` / ``ocr_failure``) → UNCERTAIN
-        2. Coverage abstention → UNCERTAIN ``coverage_false_label``
+        2. Routed coverage branch is abstention → UNCERTAIN ``coverage_false_label``
         3. ``departure_within_days`` → UNCERTAIN (medical; departure farther than
            ``n`` days — before DENY)
         4. ``checker_suspicious_dating`` → UNCERTAIN (before DENY)
@@ -980,9 +1047,7 @@ class ClaimPipeline:
                 decision=DECISION_UNCERTAIN,
                 explanation=ocr_failure_reason,
             )
-        coverage = list(state.get("coverage_labels") or [])
-        abstention = self._config.analysis.coverage.abstention_labels()
-        if coverage and set(coverage) <= abstention:
+        if state["routed_coverage"].branch == "abstention":
             return GroundTruth(
                 decision=DECISION_UNCERTAIN,
                 explanation="coverage_false_label",

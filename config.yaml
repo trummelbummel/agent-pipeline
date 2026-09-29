@@ -68,22 +68,24 @@ checking:
     Decide whether the claim contradicts the reference text.
     Return JSON only: {"result": true} if the claim contradicts the text,
     {"result": false} if the claim is supported by or consistent with the text.
+  # Extract a single person name; identity match uses lowercased Levenshtein
+  # against the booking name (see identity_max_edit_distance).
   identity_prompt: |
-    Decide whether the passenger or claimant name in the booking / internal
-    supporting-documents text (first block, often a **name** field) matches the
-    patient or subject name on the medical supporting-document text (second block).
+    Extract the single person name that identifies the passenger, claimant,
+    patient, subject, or insured in the given text.
 
-    Compare only the patient / subject / claimant / insured name on the medical
-    document. Ignore doctor, physician, surgeon, nurse, facility, hospital,
-    clinic, laboratory, stamp, letterhead, and signature-block names — those are
-    not the patient.
+    Prefer an explicit name / patient / passenger field. Ignore doctor,
+    physician, surgeon, nurse, facility, hospital, clinic, laboratory, stamp,
+    letterhead, signature-block, and requester / applicant / "solicitud del"
+    names — those are not the person to extract.
 
-    Return JSON only with one of:
-    {"result": "match"} — same person (allow minor spelling variation or reordering)
-    {"result": "mismatch"} — name is redacted, obscured, initials-only and
-    inconsistent with the booking name, or clearly a different person
-    {"result": "unclear"} — OCR has no clear patient/subject name field to compare
-    (do not invent a patient name from doctor or facility text)
+    Return JSON only:
+    {"name": "<full name as written>"} when a clear person name is present
+    {"name": null} when there is no clear patient/claimant name field
+    (do not invent a name from doctor or facility text)
+  # Inclusive Levenshtein distance on lowercased names (and token-wise):
+  # distance ≤ this value → identity match (OCR spelling noise OK).
+  identity_max_edit_distance: 3
   healthy_prompt: |
     Decide whether the supporting document states that the patient is healthy,
     clinically well, fit, able to travel or perform activity, or otherwise not ill
@@ -108,10 +110,17 @@ checking:
     Return JSON only: {"result": true} if required clinical fields are missing
     (violation), {"result": false} if diagnosis/condition and dating fields are
     adequately present.
-  # Inclusive day window: |departure − reference today| ≤ n → UNCERTAIN.
+  # Medical path: upcoming departure farther than n days → UNCERTAIN (recovery unclear).
+  # Within n days (or past flights) → continue through remaining checkers.
+  # Off: abs/past-flight overfire hurt DENY cases (healthy / identity); re-enable when
+  # gated to future departures only.
+  departure_uncertain_enabled: false
   departure_uncertain_within_days: 14
-  # Inclusive year skew: |OCR date year − reference today year| ≥ n → UNCERTAIN.
-  suspicious_dating_max_year_delta: 2
+  # Inclusive month skew: |OCR date − reference today| in months ≥ n → UNCERTAIN.
+  suspicious_dating_max_month_delta: 1
+  # Only OCR dates within ±n years of reference today are considered for
+  # suspicious dating; farther dates are treated as DOB / irrelevant history.
+  suspicious_dating_consider_within_years: 2
 
 analysis:
   coverage:
@@ -288,6 +297,7 @@ ocr_retry:
   on_missing_signature: true
   signature_model: tech4humans/yolov8s-signature-detector
   signature_weights: yolov8s.pt
+  # Accept YOLO max box conf; below this (or no boxes) → human_in_the_loop
   signature_confidence: 0.25
   model: Maternion/LightOnOCR-2:1b
   prompt: |

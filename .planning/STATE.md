@@ -8,7 +8,7 @@ status: executing
 stopped_at: Completed 260929-m5a-PLAN.md (SR-007)
 last_updated: "2026-09-29T14:21:33.759Z"
 last_activity: 2026-09-29
-last_activity_desc: Completed quick task 260929-lni (SR-006)
+last_activity_desc: Completed quick task 260929-m5a (SR-007)
 state_head: ec03fa8ba7b8f158b9691678c453b2cde83101be
 progress:
   total_phases: 8
@@ -32,7 +32,7 @@ Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
 Current Plan: 4
 Total Plans in Phase: 5
 Status: Ready to execute
-Last activity: 2026-09-29 - Completed quick task 260929-lni: SR-006 ground-truth-first evaluation
+Last activity: 2026-09-29 - Completed quick task 260929-m5a: SR-007 read-only GET + locked analysis POST
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 

@@ -17,7 +17,7 @@ affects: [SR-009, SR-013]
 actuals:
   tokens: 14959
   tasks: 3
-  commits: 4
+  commits: 5
 
 plan_head_before: 87e66604372b3631889a0522d1a3c2df6567aa27
 
@@ -180,6 +180,8 @@ status: complete
 3. **Rule 1 fix (Task 3 gate):** `753fe73` — fix(SR-007): keep tests/test_api mypy at the 8-error baseline
 4. **Task 3:** `ec03fa8` — feat(SR-007): document the read-only decision GET and the locked analysis POST
 
+**Plan metadata:** `63c263d` (docs: complete plan)
+
 ## Files Created/Modified
 
 - `src/compliance/workflows/artifact_publication.py` — `ClaimAnalysisBusyError`, `claim_analysis_lock`
@@ -250,4 +252,4 @@ None beyond the plan's mitigated register (T-SR007-01..08); T-SR007-09 remains t
 - `src/main.py` — FOUND (`analyze_claim_exclusively`, `ClaimAnalysisBusyError`)
 - `README.md` — FOUND (`claims/{claim_id}/analysis`, `analysis_in_progress`, `run_manifest`)
 - `.gsd/review_backlog.md` — FOUND (`### [x] SR-007`, steered done row); never staged
-- Commits `ef3f055`, `4d733f1`, `753fe73`, `ec03fa8` — FOUND
+- Commits `ef3f055`, `4d733f1`, `753fe73`, `ec03fa8`, `63c263d` — FOUND

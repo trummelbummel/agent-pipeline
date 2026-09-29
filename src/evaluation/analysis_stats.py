@@ -9,8 +9,10 @@ from typing import Any
 
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
-from compliance.preprocessing.claim_batch import _claim_sort_key
-from compliance.workflows.pipeline import _validate_claim_dir_name
+from compliance.preprocessing.claim_batch import (
+    _validate_claim_dir_name,
+    discover_claim_folder_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +128,7 @@ def _discover_claim_ids(results_dir: Path) -> list[str]:
     :param results_dir: Root containing claim folders.
     :return: Claim folder names sorted by numeric id, then name.
     """
-    if not results_dir.is_dir():
-        return []
-    folders = [
-        path
-        for path in results_dir.iterdir()
-        if path.is_dir() and path.name.lower().startswith("claim")
-    ]
-    return [path.name for path in sorted(folders, key=_claim_sort_key)]
+    return discover_claim_folder_names(results_dir)
 
 
 def _read_analysis_payload(path: Path, claim_id: str) -> dict[str, Any] | None:
@@ -211,11 +206,7 @@ def _checker_stats(
             present_counts[key] = present_counts.get(key, 0) + 1
             if body[key] is True:
                 true_counts[key] = true_counts.get(key, 0) + 1
-    rates = {
-        key: (true_counts.get(key, 0) / present)
-        for key, present in present_counts.items()
-        if present > 0
-    }
+    rates = {key: (true_counts.get(key, 0) / present) for key, present in present_counts.items() if present > 0}
     return true_counts, present_counts, rates
 
 

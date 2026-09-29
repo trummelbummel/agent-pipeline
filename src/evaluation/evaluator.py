@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -10,11 +9,12 @@ from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
 from compliance.models.claim import GroundTruth, is_nan_scalar
 from compliance.preprocessing.answer import AnswerReader
-from compliance.workflows.pipeline import _validate_claim_dir_name
+from compliance.preprocessing.claim_batch import (
+    _validate_claim_dir_name,
+    discover_claim_folder_names,
+)
 
 logger = logging.getLogger(__name__)
-
-_CLAIM_NUM = re.compile(r"(\d+)")
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,8 @@ class EvaluationResult:
     :param accuracy: Mean of matches over all GT-backed samples (failed preds count as wrong).
     :param f1_macro: Macro-averaged F1 over all labels (scored pairs only).
     :param n_evaluated: Number of GT-backed samples in the accuracy denominator.
+    :param human_in_the_loop_true: Predicted answers with ``human_in_the_loop`` True.
+    :param human_in_the_loop_false: Predicted answers with ``human_in_the_loop`` False.
     """
 
     claim_ids: list[str]
@@ -41,6 +43,8 @@ class EvaluationResult:
     accuracy: float
     f1_macro: float
     n_evaluated: int
+    human_in_the_loop_true: int = 0
+    human_in_the_loop_false: int = 0
 
 
 class Evaluator:
@@ -78,6 +82,8 @@ class Evaluator:
         matrix = self._confusion_matrix(y_true, effective_pred, labels)
         accuracy = sum(matches) / len(matches)
         f1_macro = self._macro_f1(y_true, effective_pred, labels)
+        hitl_true = 1 if pred.human_in_the_loop else 0
+        hitl_false = 0 if pred.human_in_the_loop else 1
         result = EvaluationResult(
             claim_ids=[claim_id],
             y_true=y_true,
@@ -88,18 +94,22 @@ class Evaluator:
             accuracy=accuracy,
             f1_macro=f1_macro,
             n_evaluated=1,
+            human_in_the_loop_true=hitl_true,
+            human_in_the_loop_false=hitl_false,
         )
         logger.info(
-            "evaluated claim_id=%s n=%d accuracy=%.4f f1_macro=%.4f",
+            "evaluated claim_id=%s n=%d accuracy=%.4f f1_macro=%.4f hitl_true=%d hitl_false=%d",
             claim_id,
             result.n_evaluated,
             result.accuracy,
             result.f1_macro,
+            result.human_in_the_loop_true,
+            result.human_in_the_loop_false,
         )
         return result
 
     def evaluate(self) -> EvaluationResult:
-        """Evaluate all discoverable claim pairs under results_dir × data_dir.
+        """Evaluate all discoverable claim pairs under results_dir x data_dir.
 
         Soft-skips still log and omit incomplete pairs from the confusion
         matrix / F1, but accuracy is always mean(matches) over every sample
@@ -115,6 +125,8 @@ class Evaluator:
         y_pred: list[str] = []
         scored_matches: list[bool] = []
         all_matches: list[bool] = []
+        hitl_true = 0
+        hitl_false = 0
         for claim_id in self._discover_claim_ids():
             try:
                 _validate_claim_dir_name(claim_id)
@@ -149,6 +161,8 @@ class Evaluator:
             y_pred.extend(single.y_pred)
             scored_matches.extend(single.matches)
             all_matches.extend(single.matches)
+            hitl_true += single.human_in_the_loop_true
+            hitl_false += single.human_in_the_loop_false
         return self._aggregate_scores(
             claim_ids,
             y_true,
@@ -156,6 +170,8 @@ class Evaluator:
             scored_matches,
             all_matches,
             labels,
+            human_in_the_loop_true=hitl_true,
+            human_in_the_loop_false=hitl_false,
         )
 
     def _count_failed_claim(
@@ -187,25 +203,7 @@ class Evaluator:
 
         :return: Claim folder names sorted by numeric id, then name.
         """
-        results_dir = Path(self._config.preprocessing.results_dir)
-        if not results_dir.is_dir():
-            return []
-        folders = [
-            path
-            for path in results_dir.iterdir()
-            if path.is_dir() and path.name.lower().startswith("claim")
-        ]
-        return [path.name for path in sorted(folders, key=self._claim_sort_key)]
-
-    def _claim_sort_key(self, path: Path) -> tuple[int, str]:
-        """Sort key preferring numeric claim ids.
-
-        :param path: Claim folder path under results_dir.
-        :return: (number, name) for stable ordering.
-        """
-        match = _CLAIM_NUM.search(path.name)
-        number = int(match.group(1)) if match else 0
-        return (number, path.name)
+        return discover_claim_folder_names(Path(self._config.preprocessing.results_dir))
 
     def _aggregate_scores(
         self,
@@ -215,6 +213,9 @@ class Evaluator:
         scored_matches: list[bool],
         all_matches: list[bool],
         labels: list[str],
+        *,
+        human_in_the_loop_true: int = 0,
+        human_in_the_loop_false: int = 0,
     ) -> EvaluationResult:
         """Build EvaluationResult from collected per-claim vectors via A4/A5 helpers.
 
@@ -227,6 +228,8 @@ class Evaluator:
         :param scored_matches: A4 match flags aligned with ``y_true`` / ``y_pred``.
         :param all_matches: Match flags for accuracy (includes failed-as-incorrect).
         :param labels: Config evaluation label vocabulary.
+        :param human_in_the_loop_true: Count of scored preds with HITL True.
+        :param human_in_the_loop_false: Count of scored preds with HITL False.
         :return: Aggregate metrics with shared confusion/F1 math.
         """
         n_samples = len(all_matches)
@@ -242,13 +245,13 @@ class Evaluator:
                 accuracy=0.0,
                 f1_macro=0.0,
                 n_evaluated=0,
+                human_in_the_loop_true=0,
+                human_in_the_loop_false=0,
             )
         else:
             effective = [
                 self._effective_pred_label(pred, true, matched)
-                for pred, true, matched in zip(
-                    y_pred, y_true, scored_matches, strict=True
-                )
+                for pred, true, matched in zip(y_pred, y_true, scored_matches, strict=True)
             ]
             result = EvaluationResult(
                 claim_ids=claim_ids,
@@ -262,16 +265,18 @@ class Evaluator:
                 ),
                 labels=labels,
                 accuracy=sum(all_matches) / n_samples,
-                f1_macro=(
-                    self._macro_f1(y_true, effective, labels) if y_true else 0.0
-                ),
+                f1_macro=(self._macro_f1(y_true, effective, labels) if y_true else 0.0),
                 n_evaluated=n_samples,
+                human_in_the_loop_true=human_in_the_loop_true,
+                human_in_the_loop_false=human_in_the_loop_false,
             )
         logger.info(
-            "batch evaluated n=%d accuracy=%.4f f1_macro=%.4f",
+            "batch evaluated n=%d accuracy=%.4f f1_macro=%.4f hitl_true=%d hitl_false=%d",
             result.n_evaluated,
             result.accuracy,
             result.f1_macro,
+            result.human_in_the_loop_true,
+            result.human_in_the_loop_false,
         )
         return result
 
@@ -282,11 +287,7 @@ class Evaluator:
         :return: Parsed GroundTruth-shaped prediction.
         """
         artifacts = self._config.preprocessing.artifacts
-        path = (
-            Path(self._config.preprocessing.results_dir)
-            / claim_id
-            / artifacts.predicted_answer
-        )
+        path = Path(self._config.preprocessing.results_dir) / claim_id / artifacts.predicted_answer
         return cast(GroundTruth, self._reader.read(path))
 
     def _read_ground_truth(self, claim_id: str) -> GroundTruth:

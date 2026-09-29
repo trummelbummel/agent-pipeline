@@ -38,7 +38,7 @@ def write_confusion_matrix_png(result: EvaluationResult, path: Path) -> Path:
 def write_analysis_stats_png(stats: AnalysisStats, path: Path) -> Path:
     """Render a multi-panel bar chart PNG from AnalysisStats.
 
-    Panels: decision counts, checker true-rates (0–1), top-N label frequencies
+    Panels: decision counts, checker true-rates (0-1), top-N label frequencies
     (coverage/reason/document prefixed), and top-N decision explanations.
     Empty stats still yield a titled PNG with empty bars.
 
@@ -68,10 +68,7 @@ def _render_analysis_stats(stats: AnalysisStats) -> Image.Image:
         ("Label frequencies", label_items, False),
         ("Decision explanations", explanation_items, False),
     ]
-    panel_images = [
-        _bar_panel(title, items, rate_scale=rate_scale)
-        for title, items, rate_scale in panels
-    ]
+    panel_images = [_bar_panel(title, items, rate_scale=rate_scale) for title, items, rate_scale in panels]
     width = _PANEL_WIDTH
     heights = [img.height for img in panel_images]
     title_band = 40
@@ -215,7 +212,8 @@ def _render_heatmap(result: EvaluationResult) -> Image.Image:
     font_cell = _load_font(18)
     title = (
         f"Confusion matrix  "
-        f"acc={result.accuracy:.0%}  F1={result.f1_macro:.2f}  n={result.n_evaluated}"
+        f"acc={result.accuracy:.0%}  F1={result.f1_macro:.2f}  n={result.n_evaluated}  "
+        f"HITL T/F={result.human_in_the_loop_true}/{result.human_in_the_loop_false}"
     )
     draw.text((_MARGIN_LEFT, 12), title, fill=(30, 30, 30), font=font_title)
     draw.text((_MARGIN_LEFT, 34), "Predicted →", fill=(90, 90, 90), font=font)

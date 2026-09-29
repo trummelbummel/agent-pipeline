@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.deps import get_claims, get_config, get_preprocessing
 from api.schemas import ClaimCreated, ClaimDecision, ClaimListItem
+from api.uploads import UploadTooLargeError, write_upload_stream
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
 from compliance.preprocessing.claim_batch import (
@@ -86,8 +88,10 @@ def _write_claim_upload(
     supporting_documents: UploadFile,
     image: UploadFile,
     image_basename: str,
+    max_file_bytes: int,
+    max_request_bytes: int,
 ) -> None:
-    """Write the multipart trio into an existing claim directory.
+    """Write the multipart trio into an existing claim directory under byte caps.
 
     :param claim_dir: Destination claim folder (already created).
     :param artifacts_description: Configured description artifact filename.
@@ -96,10 +100,28 @@ def _write_claim_upload(
     :param supporting_documents: Uploaded supporting markdown file.
     :param image: Uploaded document image.
     :param image_basename: Path-safe basename for the image file.
+    :param max_file_bytes: Per-part cap from ``api.upload``.
+    :param max_request_bytes: Per-request total cap from ``api.upload``.
     """
-    (claim_dir / artifacts_description).write_bytes(description.file.read())
-    (claim_dir / artifacts_supporting_documents).write_bytes(supporting_documents.file.read())
-    (claim_dir / image_basename).write_bytes(image.file.read())
+    remaining = max_request_bytes
+    remaining -= write_upload_stream(
+        description,
+        claim_dir / artifacts_description,
+        max_file_bytes=max_file_bytes,
+        remaining_bytes=remaining,
+    )
+    remaining -= write_upload_stream(
+        supporting_documents,
+        claim_dir / artifacts_supporting_documents,
+        max_file_bytes=max_file_bytes,
+        remaining_bytes=remaining,
+    )
+    write_upload_stream(
+        image,
+        claim_dir / image_basename,
+        max_file_bytes=max_file_bytes,
+        remaining_bytes=remaining,
+    )
 
 
 def _artifact_read(
@@ -217,6 +239,9 @@ def create_claim(
 ) -> ClaimCreated:
     """Accept multipart claim intake and write files under config data_dir.
 
+    Oversized parts or requests return 413 with ``file_too_large`` /
+    ``request_too_large`` and leave no claim folder behind.
+
     :param description: Claim narrative text upload.
     :param supporting_documents: Supporting markdown upload.
     :param image: Document image whose suffix must be in document_formats.
@@ -249,15 +274,23 @@ def create_claim(
     if not image_path.resolve().is_relative_to(claim_root):
         raise HTTPException(status_code=422, detail="unsafe image filename")
 
-    _write_claim_upload(
-        claim_dir=claim_dir,
-        artifacts_description=artifacts.description,
-        artifacts_supporting_documents=artifacts.supporting_documents,
-        description=description,
-        supporting_documents=supporting_documents,
-        image=image,
-        image_basename=image_basename,
-    )
+    try:
+        _write_claim_upload(
+            claim_dir=claim_dir,
+            artifacts_description=artifacts.description,
+            artifacts_supporting_documents=artifacts.supporting_documents,
+            description=description,
+            supporting_documents=supporting_documents,
+            image=image,
+            image_basename=image_basename,
+            max_file_bytes=config.api.upload.max_file_bytes,
+            max_request_bytes=config.api.upload.max_request_bytes,
+        )
+    except UploadTooLargeError as exc:
+        # Safe: claim_dir was created moments earlier with mkdir(parents=False),
+        # which fails when the path already exists, so this request owns it.
+        shutil.rmtree(claim_dir, ignore_errors=True)
+        raise HTTPException(status_code=413, detail=exc.reason) from exc
     logger.info("Created claim_id=%s", claim_id)
     return ClaimCreated(claim_id=claim_id)
 

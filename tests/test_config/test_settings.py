@@ -801,3 +801,28 @@ def test_load_config_validates_required_document_cross_references() -> None:
     config = load_config("config.yaml")
     assert config.analysis.required_documents.cancellation_by_reason["2"] == ["1", "4"]
     assert set(config.classification.positive_labels()) == set(config.analysis.coverage.positive_labels())
+
+
+def test_load_config_reads_api_upload_limits() -> None:
+    """Shipped config.yaml exposes the 25 MiB / 50 MiB intake caps (D-01)."""
+    config = load_config("config.yaml")
+    assert config.api.upload.max_file_bytes == 26_214_400
+    assert config.api.upload.max_request_bytes == 52_428_800
+
+
+def test_app_config_defaults_api_upload_limits() -> None:
+    """AppConfig built without an api section still gets the D-01 defaults."""
+    from compliance.config.settings import ApiConfig, UploadLimitsConfig
+
+    defaults = UploadLimitsConfig()
+    assert defaults.max_file_bytes == 26_214_400
+    assert defaults.max_request_bytes == 52_428_800
+    assert ApiConfig().upload.max_file_bytes == 26_214_400
+
+
+def test_upload_limit_order_rejects_request_below_file_cap() -> None:
+    """A request cap below the per-file cap fails at load naming both values."""
+    from compliance.config.settings import UploadLimitsConfig
+
+    with pytest.raises(ValidationError, match=r"max_request_bytes.*50.*max_file_bytes.*100"):
+        UploadLimitsConfig(max_file_bytes=100, max_request_bytes=50)

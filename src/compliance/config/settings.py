@@ -448,6 +448,39 @@ class OcrRetryConfig(StrictConfigModel):
     signature_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
 
 
+class UploadLimitsConfig(StrictConfigModel):
+    """Per-part and per-request byte caps for multipart claim intake (SR-009).
+
+    :param max_file_bytes: Maximum bytes allowed for one multipart part.
+    :param max_request_bytes: Maximum total bytes across all parts in one request.
+    """
+
+    max_file_bytes: int = Field(default=26_214_400, gt=0)
+    max_request_bytes: int = Field(default=52_428_800, gt=0)
+
+    @model_validator(mode="after")
+    def _validated_upload_limit_order(self) -> UploadLimitsConfig:
+        """Require the request cap to be at least the per-file cap.
+
+        :return: Self when the request allowance can cover one full file.
+        """
+        if self.max_request_bytes < self.max_file_bytes:
+            raise UploadLimitOrderError(
+                max_file_bytes=self.max_file_bytes,
+                max_request_bytes=self.max_request_bytes,
+            )
+        return self
+
+
+class ApiConfig(StrictConfigModel):
+    """HTTP API boundary settings (intake caps and related server policy).
+
+    :param upload: Multipart intake byte limits for ``POST /claims``.
+    """
+
+    upload: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
+
+
 class AppConfig(StrictConfigModel):
     """Top-level application configuration.
 
@@ -464,6 +497,7 @@ class AppConfig(StrictConfigModel):
     :param ocr_retry: Optional vision OCR retry after faulty Docling extraction.
     :param logging: CLI logging level and format.
     :param evaluation: Labels and metrics artifact for prediction evaluation.
+    :param api: HTTP API boundary settings including upload byte caps.
     """
 
     preprocessing: PreprocessingConfig
@@ -476,6 +510,7 @@ class AppConfig(StrictConfigModel):
     extraction_failure: ExtractionFailureConfig = Field(default_factory=ExtractionFailureConfig)
     ocr_retry: OcrRetryConfig = Field(default_factory=OcrRetryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
 
     @model_validator(mode="after")
     def _validated_coverage_vocabulary_alignment(self) -> AppConfig:
@@ -488,6 +523,20 @@ class AppConfig(StrictConfigModel):
         if ingest != routing:
             raise CoverageVocabularyMismatchError(classification=sorted(ingest), coverage=sorted(routing))
         return self
+
+
+class UploadLimitOrderError(ValueError):
+    """``api.upload.max_request_bytes`` is below ``max_file_bytes``."""
+
+    def __init__(self, max_file_bytes: int, max_request_bytes: int) -> None:
+        """Name both caps so operators can correct the ordering.
+
+        :param max_file_bytes: Configured per-file byte cap.
+        :param max_request_bytes: Configured per-request byte cap.
+        """
+        super().__init__(
+            f"api.upload.max_request_bytes ({max_request_bytes}) must be >= max_file_bytes ({max_file_bytes})"
+        )
 
 
 class ConfigFileNotFoundError(FileNotFoundError):

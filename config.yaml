@@ -1,6 +1,12 @@
 # Compliance project configuration
 # Externalize all tunable values here — model names, thresholds, URLs, retry params.
 
+# HTTP API intake caps (D-01): 25 MiB per file, 50 MiB total request (binary megabytes).
+api:
+  upload:
+    max_file_bytes: 26214400
+    max_request_bytes: 52428800
+
 preprocessing:
   data_dir: data/raw
   # Mirrored claim artifacts (description, answer, supporting docs)

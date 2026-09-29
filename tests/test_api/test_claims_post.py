@@ -156,3 +156,103 @@ def test_generated_claim_id_always_safe_single_segment(
     claim_dir = Path(config.preprocessing.data_dir) / claim_id
     assert claim_dir.parent == Path(config.preprocessing.data_dir)
     assert claim_dir.is_dir()
+
+
+def _shrink_upload_caps(config: AppConfig, *, max_file_bytes: int, max_request_bytes: int) -> None:
+    """Override intake caps on a mutable config object for size-limit tests."""
+    config.api.upload.max_file_bytes = max_file_bytes
+    config.api.upload.max_request_bytes = max_request_bytes
+
+
+def test_post_claims_rejects_file_too_large(
+    tmp_path: Path,
+    api_config_factory: Callable[..., AppConfig],
+) -> None:
+    """A part above the per-file cap returns 413 file_too_large and leaves no folder."""
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    config = api_config_factory(data_dir)
+    _shrink_upload_caps(config, max_file_bytes=64, max_request_bytes=10_000)
+    app = create_app(config=config)
+    before = {p.name for p in data_dir.iterdir()}
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/claims",
+            files=_multipart_files(image_bytes=b"x" * 65),
+        )
+
+    assert response.status_code == 413, response.text
+    assert response.json()["detail"] == "file_too_large"
+    assert {p.name for p in data_dir.iterdir()} == before
+
+
+def test_post_claims_rejects_request_too_large(
+    tmp_path: Path,
+    api_config_factory: Callable[..., AppConfig],
+) -> None:
+    """Three parts under the per-file cap but above the request total return 413."""
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    config = api_config_factory(data_dir)
+    _shrink_upload_caps(config, max_file_bytes=200, max_request_bytes=40)
+    app = create_app(config=config)
+    before = {p.name for p in data_dir.iterdir()}
+
+    with TestClient(app) as client:
+        response = client.post("/claims", files=_multipart_files())
+
+    assert response.status_code == 413, response.text
+    assert response.json()["detail"] == "request_too_large"
+    assert {p.name for p in data_dir.iterdir()} == before
+
+
+def test_post_claims_rejects_overdeclared_content_length(
+    tmp_path: Path,
+    api_config_factory: Callable[..., AppConfig],
+) -> None:
+    """Declared Content-Length above the request cap is refused before the handler."""
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    config = api_config_factory(data_dir)
+    _shrink_upload_caps(config, max_file_bytes=10_000, max_request_bytes=100)
+    app = create_app(config=config)
+    before = {p.name for p in data_dir.iterdir()}
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/claims",
+            content=b"x" * 10,
+            headers={
+                "content-type": "multipart/form-data; boundary=----bound",
+                "content-length": "101",
+            },
+        )
+
+    assert response.status_code == 413, response.text
+    assert response.json()["detail"] == "request_too_large"
+    assert {p.name for p in data_dir.iterdir()} == before
+
+
+def test_post_claims_accepts_exact_file_cap(
+    tmp_path: Path,
+    api_config_factory: Callable[..., AppConfig],
+) -> None:
+    """A part exactly at the per-file cap is accepted and written byte-identical."""
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    config = api_config_factory(data_dir)
+    image_bytes = b"p" * 64
+    _shrink_upload_caps(config, max_file_bytes=64, max_request_bytes=10_000)
+    app = create_app(config=config)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/claims",
+            files=_multipart_files(image_bytes=image_bytes),
+        )
+
+    assert response.status_code == 201, response.text
+    claim_id = response.json()["claim_id"]
+    claim_dir = Path(config.preprocessing.data_dir) / claim_id
+    assert (claim_dir / "scan.png").read_bytes() == image_bytes

@@ -1,23 +1,18 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-from unittest.mock import MagicMock
-
+from typing import TYPE_CHECKING
 
 from compliance.models.claim import BookingData, is_nan_scalar
 from compliance.preprocessing.extractor import InformationExtractor
 
-
-def _chat_returning(payload: dict[str, Any]) -> MagicMock:
-    import json
-
-    response = SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
-    return MagicMock(return_value=response)
+if TYPE_CHECKING:
+    from conftest import ChatReturningFactory
 
 
-def test_extractor_schema_constrained_booking_data() -> None:
-    chat = _chat_returning({"name": "Ada Lovelace", "booking_ref": "ABC123"})
+def test_extractor_schema_constrained_booking_data(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"name": "Ada Lovelace", "booking_ref": "ABC123"})
     extractor = InformationExtractor(
         target_model=BookingData,
         model_name="test-model",
@@ -37,8 +32,10 @@ def test_extractor_schema_constrained_booking_data() -> None:
     assert "extract booking fields" in call_kwargs["messages"][0]["content"]
 
 
-def test_extractor_missing_fields_are_nan() -> None:
-    chat = _chat_returning({"name": "Sam"})
+def test_extractor_missing_fields_are_nan(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"name": "Sam"})
     extractor = InformationExtractor(
         target_model=BookingData,
         model_name="test-model",
@@ -54,8 +51,10 @@ def test_extractor_missing_fields_are_nan() -> None:
     assert is_nan_scalar(result.operator)
 
 
-def test_extractor_null_fields_become_nan() -> None:
-    chat = _chat_returning({"name": "Sam", "price": None, "origin": None})
+def test_extractor_null_fields_become_nan(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"name": "Sam", "price": None, "origin": None})
     extractor = InformationExtractor(
         target_model=BookingData,
         model_name="m",

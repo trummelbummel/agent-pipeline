@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 from urllib.parse import quote
 
@@ -18,41 +16,16 @@ from compliance.config.settings import (
     AnalysisConfig,
     AppConfig,
 )
-from compliance.models.claim import BookingData, DocumentData, DocumentMetaData
-from compliance.preprocessing.description import DescriptionReader
-from compliance.preprocessing.extractor import InformationExtractor
+from compliance.models.claim import DocumentData, DocumentMetaData
+
+if TYPE_CHECKING:
+    from conftest import MockDescriptionReaderFactory, MockDocumentReaderFactory
 
 TRIP_CANCELLATION = "1"
-MEDICAL_EMERGENCY = "2"
-MEDICAL_CERTIFICATE = "1"
-
-def _description_reader() -> DescriptionReader:
-    chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps({})))
-    )
-    extractor = InformationExtractor(
-        target_model=BookingData,
-        model_name="test-model",
-        prompt="p",
-        chat_fn=chat,
-    )
-    return DescriptionReader(extractor=extractor)
-
-
-def _document_reader() -> MagicMock:
-    reader = MagicMock()
-    text = "I had to cancel my flight to Paris because of a medical emergency."
-    reader.read.side_effect = lambda path: DocumentData(
-        raw_text=text,
-        metadata=DocumentMetaData(extraction_probability=0.95),
-    )
-    return reader
 
 
 def _multipart_files() -> dict[str, Any]:
-    narrative = (
-        b"I had to cancel my flight to Paris because of a medical emergency."
-    )
+    narrative = b"I had to cancel my flight to Paris because of a medical emergency."
     return {
         "description": ("description.txt", BytesIO(narrative), "text/plain"),
         "supporting_documents": (
@@ -69,6 +42,8 @@ def test_claims_endpoints_post_get_list_flow(
     api_config_factory: Callable[..., AppConfig],
     cancellation_analysis_config: AnalysisConfig,
     cancellation_chat_fn: MagicMock,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    mock_document_reader_factory: MockDocumentReaderFactory,
 ) -> None:
     """POST a claim, GET its decision, then see it on GET /claims."""
     data_dir = tmp_path / "raw"
@@ -83,8 +58,13 @@ def test_claims_endpoints_post_get_list_flow(
     app = create_app(
         config=config,
         chat_fn=cancellation_chat_fn,
-        description_reader=_description_reader(),
-        document_reader=_document_reader(),
+        description_reader=mock_description_reader_factory(),
+        document_reader=mock_document_reader_factory(
+            default=DocumentData(
+                raw_text=("I had to cancel my flight to Paris because of a medical emergency."),
+                metadata=DocumentMetaData(extraction_probability=0.95),
+            )
+        ),
     )
 
     with TestClient(app) as client:
@@ -119,6 +99,4 @@ def test_claims_endpoints_post_get_list_flow(
         assert len(items) == 1
         assert items[0]["claim_id"] == claim_id
         assert items[0]["analysis_result"] is not None
-        assert items[0]["analysis_result"]["coverage_label_codes"] == [
-            TRIP_CANCELLATION
-        ]
+        assert items[0]["analysis_result"]["coverage_label_codes"] == [TRIP_CANCELLATION]

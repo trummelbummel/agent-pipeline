@@ -85,23 +85,17 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     pred_dir = results_dir / claim_id
     gt_dir.mkdir(parents=True)
     pred_dir.mkdir(parents=True)
-    (gt_dir / "answer.json").write_text(
-        json.dumps({"decision": "DENY"}), encoding="utf-8"
-    )
-    (pred_dir / "predicted_answer.json").write_text(
-        json.dumps({"decision": "DENY"}), encoding="utf-8"
-    )
+    (gt_dir / "answer.json").write_text(json.dumps({"decision": "DENY"}), encoding="utf-8")
+    (pred_dir / "predicted_answer.json").write_text(json.dumps({"decision": "DENY"}), encoding="utf-8")
     (pred_dir / "analysis_result.json").write_text(
-        json.dumps(
-            {
-                "decision": "DENY",
-                "decision_explanation": "checker_contradicts",
-                "coverage_labels": ["Trip cancellation or rescheduling"],
-                "reason_labels": [],
-                "document_labels": [],
-                "checker_contradicts": True,
-            }
-        ),
+        json.dumps({
+            "decision": "DENY",
+            "decision_explanation": "checker_contradicts",
+            "coverage_labels": ["Trip cancellation or rescheduling"],
+            "reason_labels": [],
+            "document_labels": [],
+            "checker_contradicts": True,
+        }),
         encoding="utf-8",
     )
     config_path = _write_minimal_config(tmp_path, data_dir, results_dir)
@@ -114,6 +108,8 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     assert "accuracy" in payload
     assert "f1_macro" in payload
     assert "confusion_matrix" in payload
+    assert payload["human_in_the_loop_true"] == 0
+    assert payload["human_in_the_loop_false"] == 1
     assert payload["confusion_matrix_labeled"]["DENY"]["DENY"] == 1
     assert "labels" in payload
     assert "explanation" not in payload

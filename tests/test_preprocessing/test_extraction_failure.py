@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
+from docling_fakes import mock_docling_converter
 
 from compliance.config.settings import OcrRetryConfig
 from compliance.preprocessing.document import DocumentReader
@@ -13,20 +14,7 @@ from compliance.preprocessing.preprocessing import FormatConverter
 
 
 def _mock_converter(text: str, confidence: float) -> MagicMock:
-    result = SimpleNamespace(
-        document=SimpleNamespace(
-            export_to_markdown=lambda: text,
-            pictures=[],
-        ),
-        confidence=SimpleNamespace(
-            layout_score=confidence,
-            ocr_score=confidence,
-            parse_score=confidence,
-        ),
-    )
-    converter = MagicMock()
-    converter.convert.return_value = result
-    return converter
+    return mock_docling_converter(text, confidence)
 
 
 def test_empty_text_is_faulty() -> None:
@@ -45,15 +33,13 @@ def test_nan_text_is_faulty() -> None:
 
 def test_claim5_style_figure_noise_is_faulty() -> None:
     detector = ExtractionFailure()
-    text = "\n".join(
-        [
-            "31. X. 20u",
-            "<!-- image -->",
-            "Signature",
-            "<!-- image -->",
-            "Signature",
-        ]
-    )
+    text = "\n".join([
+        "31. X. 20u",
+        "<!-- image -->",
+        "Signature",
+        "<!-- image -->",
+        "Signature",
+    ])
     result = detector.evaluate(text)
     assert result.faulty is True
     assert result.reasons
@@ -84,7 +70,7 @@ def test_document_reader_marks_faulty_extraction_as_hitl(tmp_path: Path) -> None
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(garbage, 0.95),
-        ocr_retry=OcrRetryConfig(enabled=False, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=False, on_missing_signature=False, model="llava", prompt="ocr"),
     )
     result = reader.read(src)
 
@@ -107,11 +93,10 @@ def test_faulty_extraction_invokes_vision_retry_and_clears_faulty(tmp_path: Path
         "Je soussigné, Docteur Kurtneh Mohamed, Praticien Hospitalier dans le service "
         "de Médecine Physique, atteste que Monsieur KOUADRI a été pris en charge."
     )
-    retry_chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content=certificate))
-    )
+    retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=certificate)))
     ocr_retry = OcrRetryConfig(
         enabled=True,
+        on_missing_signature=False,
         model="llava",
         prompt="Transcribe the document image into clean markdown.",
     )
@@ -140,15 +125,13 @@ def test_faulty_extraction_retry_still_faulty_keeps_hitl(tmp_path: Path) -> None
     format_converter.to_png.return_value = src
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
-    retry_chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content="_none_"))
-    )
+    retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content="_none_")))
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(garbage, 0.95),
-        ocr_retry=OcrRetryConfig(enabled=True, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=True, on_missing_signature=False, model="llava", prompt="ocr"),
         retry_chat_fn=retry_chat,
     )
     result = reader.read(src)
@@ -168,15 +151,13 @@ def test_faulty_extraction_retry_invoked_when_enabled(tmp_path: Path) -> None:
     format_converter.to_png.return_value = src
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
-    retry_chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content="_none_"))
-    )
+    retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content="_none_")))
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(garbage, 0.9),
-        ocr_retry=OcrRetryConfig(enabled=True, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=True, on_missing_signature=False, model="llava", prompt="ocr"),
         retry_chat_fn=retry_chat,
     )
     reader.read(src)
@@ -201,7 +182,7 @@ def test_clean_extraction_skips_retry(tmp_path: Path) -> None:
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(certificate, 0.95),
-        ocr_retry=OcrRetryConfig(enabled=True, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=True, on_missing_signature=False, model="llava", prompt="ocr"),
         retry_chat_fn=retry_chat,
     )
     result = reader.read(src)
@@ -225,7 +206,7 @@ def test_ocr_retry_disabled_skips_chat(tmp_path: Path) -> None:
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(garbage, 0.95),
-        ocr_retry=OcrRetryConfig(enabled=False, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=False, on_missing_signature=False, model="llava", prompt="ocr"),
         retry_chat_fn=retry_chat,
     )
     result = reader.read(src)
@@ -236,7 +217,8 @@ def test_ocr_retry_disabled_skips_chat(tmp_path: Path) -> None:
     retry_chat.assert_not_called()
 
 
-def test_faulty_extraction_retry_error_keeps_hitl(tmp_path: Path) -> None:
+def test_faulty_extraction_retry_error_marks_uncertain_hitl(tmp_path: Path) -> None:
+    """Vision OCR retry failure → UNCERTAIN / ocr_failure + human_in_the_loop."""
     src = tmp_path / "scan.png"
     src.write_bytes(b"png")
     format_converter = MagicMock(spec=FormatConverter)
@@ -250,15 +232,18 @@ def test_faulty_extraction_retry_error_keeps_hitl(tmp_path: Path) -> None:
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(garbage, 0.95),
-        ocr_retry=OcrRetryConfig(enabled=True, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=True, on_missing_signature=False, model="llava", prompt="ocr"),
         retry_chat_fn=retry_chat,
     )
     result = reader.read(src)
 
-    assert result.metadata.faulty_extraction is True
+    assert getattr(result, "decision", None) == "UNCERTAIN"
+    assert getattr(result, "reason", None) == "ocr_failure"
+    assert result.fields.get("reason") == "ocr_failure"
     assert result.metadata.human_in_the_loop is True
     assert result.metadata.retry_used is True
     assert result.metadata.retry_model == "llava"
+    assert "ocr_failure" in result.metadata.failure_reasons
     assert retry_chat.call_count == 1
 
 
@@ -277,14 +262,9 @@ def test_low_confidence_triggers_vision_retry(tmp_path: Path) -> None:
         "Firma del profesional\n"
     )
     clearer = (
-        "Certifico haber examinado a:\n"
-        "Marcos Junes\n"
-        "Quien autoriza informar el diagnostico.\n"
-        "Firma del profesional\n"
+        "Certifico haber examinado a:\nMarcos Junes\nQuien autoriza informar el diagnostico.\nFirma del profesional\n"
     )
-    retry_chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content=clearer))
-    )
+    retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=clearer)))
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,
@@ -292,6 +272,7 @@ def test_low_confidence_triggers_vision_retry(tmp_path: Path) -> None:
         document_converter=_mock_converter(weak_but_long, 0.65),
         ocr_retry=OcrRetryConfig(
             enabled=True,
+            on_missing_signature=False,
             model="llava",
             prompt="ocr",
             on_faulty_extraction=False,
@@ -319,9 +300,7 @@ def test_hitl_triggers_vision_retry_when_faulty_flag_disabled(tmp_path: Path) ->
         "el presente documento podra ser utilizado por el interesado para el fin "
         "que bien considere sin constituir el mismo una referencia absoluta.\n"
     )
-    retry_chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content=weak_but_long))
-    )
+    retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=weak_but_long)))
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,
@@ -329,6 +308,7 @@ def test_hitl_triggers_vision_retry_when_faulty_flag_disabled(tmp_path: Path) ->
         document_converter=_mock_converter(weak_but_long, 0.65),
         ocr_retry=OcrRetryConfig(
             enabled=True,
+            on_missing_signature=False,
             model="llava",
             prompt="ocr",
             on_faulty_extraction=False,
@@ -362,7 +342,7 @@ def test_high_confidence_clean_ocr_skips_retry(tmp_path: Path) -> None:
         confidence_threshold=0.7,
         format_converter=format_converter,
         document_converter=_mock_converter(certificate, 0.95),
-        ocr_retry=OcrRetryConfig(enabled=True, model="llava", prompt="ocr"),
+        ocr_retry=OcrRetryConfig(enabled=True, on_missing_signature=False, model="llava", prompt="ocr"),
         retry_chat_fn=retry_chat,
     )
     result = reader.read(src)

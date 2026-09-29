@@ -19,24 +19,22 @@ def test_is_preprocess_origin_with_source_preprocess() -> None:
 
 
 def test_is_preprocess_origin_legacy_fraud_explanation() -> None:
-    assert is_preprocess_origin_prediction(
-        {
-            "decision": "DENY",
-            "explanation": "fraud (benford chi_squared=1.0)",
-        }
-    )
+    assert is_preprocess_origin_prediction({
+        "decision": "DENY",
+        "explanation": "fraud (benford chi_squared=1.0)",
+    })
 
 
 def test_is_not_preprocess_origin_analysis_source() -> None:
-    assert not is_preprocess_origin_prediction(
-        {"source": SOURCE_ANALYSIS, "decision": "APPROVE", "explanation": "checker_consistent"}
-    )
+    assert not is_preprocess_origin_prediction({
+        "source": SOURCE_ANALYSIS,
+        "decision": "APPROVE",
+        "explanation": "checker_consistent",
+    })
 
 
 def test_is_not_preprocess_origin_unknown_without_fraud_heuristic() -> None:
-    assert not is_preprocess_origin_prediction(
-        {"decision": "APPROVE", "explanation": "checker_consistent"}
-    )
+    assert not is_preprocess_origin_prediction({"decision": "APPROVE", "explanation": "checker_consistent"})
 
 
 def test_remove_stale_preserves_analysis_source_without_analysis_result(
@@ -45,19 +43,15 @@ def test_remove_stale_preserves_analysis_source_without_analysis_result(
     predicted = tmp_path / "predicted_answer.json"
     analysis_result = tmp_path / "analysis_result.json"
     predicted.write_text(
-        json.dumps(
-            {
-                "decision": "APPROVE",
-                "explanation": "checker_consistent",
-                "source": SOURCE_ANALYSIS,
-            }
-        ),
+        json.dumps({
+            "decision": "APPROVE",
+            "explanation": "checker_consistent",
+            "source": SOURCE_ANALYSIS,
+        }),
         encoding="utf-8",
     )
 
-    removed = remove_stale_preprocess_prediction(
-        predicted, analysis_result_path=analysis_result
-    )
+    removed = remove_stale_preprocess_prediction(predicted, analysis_result_path=analysis_result)
 
     assert removed is False
     assert predicted.is_file()
@@ -69,18 +63,14 @@ def test_remove_stale_unlinks_legacy_fraud_without_analysis_result(
     predicted = tmp_path / "predicted_answer.json"
     analysis_result = tmp_path / "analysis_result.json"
     predicted.write_text(
-        json.dumps(
-            {
-                "decision": "DENY",
-                "explanation": "fraud (benford chi_squared=1.0)",
-            }
-        ),
+        json.dumps({
+            "decision": "DENY",
+            "explanation": "fraud (benford chi_squared=1.0)",
+        }),
         encoding="utf-8",
     )
 
-    removed = remove_stale_preprocess_prediction(
-        predicted, analysis_result_path=analysis_result
-    )
+    removed = remove_stale_preprocess_prediction(predicted, analysis_result_path=analysis_result)
 
     assert removed is True
     assert not predicted.exists()
@@ -90,20 +80,16 @@ def test_remove_stale_preserves_when_analysis_result_present(tmp_path: Path) -> 
     predicted = tmp_path / "predicted_answer.json"
     analysis_result = tmp_path / "analysis_result.json"
     predicted.write_text(
-        json.dumps(
-            {
-                "decision": "DENY",
-                "explanation": "fraud (benford chi_squared=1.0)",
-                "source": SOURCE_PREPROCESS,
-            }
-        ),
+        json.dumps({
+            "decision": "DENY",
+            "explanation": "fraud (benford chi_squared=1.0)",
+            "source": SOURCE_PREPROCESS,
+        }),
         encoding="utf-8",
     )
     analysis_result.write_text('{"decision":"APPROVE"}', encoding="utf-8")
 
-    removed = remove_stale_preprocess_prediction(
-        predicted, analysis_result_path=analysis_result
-    )
+    removed = remove_stale_preprocess_prediction(predicted, analysis_result_path=analysis_result)
 
     assert removed is False
     assert predicted.is_file()
@@ -124,7 +110,7 @@ def test_write_analysis_stamps_source(tmp_path: Path) -> None:
     path = tmp_path / "predicted_answer.json"
     written = write_analysis_predicted_answer(
         path,
-        {"decision": "APPROVE", "explanation": "checker_consistent"},
+        GroundTruth(decision="APPROVE", explanation="checker_consistent"),
     )
     payload = json.loads(written.read_text(encoding="utf-8"))
     assert payload["source"] == SOURCE_ANALYSIS

@@ -1,18 +1,12 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
 
-
-def _chat_returning(payload: dict[str, Any]) -> MagicMock:
-    import json
-
-    response = SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
-    return MagicMock(return_value=response)
-
+if TYPE_CHECKING:
+    from conftest import ChatReturningFactory
 
 TRIP_CANCELLATION = "1"
 PERSONAL_EFFECTS = "2"
@@ -20,23 +14,21 @@ MISSED_DEPARTURE = "3"
 OTHER = "Other"
 
 _SAMPLE_LABELS = [TRIP_CANCELLATION, PERSONAL_EFFECTS, MISSED_DEPARTURE]
-_SAMPLE_DESCRIPTION = (
-    "I had to cancel my flight to Paris because of a medical emergency."
-)
+_SAMPLE_DESCRIPTION = "I had to cancel my flight to Paris because of a medical emergency."
 
 
-def test_case_classifier_happy_path_trip_cancellation() -> None:
-    chat = _chat_returning(
-        {
-            "labels": [TRIP_CANCELLATION],
-            "probabilities": {
-                TRIP_CANCELLATION: 0.91,
-                PERSONAL_EFFECTS: 0.05,
-                MISSED_DEPARTURE: 0.02,
-                OTHER: 0.02,
-            },
-        }
-    )
+def test_case_classifier_happy_path_trip_cancellation(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({
+        "labels": [TRIP_CANCELLATION],
+        "probabilities": {
+            TRIP_CANCELLATION: 0.91,
+            PERSONAL_EFFECTS: 0.05,
+            MISSED_DEPARTURE: 0.02,
+            OTHER: 0.02,
+        },
+    })
     classifier = CaseClassifier(
         labels=_SAMPLE_LABELS,
         model_name="test-model",
@@ -70,34 +62,36 @@ def _make_classifier(chat: MagicMock) -> CaseClassifier:
     )
 
 
-def test_case_classifier_empty_labels_uses_other() -> None:
-    chat = _chat_returning({"labels": [], "probabilities": {}})
+def test_case_classifier_empty_labels_uses_other(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"labels": [], "probabilities": {}})
     result = _make_classifier(chat).classify("unrelated narrative")
 
     assert result.labels == [OTHER]
     assert result.probabilities[OTHER] == 1.0
 
 
-def test_case_classifier_unknown_label_mapped_to_other() -> None:
-    chat = _chat_returning(
-        {
-            "labels": ["Not A Real Coverage Type"],
-            "probabilities": {"Not A Real Coverage Type": 0.8},
-        }
-    )
+def test_case_classifier_unknown_label_mapped_to_other(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({
+        "labels": ["Not A Real Coverage Type"],
+        "probabilities": {"Not A Real Coverage Type": 0.8},
+    })
     result = _make_classifier(chat).classify("something odd")
 
     assert result.labels == [OTHER]
     assert OTHER in result.probabilities
 
 
-def test_case_classifier_probabilities_cover_configured_labels() -> None:
-    chat = _chat_returning(
-        {
-            "labels": [PERSONAL_EFFECTS],
-            "probabilities": {PERSONAL_EFFECTS: 0.7},
-        }
-    )
+def test_case_classifier_probabilities_cover_configured_labels(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({
+        "labels": [PERSONAL_EFFECTS],
+        "probabilities": {PERSONAL_EFFECTS: 0.7},
+    })
     result = _make_classifier(chat).classify("my bag was stolen")
 
     expected_keys = set(_SAMPLE_LABELS) | {OTHER}

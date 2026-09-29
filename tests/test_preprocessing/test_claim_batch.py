@@ -1,109 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING
 
-from compliance.config.settings import (
-    AnalysisConfig,
-    AppConfig,
-    CheckingConfig,
-    ClassificationConfig,
-    EvaluationConfig,
-    ExtractionConfig,
-    PreprocessingConfig,
-)
-from compliance.models.claim import BookingData, DocumentData, DocumentMetaData, is_nan_scalar
+from compliance.models.claim import DocumentData, DocumentMetaData, is_nan_scalar
 from compliance.preprocessing.claim_batch import (
     _classify_files,
     _discover_claim_folders,
     _process_single_claim,
     run_pipeline,
 )
-from compliance.preprocessing.description import DescriptionReader
-from compliance.preprocessing.extractor import InformationExtractor
 
-
-def _analysis_config() -> AnalysisConfig:
-    stage = ClassificationConfig(
-        labels=["1"],
-        other_label="False",
-        model="test-model",
-        prompt="classify",
+if TYPE_CHECKING:
+    from conftest import (
+        MinimalAppConfigFactory,
+        MockDescriptionReaderFactory,
+        MockDocumentReaderFactory,
     )
-    return AnalysisConfig(
-        coverage=stage,
-        cancellation_reason=stage,
-        cancellation_document=stage,
-        personal_effects_document=stage,
-        missed_departure_document=stage,
-    )
-
-
-def _config(data_dir: Path) -> AppConfig:
-    return AppConfig(
-        preprocessing=PreprocessingConfig(
-            data_dir=str(data_dir),
-            document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
-            confidence_threshold=0.7,
-            preprocessed_dir="data/preprocessed",
-            results_dir="data/results",
-        ),
-        extraction=ExtractionConfig(model="test-model", prompt="extract fields"),
-        classification=ClassificationConfig(
-            labels=["1"],
-            other_label="False",
-            model="test-model",
-            prompt="classify",
-        ),
-        checking=CheckingConfig(
-            model="test-model",
-            containment_prompt="containment",
-            contradicts_prompt="contradicts",
-            identity_prompt="identity",
-            healthy_prompt="healthy",
-            authenticity_prompt="authenticity",
-            incomplete_prompt="incomplete",
-        ),
-        analysis=_analysis_config(),
-        evaluation=EvaluationConfig(
-            labels=["APPROVE", "DENY", "UNCERTAIN"],
-            metrics_artifact="evaluation_metrics.json",
-        ),
-    )
-
-
-def _mock_description_reader(fields: dict[str, Any] | None = None) -> DescriptionReader:
-    import json
-
-    payload = fields or {}
-    chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))
-    )
-    extractor = InformationExtractor(
-        target_model=BookingData,
-        model_name="test-model",
-        prompt="p",
-        chat_fn=chat,
-    )
-    return DescriptionReader(extractor=extractor)
-
-
-def _mock_document_reader(docs: dict[str, DocumentData] | None = None) -> MagicMock:
-    mapping = docs or {}
-    reader = MagicMock()
-
-    def _read(path: Path) -> DocumentData:
-        if path.name in mapping:
-            return mapping[path.name]
-        return DocumentData(
-            raw_text="x",
-            metadata=DocumentMetaData(extraction_probability=0.9),
-        )
-
-    reader.read.side_effect = _read
-    return reader
 
 
 def test_discover_claim_folders(tmp_path: Path) -> None:
@@ -136,7 +49,12 @@ def test_classify_files(tmp_path: Path) -> None:
     assert not any(p.endswith("notes.txt") for p in sources.document_paths)
 
 
-def test_process_single_claim_missing_optional_files(tmp_path: Path) -> None:
+def test_process_single_claim_missing_optional_files(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    mock_document_reader_factory: MockDocumentReaderFactory,
+) -> None:
     claim = tmp_path / "claim 99"
     claim.mkdir()
     (claim / "answer.json").write_text('{"decision": "DENY"}', encoding="utf-8")
@@ -144,9 +62,9 @@ def test_process_single_claim_missing_optional_files(tmp_path: Path) -> None:
 
     bundle = _process_single_claim(
         claim,
-        _config(tmp_path),
-        description_reader=_mock_description_reader({"name": "Pat"}),
-        document_reader=_mock_document_reader(),
+        minimal_app_config_factory(tmp_path),
+        description_reader=mock_description_reader_factory({"name": "Pat"}),
+        document_reader=mock_document_reader_factory(),
     )
 
     assert bundle.claim_id == "claim 99"
@@ -158,7 +76,12 @@ def test_process_single_claim_missing_optional_files(tmp_path: Path) -> None:
     assert is_nan_scalar(bundle.booking_data.name)
 
 
-def test_process_single_claim_with_markdown_and_document(tmp_path: Path) -> None:
+def test_process_single_claim_with_markdown_and_document(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    mock_document_reader_factory: MockDocumentReaderFactory,
+) -> None:
     claim = tmp_path / "claim 7"
     claim.mkdir()
     (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
@@ -174,9 +97,9 @@ def test_process_single_claim_with_markdown_and_document(tmp_path: Path) -> None
     )
     bundle = _process_single_claim(
         claim,
-        _config(tmp_path),
-        description_reader=_mock_description_reader(),
-        document_reader=_mock_document_reader({"pass.png": doc}),
+        minimal_app_config_factory(tmp_path),
+        description_reader=mock_description_reader_factory(),
+        document_reader=mock_document_reader_factory({"pass.png": doc}),
     )
 
     assert bundle.booking_data.name == "Ada"
@@ -187,19 +110,58 @@ def test_process_single_claim_with_markdown_and_document(tmp_path: Path) -> None
     assert bundle.documents[0].person == "Ada"
 
 
-def test_run_pipeline_returns_claim_bundles(tmp_path: Path) -> None:
+def test_run_pipeline_returns_claim_bundles(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    mock_document_reader_factory: MockDocumentReaderFactory,
+) -> None:
     claim = tmp_path / "claim 1"
     claim.mkdir()
     (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
     (claim / "description.txt").write_text("hi", encoding="utf-8")
 
     bundles = run_pipeline(
-        _config(tmp_path),
-        description_reader=_mock_description_reader(),
-        document_reader=_mock_document_reader(),
+        minimal_app_config_factory(tmp_path),
+        description_reader=mock_description_reader_factory(),
+        document_reader=mock_document_reader_factory(),
     )
 
     assert len(bundles) == 1
     assert bundles[0].claim_id == "claim 1"
     assert bundles[0].ground_truth.decision == "APPROVE"
     assert not (claim / "processed.json").exists()
+
+
+def test_read_documents_skips_missing_file(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from compliance.preprocessing.claim_batch import _read_documents
+
+    missing = tmp_path / "gone.png"
+    reader = MagicMock()
+    docs = _read_documents([str(missing)], reader)
+
+    assert docs == []
+    reader.read.assert_not_called()
+
+
+def test_read_documents_tags_ocr_read_failure_when_file_exists(
+    tmp_path: Path,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from compliance.preprocessing.claim_batch import _read_documents
+
+    present = tmp_path / "scan.png"
+    present.write_bytes(b"png")
+    reader = MagicMock()
+    reader.read.side_effect = RuntimeError("docling crashed")
+    docs = _read_documents([str(present)], reader)
+
+    assert len(docs) == 1
+    assert getattr(docs[0], "decision", None) == "UNCERTAIN"
+    assert getattr(docs[0], "reason", None) == "ocr_read_failure"
+    assert docs[0].metadata.human_in_the_loop is True
+    assert "ocr_read_failure" in docs[0].metadata.failure_reasons
+    reader.read.assert_called_once()

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-
 from compliance.models.claim import BookingData, is_nan_scalar
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.extractor import InformationExtractor
@@ -14,9 +13,7 @@ from compliance.preprocessing.extractor import InformationExtractor
 def _mock_extractor(fields: dict[str, Any]) -> InformationExtractor:
     import json
 
-    chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps(fields)))
-    )
+    chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps(fields))))
     return InformationExtractor(
         target_model=BookingData,
         model_name="test-model",

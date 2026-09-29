@@ -1,31 +1,27 @@
 from __future__ import annotations
 
-import json
-from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from compliance.llm.checker import Checker
 
-
-def _chat_returning(payload: dict[str, Any] | str) -> MagicMock:
-    content = payload if isinstance(payload, str) else json.dumps(payload)
-    response = SimpleNamespace(message=SimpleNamespace(content=content))
-    return MagicMock(return_value=response)
+if TYPE_CHECKING:
+    from conftest import ChatReturningFactory
 
 
-def _make_checker(chat: MagicMock) -> Checker:
+def _make_checker(chat: MagicMock, *, identity_max_edit_distance: int = 3) -> Checker:
     return Checker(
         model_name="test-model",
         containment_prompt="check containment of claim in text",
         contradicts_prompt="check whether claim contradicts text",
-        identity_prompt="check whether claimant name matches document",
+        identity_prompt="extract person name as JSON",
         healthy_prompt="check whether document says patient is healthy",
         authenticity_prompt="check authenticity of supporting document",
         incomplete_prompt="check whether medical fields are incomplete",
         chat_fn=chat,
+        identity_max_edit_distance=identity_max_edit_distance,
     )
 
 
@@ -43,8 +39,10 @@ def test_checker_containment_deterministic_hit_skips_llm() -> None:
     chat.assert_not_called()
 
 
-def test_checker_containment_llm_fallback_true() -> None:
-    chat = _chat_returning({"result": True})
+def test_checker_containment_llm_fallback_true(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"result": True})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -61,8 +59,10 @@ def test_checker_containment_llm_fallback_true() -> None:
     assert "check containment" in call_kwargs["messages"][0]["content"]
 
 
-def test_checker_containment_llm_fallback_false() -> None:
-    chat = _chat_returning({"result": False})
+def test_checker_containment_llm_fallback_false(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"result": False})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -75,8 +75,10 @@ def test_checker_containment_llm_fallback_false() -> None:
     chat.assert_called_once()
 
 
-def test_checker_contradicts_true_when_claim_conflicts() -> None:
-    chat = _chat_returning({"result": True})
+def test_checker_contradicts_true_when_claim_conflicts(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"result": True})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -92,8 +94,10 @@ def test_checker_contradicts_true_when_claim_conflicts() -> None:
     assert "contradicts" in call_kwargs["messages"][0]["content"]
 
 
-def test_checker_contradicts_false_when_supported() -> None:
-    chat = _chat_returning({"result": False})
+def test_checker_contradicts_false_when_supported(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"result": False})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -106,8 +110,11 @@ def test_checker_contradicts_false_when_supported() -> None:
     chat.assert_called_once()
 
 
-def test_checker_identity_false_when_name_obscured() -> None:
-    chat = _chat_returning({"result": "mismatch"})
+def test_checker_identity_false_when_name_obscured(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    """Extracted initial vs full booking name → edit distance fails → mismatch."""
+    chat = chat_returning_factory({"name": "R"})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -120,8 +127,7 @@ def test_checker_identity_false_when_name_obscured() -> None:
     chat.assert_called_once()
     call_kwargs = chat.call_args.kwargs
     user = call_kwargs["messages"][1]["content"]
-    assert "Booking / internal" in user
-    assert "Roy Hoffman" in user
+    assert "patient / subject" in user.lower() or "Patient: R" in user
     assert "Patient: R" in user
 
 
@@ -132,8 +138,7 @@ def test_checker_identity_deterministic_containment_skips_llm() -> None:
 
     status = checker.check_identity(
         "# Supporting documents\n\n**name**: Amy Ndiaye\n",
-        "Je soussigné certifie que Mme Amy NDIAYE, née le 21/12/1981 "
-        "est hospitalisée depuis le 01/12/2022.\n",
+        "Je soussigné certifie que Mme Amy NDIAYE, née le 21/12/1981 est hospitalisée depuis le 01/12/2022.\n",
     )
 
     assert status == "match"
@@ -148,13 +153,11 @@ def test_checker_identity_deterministic_token_containment_handles_glue_and_order
     # Claim-3 style: patient name glued to the next word; doctor name first.
     status = checker.check_identity(
         "**name**: Kacou Meitiale Evelyne\n",
-        "docteur KOUASSI KONE FRANCOIS que l'état de santé de "
-        "Mme KACOU MEITIALE EVELYNEnécessite unehospitalisation\n",
+        "docteur KOUASSI KONE FRANCOIS que l'état de santé de Mme KACOU MEITIALE EVELYNEnécessite unehospitalisation\n",
     )
     assert status == "match"
     chat.assert_not_called()
 
-    # Claim-9 style: token reorder (Daisy vs DAYSI still needs LLM — Daysi typo).
     # Exact token reorder with matching spelling skips LLM.
     status = checker.check_identity(
         "**name**: Bastidas Angulo Daisy Mariuxi\n",
@@ -164,8 +167,35 @@ def test_checker_identity_deterministic_token_containment_handles_glue_and_order
     chat.assert_not_called()
 
 
-def test_checker_identity_falls_back_to_llm_when_not_contained() -> None:
-    chat = _chat_returning({"result": "mismatch"})
+def test_checker_identity_partner_note_skips_containment_requester_false_pass(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    """Booking ``(partner)`` name in OCR as requester must not short-circuit match.
+
+    Claim-6 shape: partner tokens appear under 'a solicitud del…' while the
+    patient is a different person → extract + edit-distance → mismatch.
+    """
+    chat = chat_returning_factory({"name": "VELOSA RUIZ JORGE LUIS"})
+    checker = _make_checker(chat)
+
+    status = checker.check_identity(
+        "**name**: Marta Isabel Rojas Valbuena (partner)\n",
+        "el paciente VELOSA RUIZ JORGE LUIS identificado con C.C 19.092.121, "
+        "se encuentra hospitalizado. La presente se expide a solicitud del "
+        "Señora ROJAS VALBUENA MARTA ISABEL Identificada con C.C. 41.541.380.\n",
+    )
+
+    assert status == "mismatch"
+    chat.assert_called_once()
+    user = chat.call_args.kwargs["messages"][1]["content"]
+    assert "solicitud" in user.lower() or "patient" in user.lower()
+
+
+def test_checker_identity_extract_null_when_not_contained(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    """No patient name in OCR → extraction null → unclear."""
+    chat = chat_returning_factory({"name": None})
     checker = _make_checker(chat)
 
     status = checker.check_identity(
@@ -173,13 +203,15 @@ def test_checker_identity_falls_back_to_llm_when_not_contained() -> None:
         "31. X. 20u\nSignature\nuv\n",
     )
 
-    assert status == "mismatch"
+    assert status == "unclear"
     chat.assert_called_once()
 
 
-def test_checker_identity_true_when_names_match() -> None:
-    """Spelling variants still use the LLM (Piccirilly vs PICCIRILLI)."""
-    chat = _chat_returning({"result": "match"})
+def test_checker_identity_true_when_edit_distance_within_threshold(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    """OCR spelling variant within edit distance (Piccirilly vs PICCIRILLI)."""
+    chat = chat_returning_factory({"name": "PICCIRILLI FRANCESCA"})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -192,8 +224,26 @@ def test_checker_identity_true_when_names_match() -> None:
     chat.assert_called_once()
 
 
-def test_checker_identity_unclear_when_no_patient_field() -> None:
-    chat = _chat_returning({"result": "unclear"})
+def test_checker_identity_mismatch_when_edit_distance_above_threshold(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    """Different person names → distance above threshold → mismatch."""
+    chat = chat_returning_factory({"name": "Maria Rossi"})
+    checker = _make_checker(chat, identity_max_edit_distance=3)
+
+    status = checker.check_identity(
+        "**name**: Roy Hoffman\n",
+        "Patient: Maria Rossi\n",
+    )
+
+    assert status == "mismatch"
+    chat.assert_called_once()
+
+
+def test_checker_identity_unclear_when_no_patient_field(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"name": None})
     checker = _make_checker(chat)
 
     status = checker.check_identity(
@@ -202,26 +252,14 @@ def test_checker_identity_unclear_when_no_patient_field() -> None:
     )
 
     assert status == "unclear"
-    assert checker.check(
-        claim="# Supporting documents\n\n**name**: Olivier Bayante\n",
-        text="Dr. Rossi\nAmbulatorio\n",
-        mode="identity",
-    ) is False
-
-
-def test_checker_identity_accepts_legacy_bool_result() -> None:
-    chat = _chat_returning({"result": True})
-    checker = _make_checker(chat)
-
-    # Spelling differs enough that containment misses → LLM legacy bool True.
     assert (
-        checker.check_identity(
-            "**name**: Ada Lovelace\n",
-            "Patient: Augusta Ada King\n",
+        checker.check(
+            claim="# Supporting documents\n\n**name**: Olivier Bayante\n",
+            text="Dr. Rossi\nAmbulatorio\n",
+            mode="identity",
         )
-        == "match"
+        is False
     )
-    chat.assert_called_once()
 
 
 def test_checker_identity_exact_containment_skips_llm_for_ada() -> None:
@@ -238,8 +276,10 @@ def test_checker_identity_exact_containment_skips_llm_for_ada() -> None:
     chat.assert_not_called()
 
 
-def test_checker_healthy_true_when_document_says_healthy() -> None:
-    chat = _chat_returning({"result": True})
+def test_checker_healthy_true_when_document_says_healthy(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"result": True})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -255,8 +295,10 @@ def test_checker_healthy_true_when_document_says_healthy() -> None:
     assert "Supporting document" in user
 
 
-def test_checker_healthy_false_when_illness_documented() -> None:
-    chat = _chat_returning({"result": False})
+def test_checker_healthy_false_when_illness_documented(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory({"result": False})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -275,8 +317,10 @@ def test_checker_invalid_mode_raises() -> None:
         checker.check("claim", "text", mode="unsupported")  # type: ignore[arg-type]
 
 
-def test_checker_unparseable_llm_response_returns_false() -> None:
-    chat = _chat_returning("")
+def test_checker_unparseable_llm_response_returns_false(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
+    chat = chat_returning_factory("")
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -292,13 +336,15 @@ def test_checker_unparseable_llm_response_returns_false() -> None:
 # --- Phase 07 authenticity (R027) + incomplete (R028) ---
 
 
-def test_checker_not_authentic_true_when_ocr_format_suspect() -> None:
+def test_checker_not_authentic_true_when_ocr_format_suspect(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
     """mode=not_authentic: True = authenticity violation (OCR/format path, no Benford).
 
     Message layout mirrors healthy: claim may be empty; user content is OCR-focused
     (Supporting document + text).
     """
-    chat = _chat_returning({"result": True})
+    chat = chat_returning_factory({"result": True})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -314,9 +360,11 @@ def test_checker_not_authentic_true_when_ocr_format_suspect() -> None:
     assert "garbled OCR" in user
 
 
-def test_checker_not_authentic_false_on_llm_false() -> None:
+def test_checker_not_authentic_false_on_llm_false(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
     """mode=not_authentic: LLM {"result": false} → False (document looks authentic)."""
-    chat = _chat_returning({"result": False})
+    chat = chat_returning_factory({"result": False})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -329,9 +377,11 @@ def test_checker_not_authentic_false_on_llm_false() -> None:
     chat.assert_called_once()
 
 
-def test_checker_not_authentic_parse_failure_fail_closed_true() -> None:
+def test_checker_not_authentic_parse_failure_fail_closed_true(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
     """Deny-on-True mode: malformed JSON / missing result → fail-closed True."""
-    chat = _chat_returning("")
+    chat = chat_returning_factory("")
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -344,9 +394,11 @@ def test_checker_not_authentic_parse_failure_fail_closed_true() -> None:
     chat.assert_called_once()
 
 
-def test_checker_incomplete_true_when_required_medical_fields_missing() -> None:
+def test_checker_incomplete_true_when_required_medical_fields_missing(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
     """mode=incomplete: True when discharge/diagnosis/condition fields are absent."""
-    chat = _chat_returning({"result": True})
+    chat = chat_returning_factory({"result": True})
     checker = _make_checker(chat)
 
     result = checker.check(
@@ -362,9 +414,11 @@ def test_checker_incomplete_true_when_required_medical_fields_missing() -> None:
     assert "No diagnosis" in user
 
 
-def test_checker_incomplete_parse_failure_fail_closed_true() -> None:
+def test_checker_incomplete_parse_failure_fail_closed_true(
+    chat_returning_factory: ChatReturningFactory,
+) -> None:
     """Deny-on-True mode: missing result key → fail-closed True (unlike containment)."""
-    chat = _chat_returning({"other": True})
+    chat = chat_returning_factory({"other": True})
     checker = _make_checker(chat)
 
     result = checker.check(

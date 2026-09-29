@@ -156,9 +156,12 @@ def test_load_config_reads_checking_section() -> None:
     assert config.checking.model
     assert config.checking.containment_prompt.strip()
     assert config.checking.contradicts_prompt.strip()
+    assert "Extract the single person name" in config.checking.identity_prompt
+    assert config.checking.identity_max_edit_distance == 3
     within_days = getattr(config.checking, "departure_uncertain_within_days", None)
     assert isinstance(within_days, int)
     assert within_days == 14
+    assert config.checking.departure_uncertain_enabled is False
 
 
 def test_load_config_reads_authenticity_and_incomplete_prompts() -> None:
@@ -170,12 +173,15 @@ def test_load_config_reads_authenticity_and_incomplete_prompts() -> None:
     assert isinstance(incomplete, str) and incomplete.strip()
 
 
-def test_load_config_reads_suspicious_dating_max_year_delta() -> None:
-    """checking.suspicious_dating_max_year_delta is a positive int (R029 / A16)."""
+def test_load_config_reads_suspicious_dating_max_month_delta() -> None:
+    """checking.suspicious_dating_max_month_delta is a positive int (one-month default)."""
     config = load_config("config.yaml")
-    delta = getattr(config.checking, "suspicious_dating_max_year_delta", None)
+    delta = getattr(config.checking, "suspicious_dating_max_month_delta", None)
     assert isinstance(delta, int)
     assert delta >= 1
+    assert delta == 1
+    within = getattr(config.checking, "suspicious_dating_consider_within_years", None)
+    assert within == 2
 
 
 def test_load_config_reads_analysis_section() -> None:
@@ -260,14 +266,11 @@ def test_load_config_reads_classification_labels_and_other() -> None:
     assert "Personal Effects" in config.classification.prompt
     assert "Missed Departure or Missed Connection" in config.classification.prompt
     assert config.classification.other_label.strip()
-    assert (
-        config.classification.label_names["1"]
-        == "Trip cancellation or rescheduling"
-    )
-    assert (
-        config.analysis.coverage.resolve_label_names(["1", "False"])
-        == ["Trip cancellation or rescheduling", "False"]
-    )
+    assert config.classification.label_names["1"] == "Trip cancellation or rescheduling"
+    assert config.analysis.coverage.resolve_label_names(["1", "False"]) == [
+        "Trip cancellation or rescheduling",
+        "False",
+    ]
     assert config.analysis.cancellation_reason.label_names["2"] == "Medical emergency"
 
 

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from docling_fakes import mock_docling_converter
 
 from compliance.models.claim import DocumentData, is_nan_scalar
 from compliance.preprocessing.document import DocumentReader
@@ -30,25 +30,7 @@ def _mock_converter(
     *,
     picture_classes: list[str] | None = None,
 ) -> MagicMock:
-    pictures: list[Any] = []
-    for class_name in picture_classes or []:
-        prediction = SimpleNamespace(class_name=class_name, confidence=0.9)
-        classification = SimpleNamespace(predictions=[prediction])
-        pictures.append(SimpleNamespace(meta=SimpleNamespace(classification=classification)))
-    result = SimpleNamespace(
-        document=SimpleNamespace(
-            export_to_markdown=lambda: text,
-            pictures=pictures,
-        ),
-        confidence=SimpleNamespace(
-            layout_score=confidence,
-            ocr_score=confidence,
-            parse_score=confidence,
-        ),
-    )
-    converter = MagicMock()
-    converter.convert.return_value = result
-    return converter
+    return mock_docling_converter(text, confidence, picture_classes=picture_classes)
 
 
 def test_to_png_called_before_docling(tmp_path: Path) -> None:
@@ -202,10 +184,7 @@ def test_signature_detected_via_figure_classifier(tmp_path: Path) -> None:
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
 
-    text = (
-        "CONSTANCIA MÉDICA\n"
-        "El paciente fue evaluado en consulta externa y se encuentra estable."
-    )
+    text = "CONSTANCIA MÉDICA\nEl paciente fue evaluado en consulta externa y se encuentra estable."
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,
@@ -236,6 +215,186 @@ def test_signature_absent_when_classifier_finds_no_signature(tmp_path: Path) -> 
     assert result.metadata.has_signature is False
 
 
+def test_yolo_signature_verify_sets_has_signature_when_docling_misses(
+    tmp_path: Path,
+) -> None:
+    """YOLO fallback can flip has_signature when Docling left it false."""
+    from compliance.config.settings import OcrRetryConfig
+
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+    detect = MagicMock(return_value=0.91)
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter("CERTIFICADO MEDICO\nPaciente: Ada", 0.9),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=False,
+            on_human_in_the_loop=False,
+            on_missing_signature=True,
+            signature_model="tech4humans/yolov8s-signature-detector",
+            signature_weights="yolov8s.pt",
+            signature_confidence=0.25,
+        ),
+        signature_detect_fn=detect,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.has_signature is True
+    assert result.metadata.signature_verify_used is True
+    assert result.metadata.signature_probability == pytest.approx(0.91)
+    detect.assert_called_once_with(src)
+
+
+def test_yolo_signature_verify_keeps_false_when_detector_finds_none(
+    tmp_path: Path,
+) -> None:
+    from compliance.config.settings import OcrRetryConfig
+
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+    detect = MagicMock(return_value=None)
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter("unsigned note", 0.9),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=False,
+            on_human_in_the_loop=False,
+            on_missing_signature=True,
+            signature_model="tech4humans/yolov8s-signature-detector",
+        ),
+        signature_detect_fn=detect,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.has_signature is False
+    assert result.metadata.signature_verify_used is True
+    assert result.metadata.human_in_the_loop is True
+    detect.assert_called_once_with(src)
+
+
+def test_yolo_signature_below_threshold_sets_hitl(tmp_path: Path) -> None:
+    """Weak YOLO score below signature_confidence → HITL, has_signature false."""
+    from compliance.config.settings import OcrRetryConfig
+
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+    detect = MagicMock(return_value=0.12)
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter("faint mark", 0.9),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=False,
+            on_human_in_the_loop=False,
+            on_missing_signature=True,
+            signature_model="tech4humans/yolov8s-signature-detector",
+            signature_confidence=0.25,
+        ),
+        signature_detect_fn=detect,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.has_signature is False
+    assert result.metadata.signature_verify_used is True
+    assert result.metadata.signature_probability == pytest.approx(0.12)
+    assert result.metadata.human_in_the_loop is True
+    assert not is_nan_scalar(result.metadata.signature_probability)
+
+
+def test_yolo_signature_verify_skipped_when_docling_already_detected(
+    tmp_path: Path,
+) -> None:
+    from compliance.config.settings import OcrRetryConfig
+
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+    detect = MagicMock(return_value=0.9)
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter("signed", 0.9, picture_classes=["signature"]),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=False,
+            on_human_in_the_loop=False,
+            on_missing_signature=True,
+            signature_model="tech4humans/yolov8s-signature-detector",
+        ),
+        signature_detect_fn=detect,
+    )
+    result = reader.read(src)
+
+    assert result.metadata.has_signature is True
+    assert result.metadata.signature_verify_used is False
+    detect.assert_not_called()
+
+
+def test_yolo_signature_verify_errors_without_fallback(tmp_path: Path) -> None:
+    """Missing YOLO / HF auth must raise — no soft has_signature=false fallback."""
+    from compliance.config.settings import OcrRetryConfig
+    from compliance.preprocessing.document import SignatureDetectionError
+
+    src = tmp_path / "cert.png"
+    src.write_bytes(b"png")
+    format_converter = MagicMock(spec=FormatConverter)
+    format_converter.source_formats = ["png"]
+    format_converter.to_png.return_value = src
+    detect = MagicMock(side_effect=SignatureDetectionError("Cannot download gated YOLO weights. Set HF_TOKEN."))
+    reader = DocumentReader(
+        document_formats=["png"],
+        confidence_threshold=0.7,
+        format_converter=format_converter,
+        document_converter=_mock_converter("unsigned note", 0.9),
+        ocr_retry=OcrRetryConfig(
+            enabled=True,
+            model="llava",
+            prompt="ocr",
+            on_faulty_extraction=False,
+            on_low_confidence=False,
+            on_human_in_the_loop=False,
+            on_missing_signature=True,
+            signature_model="tech4humans/yolov8s-signature-detector",
+        ),
+        signature_detect_fn=detect,
+    )
+
+    with pytest.raises(SignatureDetectionError, match="HF_TOKEN"):
+        reader.read(src)
+
+
 def test_no_signature_when_no_pictures(tmp_path: Path) -> None:
     src = tmp_path / "cert.png"
     src.write_bytes(b"png")
@@ -243,10 +402,7 @@ def test_no_signature_when_no_pictures(tmp_path: Path) -> None:
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
 
-    text = (
-        "CERTIFICACION DE HOSPITALIZACION\n"
-        "El paciente fue admitido por dolor abdominal agudo en urgencias."
-    )
+    text = "CERTIFICACION DE HOSPITALIZACION\nEl paciente fue admitido por dolor abdominal agudo en urgencias."
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,
@@ -265,13 +421,7 @@ def test_timestamps_extracted(tmp_path: Path) -> None:
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
 
-    text = (
-        "Name: Ada\n"
-        "Admitted: 14-04-2017\n"
-        "Discharged: 18/04/2017\n"
-        "Date: 2017-04-20\n"
-        "Signed by Dr. García"
-    )
+    text = "Name: Ada\nAdmitted: 14-04-2017\nDischarged: 18/04/2017\nDate: 2017-04-20\nSigned by Dr. García"
     reader = DocumentReader(
         document_formats=["png"],
         confidence_threshold=0.7,

@@ -98,6 +98,7 @@ def test_post_claims_conflict_when_folder_exists(
     assert ((data_dir / "claim 1") / "keep.txt").read_text(encoding="utf-8") == "original"
     assert not ((data_dir / "claim 1") / "scan.png").exists()
 
+
 def test_post_rejects_path_traversal_image_filename(
     tmp_path: Path,
     api_config_factory: Callable[..., AppConfig],
@@ -134,7 +135,7 @@ def test_generated_claim_id_always_safe_single_segment(
     api_config_factory: Callable[..., AppConfig],
 ) -> None:
     """Generated claim_id is a single safe path segment starting with claim."""
-    from compliance.workflows.pipeline import _validate_claim_dir_name
+    from compliance.preprocessing.claim_batch import _validate_claim_dir_name
 
     data_dir = tmp_path / "raw"
     data_dir.mkdir()

@@ -370,6 +370,8 @@ class EvaluationConfig(StrictConfigModel):
     """Prediction-evaluation settings for scoring predicted vs ground-truth answers.
 
     :param labels: Decision vocabulary for confusion-matrix axes and macro F1.
+    :param unscored_label: Confusion-matrix column for ground-truth claims with no
+        scorable prediction (missing or invalid).
     :param metrics_artifact: Filename for the batch metrics JSON under results_dir.
     :param confusion_matrix_artifact: Filename for the labeled matrix JSON under results_dir.
     :param visualization_artifact: Filename for the confusion-matrix PNG under results_dir.
@@ -378,11 +380,33 @@ class EvaluationConfig(StrictConfigModel):
     """
 
     labels: list[str] = Field(default_factory=lambda: ["APPROVE", "DENY", "UNCERTAIN"])
+    unscored_label: str = "NO_PREDICTION"
     metrics_artifact: str = "evaluation_metrics.json"
     confusion_matrix_artifact: str = "confusion_matrix.json"
     visualization_artifact: str = "evaluation_visualization.png"
     analysis_stats_artifact: str = "analysis_stats.json"
     analysis_visualization_artifact: str = "analysis_stats_visualization.png"
+
+    @model_validator(mode="after")
+    def _validated_metric_vocabulary(self) -> EvaluationConfig:
+        """Reject duplicate labels and an unscored column that collides with them.
+
+        :return: Self after the metric vocabulary passes all checks.
+        """
+        seen: set[str] = set()
+        duplicates: list[str] = []
+        for label in self.labels:
+            if label in seen and label not in duplicates:
+                duplicates.append(label)
+            seen.add(label)
+        if duplicates:
+            raise DuplicateConfigLabelsError(duplicates=duplicates)
+        if self.unscored_label in seen:
+            raise UnscoredLabelCollisionError(
+                unscored_label=self.unscored_label,
+                labels=list(self.labels),
+            )
+        return self
 
 
 class OcrRetryConfig(StrictConfigModel):
@@ -516,6 +540,18 @@ class DuplicateConfigLabelsError(ValueError):
         :param duplicates: Label codes that appear more than once in ``labels``.
         """
         super().__init__(f"Duplicate config labels: {duplicates}")
+
+
+class UnscoredLabelCollisionError(ValueError):
+    """``evaluation.unscored_label`` collides with a configured decision label."""
+
+    def __init__(self, unscored_label: str, labels: list[str]) -> None:
+        """Name the colliding unscored column and the label vocabulary.
+
+        :param unscored_label: Column name that also appears in ``labels``.
+        :param labels: Configured evaluation decision vocabulary.
+        """
+        super().__init__(f"evaluation.unscored_label {unscored_label!r} collides with labels {labels}")
 
 
 class EmptyConfigLabelsError(ValueError):

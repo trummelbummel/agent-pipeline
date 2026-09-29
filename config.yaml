@@ -330,6 +330,7 @@ evaluation:
     - APPROVE
     - DENY
     - UNCERTAIN
+  unscored_label: NO_PREDICTION
   metrics_artifact: evaluation_metrics.json
   confusion_matrix_artifact: confusion_matrix.json
   visualization_artifact: evaluation_visualization.png

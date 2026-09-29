@@ -68,6 +68,7 @@ logging:
   format: "%(levelname)s %(message)s"
 evaluation:
   labels: [APPROVE, DENY, UNCERTAIN]
+  unscored_label: NO_PREDICTION
   metrics_artifact: evaluation_metrics.json
   confusion_matrix_artifact: confusion_matrix.json
   visualization_artifact: evaluation_visualization.png
@@ -100,20 +101,31 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
         }),
         encoding="utf-8",
     )
+    # Ground-truth-only claim: no results folder at all.
+    claim2 = data_dir / "claim 2"
+    claim2.mkdir(parents=True)
+    (claim2 / "answer.json").write_text(json.dumps({"decision": "APPROVE"}), encoding="utf-8")
     config_path = _write_minimal_config(tmp_path, data_dir, results_dir)
     exit_code = main(["--config", str(config_path)])
     assert exit_code == 0
     metrics_path = results_dir / "evaluation_metrics.json"
     assert metrics_path.is_file()
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
-    assert payload["n_evaluated"] == 1
-    assert "accuracy" in payload
-    assert "f1_macro" in payload
-    assert "confusion_matrix" in payload
+    population = payload["population"]
+    assert population["n_ground_truth"] == 2
+    assert population["n_scored"] == 1
+    assert population["n_missing_prediction"] == 1
+    assert population["coverage_rate"] == 0.5
+    assert payload["raw"]["accuracy"] == 0.5
+    assert payload["raw"]["n"] == 2
+    assert sum(sum(row) for row in payload["raw"]["confusion_matrix"]) == 2
+    assert payload["column_labels"] == ["APPROVE", "DENY", "UNCERTAIN", "NO_PREDICTION"]
     assert payload["human_in_the_loop_true"] == 0
     assert payload["human_in_the_loop_false"] == 1
-    assert payload["confusion_matrix_labeled"]["DENY"]["DENY"] == 1
+    assert payload["raw"]["confusion_matrix_labeled"]["DENY"]["DENY"] == 1
     assert "labels" in payload
+    assert "outcomes" in payload
+    assert any(o["status"] == "missing_prediction" for o in payload["outcomes"])
     assert "explanation" not in payload
     assert "explanations" not in payload
     matrix_path = results_dir / "confusion_matrix.json"
@@ -121,8 +133,9 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     matrix_payload = json.loads(matrix_path.read_text(encoding="utf-8"))
     assert matrix_payload["rows"] == "true_label"
     assert matrix_payload["cols"] == "predicted_label"
-    assert matrix_payload["labeled"]["DENY"]["DENY"] == 1
-    assert matrix_payload["matrix"] == payload["confusion_matrix"]
+    assert matrix_payload["column_labels"] == payload["column_labels"]
+    assert matrix_payload["raw"]["labeled"]["DENY"]["DENY"] == 1
+    assert matrix_payload["raw"]["matrix"] == payload["raw"]["confusion_matrix"]
     viz_path = results_dir / "evaluation_visualization.png"
     assert viz_path.is_file()
     assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
@@ -148,9 +161,10 @@ def test_cli_exit_zero_on_empty_batch(tmp_path: Path) -> None:
     metrics_path = results_dir / "evaluation_metrics.json"
     assert metrics_path.is_file()
     payload = json.loads(metrics_path.read_text(encoding="utf-8"))
-    assert payload["n_evaluated"] == 0
-    assert payload["accuracy"] == 0.0
-    assert payload["f1_macro"] == 0.0
+    assert payload["population"]["n_ground_truth"] == 0
+    assert payload["population"]["coverage_rate"] == 0.0
+    assert payload["raw"]["accuracy"] == 0.0
+    assert payload["raw"]["f1_macro"] == 0.0
     viz_path = results_dir / "evaluation_visualization.png"
     assert viz_path.is_file()
     assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

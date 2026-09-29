@@ -201,31 +201,36 @@ def _truncate(text: str, max_len: int) -> str:
 
 def _render_heatmap(result: EvaluationResult) -> Image.Image:
     labels = result.labels
-    matrix = result.confusion_matrix
-    n = len(labels)
-    width = _MARGIN_LEFT + n * _CELL + _PAD
-    height = _MARGIN_TOP + n * _CELL + 36
+    column_labels = [*labels, result.unscored_label]
+    matrix = result.raw.confusion_matrix
+    n_rows = len(labels)
+    n_cols = len(column_labels)
+    title_band = 48
+    margin_top = _MARGIN_TOP + 16
+    width = _MARGIN_LEFT + n_cols * _CELL + _PAD
+    height = margin_top + n_rows * _CELL + 36
     image = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(image)
     font = _load_font(14)
-    font_title = _load_font(16)
+    font_title = _load_font(15)
     font_cell = _load_font(18)
-    title = (
-        f"Confusion matrix  "
-        f"acc={result.accuracy:.0%}  F1={result.f1_macro:.2f}  n={result.n_evaluated}  "
+    line1 = f"raw acc={result.raw.accuracy:.0%}  F1={result.raw.f1_macro:.2f}  n_gt={result.population.n_ground_truth}"
+    line2 = (
+        f"coverage={result.population.coverage_rate:.0%}  "
         f"HITL T/F={result.human_in_the_loop_true}/{result.human_in_the_loop_false}"
     )
-    draw.text((_MARGIN_LEFT, 12), title, fill=(30, 30, 30), font=font_title)
-    draw.text((_MARGIN_LEFT, 34), "Predicted →", fill=(90, 90, 90), font=font)
-    draw.text((8, _MARGIN_TOP - 18), "GT ↓", fill=(90, 90, 90), font=font)
+    draw.text((_MARGIN_LEFT, 8), line1, fill=(30, 30, 30), font=font_title)
+    draw.text((_MARGIN_LEFT, 26), line2, fill=(30, 30, 30), font=font_title)
+    draw.text((_MARGIN_LEFT, title_band + 2), "Predicted →", fill=(90, 90, 90), font=font)
+    draw.text((8, margin_top - 18), "GT ↓", fill=(90, 90, 90), font=font)
     peak = max((max(row) for row in matrix), default=0) or 1
     for i, true_label in enumerate(labels):
-        y = _MARGIN_TOP + i * _CELL
+        y = margin_top + i * _CELL
         draw.text((8, y + _CELL // 3), true_label, fill=(20, 20, 20), font=font)
-        for j, pred_label in enumerate(labels):
+        for j, pred_label in enumerate(column_labels):
             x = _MARGIN_LEFT + j * _CELL
             if i == 0:
-                draw.text((x + 8, _MARGIN_TOP - 18), pred_label, fill=(20, 20, 20), font=font)
+                draw.text((x + 4, margin_top - 18), pred_label, fill=(20, 20, 20), font=font)
             count = matrix[i][j]
             fill = _cell_color(count, peak)
             draw.rectangle(

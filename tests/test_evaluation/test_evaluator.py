@@ -29,6 +29,17 @@ def _write_pair(
     (pred_dir / "predicted_answer.json").write_text(json.dumps(pred), encoding="utf-8")
 
 
+def _write_ground_truth_only(
+    data_dir: Path,
+    claim_id: str,
+    *,
+    gt: dict[str, object],
+) -> None:
+    gt_dir = data_dir / claim_id
+    gt_dir.mkdir(parents=True, exist_ok=True)
+    (gt_dir / "answer.json").write_text(json.dumps(gt), encoding="utf-8")
+
+
 def test_evaluate_claim_perfect_match(
     tmp_path: Path,
     minimal_app_config_factory: MinimalAppConfigFactory,
@@ -50,17 +61,20 @@ def test_evaluate_claim_perfect_match(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate_claim(claim_id)
-    assert result.accuracy == 1.0
-    assert result.n_evaluated == 1
-    assert result.matches == [True]
+    assert result.raw.accuracy == 1.0
+    assert result.raw.n == 1
+    assert result.population.n_ground_truth == 1
+    assert result.population.n_scored == 1
+    assert result.outcomes[0].raw_match is True
+    assert result.outcomes[0].policy_match is True
     assert result.human_in_the_loop_true == 0
     assert result.human_in_the_loop_false == 1
     # A5: macro mean over all 3 labels; only DENY has support → F1=1; others 0 → ≈1/3
-    assert result.f1_macro == pytest.approx(1.0 / 3.0)
-    assert len(result.confusion_matrix) == 3
-    assert len(result.confusion_matrix[0]) == 3
+    assert result.raw.f1_macro == pytest.approx(1.0 / 3.0)
+    assert len(result.raw.confusion_matrix) == 3
+    assert len(result.raw.confusion_matrix[0]) == 4  # labels + unscored
     deny_idx = result.labels.index("DENY")
-    assert result.confusion_matrix[deny_idx][deny_idx] == 1
+    assert result.raw.confusion_matrix[deny_idx][deny_idx] == 1
 
 
 def test_evaluate_claim_rejects_mixed_generation(
@@ -149,11 +163,13 @@ def test_batch_counts_mixed_generation_as_incorrect(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate()
-    assert result.n_evaluated == 2
+    assert result.population.n_ground_truth == 2
+    assert result.population.n_scored == 1
+    assert result.population.n_invalid_prediction == 1
     assert "claim 2" in result.claim_ids
-    assert result.y_true == ["DENY"]
-    assert result.y_pred == ["DENY"]
-    assert result.accuracy == 0.5
+    claim2 = next(o for o in result.outcomes if o.claim_id == "claim 2")
+    assert claim2.status.value == "invalid_prediction"
+    assert result.raw.accuracy == 0.5
 
 
 def test_batch_scores_claim_without_manifest(
@@ -177,10 +193,10 @@ def test_batch_scores_claim_without_manifest(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate()
-    assert result.n_evaluated == 1
+    assert result.population.n_scored == 1
     assert result.claim_ids == ["claim 1"]
-    assert result.accuracy == 1.0
-    assert result.matches == [True]
+    assert result.raw.accuracy == 1.0
+    assert result.outcomes[0].raw_match is True
 
 
 def test_evaluate_claim_mismatch(
@@ -204,11 +220,10 @@ def test_evaluate_claim_mismatch(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate_claim(claim_id)
-    assert result.accuracy == 0.0
-    assert result.matches == [False]
-    off_diagonal = sum(
-        result.confusion_matrix[i][j] for i in range(len(result.labels)) for j in range(len(result.labels)) if i != j
-    )
+    assert result.raw.accuracy == 0.0
+    assert result.outcomes[0].raw_match is False
+    n_labels = len(result.labels)
+    off_diagonal = sum(result.raw.confusion_matrix[i][j] for i in range(n_labels) for j in range(n_labels) if i != j)
     assert off_diagonal == 1
 
 
@@ -259,12 +274,14 @@ def test_acceptable_decision_counts_as_match(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate_claim(claim_id)
-    assert result.matches == [True]
-    assert result.accuracy == 1.0
-    # A5: effective pred remapped to UNCERTAIN when matched via acceptable_decision
+    outcome = result.outcomes[0]
+    assert outcome.raw_match is False
+    assert outcome.policy_match is True
+    # Task 1 publishes raw only: acceptable credit is not in the headline accuracy.
+    assert result.raw.accuracy == 0.0
+    deny_idx = result.labels.index("DENY")
     uncertain_idx = result.labels.index("UNCERTAIN")
-    assert result.confusion_matrix[uncertain_idx][uncertain_idx] == 1
-    assert result.f1_macro == pytest.approx(1.0 / 3.0)
+    assert result.raw.confusion_matrix[uncertain_idx][deny_idx] == 1
 
 
 def test_acceptable_decision_ignored_when_nan(
@@ -288,8 +305,9 @@ def test_acceptable_decision_ignored_when_nan(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate_claim(claim_id)
-    assert result.matches == [False]
-    assert result.accuracy == 0.0
+    assert result.outcomes[0].raw_match is False
+    assert result.outcomes[0].policy_match is False
+    assert result.raw.accuracy == 0.0
 
 
 def test_confusion_matrix_label_order(
@@ -319,10 +337,11 @@ def test_confusion_matrix_label_order(
     )
     result = Evaluator(config).evaluate_claim(claim_id)
     assert result.labels == custom_labels
-    assert len(result.confusion_matrix) == len(custom_labels)
-    assert all(len(row) == len(custom_labels) for row in result.confusion_matrix)
+    assert result.unscored_label == "NO_PREDICTION"
+    assert len(result.raw.confusion_matrix) == len(custom_labels)
+    assert all(len(row) == len(custom_labels) + 1 for row in result.raw.confusion_matrix)
     approve_idx = custom_labels.index("APPROVE")
-    assert result.confusion_matrix[approve_idx][approve_idx] == 1
+    assert result.raw.confusion_matrix[approve_idx][approve_idx] == 1
 
 
 def test_unknown_pred_label_raises(
@@ -376,15 +395,56 @@ def test_evaluate_batch_aggregates_two_claims(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate()
-    assert result.n_evaluated == 2
-    assert result.accuracy == 1.0
+    assert result.population.n_ground_truth == 2
+    assert result.raw.n == 2
+    assert result.raw.accuracy == 1.0
     assert result.human_in_the_loop_true == 1
     assert result.human_in_the_loop_false == 1
-    assert sum(sum(row) for row in result.confusion_matrix) == 2
+    assert sum(sum(row) for row in result.raw.confusion_matrix) == 2
     assert set(result.claim_ids) == {"claim 1", "claim 2"}
 
 
-def test_evaluate_batch_skips_missing_prediction(
+def test_ground_truth_without_results_folder_is_counted_incorrect(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_ground_truth_only(
+        data_dir,
+        "claim 2",
+        gt={"decision": "APPROVE"},
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.population.n_ground_truth == 2
+    assert result.population.n_scored == 1
+    assert result.population.n_missing_prediction == 1
+    assert result.population.coverage_rate == pytest.approx(0.5)
+    assert result.raw.accuracy == 0.5
+    assert "claim 2" in result.claim_ids
+    claim2 = next(o for o in result.outcomes if o.claim_id == "claim 2")
+    assert claim2.status.value == "missing_prediction"
+    assert claim2.ground_truth == "APPROVE"
+    assert claim2.reason is not None
+    unscored_idx = len(result.labels)
+    approve_idx = result.labels.index("APPROVE")
+    assert result.raw.confusion_matrix[approve_idx][unscored_idx] == 1
+
+
+def test_results_folder_without_prediction_artifact_is_counted_incorrect(
     tmp_path: Path,
     minimal_app_config_factory: MinimalAppConfigFactory,
 ) -> None:
@@ -408,13 +468,52 @@ def test_evaluate_batch_skips_missing_prediction(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate()
-    # Missing prediction still counts as an incorrect sample for accuracy.
-    assert result.n_evaluated == 2
-    assert result.accuracy == 0.5
+    assert result.population.n_ground_truth == 2
+    assert result.population.n_missing_prediction == 1
+    assert result.population.coverage_rate == pytest.approx(0.5)
+    assert result.raw.accuracy == 0.5
     assert set(result.claim_ids) == {"claim 1", "claim 2"}
-    assert sum(sum(row) for row in result.confusion_matrix) == 1
-    assert result.y_true == ["DENY"]
-    assert result.y_pred == ["DENY"]
+    assert sum(sum(row) for row in result.raw.confusion_matrix) == 2
+
+
+def test_matrix_total_equals_population(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 2",
+        gt={"decision": "APPROVE"},
+        pred={"decision": "DENY"},
+    )
+    _write_ground_truth_only(
+        data_dir,
+        "claim 3",
+        gt={"decision": "UNCERTAIN"},
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    matrix = result.raw.confusion_matrix
+    total = sum(sum(row) for row in matrix)
+    assert total == result.population.n_ground_truth
+    n_labels = len(result.labels)
+    trace = sum(matrix[i][i] for i in range(n_labels))
+    assert result.raw.accuracy == pytest.approx(trace / total)
 
 
 def test_evaluate_batch_skips_missing_ground_truth(
@@ -441,8 +540,10 @@ def test_evaluate_batch_skips_missing_ground_truth(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate()
-    assert result.n_evaluated == 1
+    assert result.population.n_ground_truth == 1
+    assert result.population.n_invalid_ground_truth == 1
     assert result.claim_ids == ["claim 1"]
+    assert result.population.n_unmatched_prediction == 0
 
 
 def test_evaluate_batch_empty(
@@ -460,11 +561,13 @@ def test_evaluate_batch_empty(
         extraction_prompt="extract",
     )
     result = Evaluator(config).evaluate()
-    assert result.n_evaluated == 0
-    assert result.accuracy == 0.0
-    assert result.f1_macro == 0.0
+    assert result.population.n_ground_truth == 0
+    assert result.population.coverage_rate == 0.0
+    assert result.raw.accuracy == 0.0
+    assert result.raw.f1_macro == 0.0
     assert result.claim_ids == []
-    assert sum(sum(row) for row in result.confusion_matrix) == 0
+    assert sum(sum(row) for row in result.raw.confusion_matrix) == 0
+    assert len(result.raw.confusion_matrix[0]) == len(result.labels) + 1
 
 
 def test_evaluate_batch_refuses_unsafe_names_in_discovery(
@@ -495,9 +598,9 @@ def test_evaluate_batch_refuses_unsafe_names_in_discovery(
     def _unsafe_names() -> list[str]:
         return ["../escape", "claim/nested", "claim 1"]
 
-    evaluator._discover_claim_ids = _unsafe_names  # type: ignore[method-assign]
+    evaluator._ground_truth_claim_ids = _unsafe_names  # type: ignore[method-assign]
     result = evaluator.evaluate()
-    assert result.n_evaluated == 1
+    assert result.population.n_ground_truth == 1
     assert result.claim_ids == ["claim 1"]
     # Unsafe names must not escape roots to read sibling files
     assert secret.read_text(encoding="utf-8") == '{"decision":"APPROVE"}'

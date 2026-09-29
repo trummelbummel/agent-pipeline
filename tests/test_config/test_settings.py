@@ -250,8 +250,23 @@ def test_load_config_reads_evaluation_section() -> None:
     assert "APPROVE" in evaluation.labels
     assert "DENY" in evaluation.labels
     assert "UNCERTAIN" in evaluation.labels
+    assert evaluation.unscored_label == "NO_PREDICTION"
     assert evaluation.metrics_artifact == "evaluation_metrics.json"
     assert evaluation.visualization_artifact == "evaluation_visualization.png"
+
+
+def test_evaluation_unscored_label_defaults_to_no_prediction() -> None:
+    from compliance.config.settings import EvaluationConfig
+
+    evaluation = EvaluationConfig()
+    assert evaluation.unscored_label == "NO_PREDICTION"
+
+
+def test_evaluation_rejects_unscored_label_colliding_with_labels() -> None:
+    from compliance.config.settings import EvaluationConfig
+
+    with pytest.raises(ValidationError, match="unscored_label"):
+        EvaluationConfig(labels=["APPROVE", "DENY", "UNCERTAIN"], unscored_label="DENY")
 
 
 def test_load_config_reads_ocr_retry_section() -> None:

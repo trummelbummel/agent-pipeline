@@ -144,6 +144,8 @@ def test_load_config_reads_artifact_names() -> None:
     assert artifacts.document_metadata == "document_metadata.json"
     assert artifacts.supporting_document == "supporting_document.md"
     assert artifacts.supporting_documents == "supporting_documents.md"
+    assert artifacts.run_manifest == "run_manifest.json"
+    assert artifacts.analysis_result == "analysis_result.json"
 
 
 def test_load_config_benford_disabled_by_default() -> None:

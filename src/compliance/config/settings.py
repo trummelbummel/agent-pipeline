@@ -27,6 +27,7 @@ class PreprocessedArtifactNames(StrictConfigModel):
     :param answer: Ground-truth answer JSON artifact.
     :param predicted_answer: Pipeline-predicted decision JSON (when available).
     :param analysis_result: Claim-analysis JSON artifact under results_dir.
+    :param run_manifest: Per-claim publication commit marker under results_dir.
     :param supporting_document: Docling-extracted document content as markdown.
     :param supporting_documents: Booking/internal markdown artifact.
     :param document_metadata: Per-document DocumentMetaData JSON artifact.
@@ -36,6 +37,7 @@ class PreprocessedArtifactNames(StrictConfigModel):
     answer: str = "answer.json"
     predicted_answer: str = "predicted_answer.json"
     analysis_result: str = "analysis_result.json"
+    run_manifest: str = "run_manifest.json"
     supporting_document: str = "supporting_document.md"
     supporting_documents: str = "supporting_documents.md"
     document_metadata: str = "document_metadata.json"

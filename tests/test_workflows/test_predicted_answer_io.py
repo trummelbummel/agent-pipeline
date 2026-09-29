@@ -7,9 +7,9 @@ from compliance.models.claim import GroundTruth
 from compliance.workflows.predicted_answer_io import (
     SOURCE_ANALYSIS,
     SOURCE_PREPROCESS,
+    analysis_predicted_answer_text,
     is_preprocess_origin_prediction,
     remove_stale_preprocess_prediction,
-    write_analysis_predicted_answer,
     write_preprocess_predicted_answer,
 )
 
@@ -106,12 +106,13 @@ def test_write_preprocess_stamps_source(tmp_path: Path) -> None:
     assert payload["decision"] == "DENY"
 
 
-def test_write_analysis_stamps_source(tmp_path: Path) -> None:
-    path = tmp_path / "predicted_answer.json"
-    written = write_analysis_predicted_answer(
-        path,
+def test_analysis_predicted_answer_text_stamps_source_and_run_id() -> None:
+    text = analysis_predicted_answer_text(
         GroundTruth(decision="APPROVE", explanation="checker_consistent"),
+        run_id="20260929T120000-abcd1234",
     )
-    payload = json.loads(written.read_text(encoding="utf-8"))
+    payload = json.loads(text)
     assert payload["source"] == SOURCE_ANALYSIS
+    assert payload["run_id"] == "20260929T120000-abcd1234"
     assert payload["decision"] == "APPROVE"
+    assert text.endswith("\n")

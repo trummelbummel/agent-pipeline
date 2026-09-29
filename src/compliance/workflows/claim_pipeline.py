@@ -24,12 +24,17 @@ from compliance.preprocessing.claim_batch import (
     _is_claim_folder,
     _validate_claim_dir_name,
 )
+from compliance.workflows.artifact_publication import (
+    PublishedGeneration,
+    new_run_id,
+    publish_claim_generation,
+)
 from compliance.workflows.claim_dates import (
     _departure_beyond_days,
     _reference_today,
     _suspicious_dating,
 )
-from compliance.workflows.predicted_answer_io import write_analysis_predicted_answer
+from compliance.workflows.predicted_answer_io import analysis_predicted_answer_text
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +260,8 @@ class ClaimAnalysisState(TypedDict, total=False):
         routed coverage label is ``False``, a raw reason/document classifier
         label is ``False``, or analysis decision is UNCERTAIN (checker dating /
         departure / identity unclear / checker ERROR, coverage abstention).
+    :param run_id: Generation id stamped into every artifact published for this
+        claim in the current run.
     """
 
     claim_id: str
@@ -282,6 +289,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     departure_within_days: bool
     checker_suspicious_dating: bool
     human_in_the_loop: bool
+    run_id: str
 
 
 class ClaimPipeline:
@@ -336,27 +344,36 @@ class ClaimPipeline:
         builder.add_edge("persist", END)
         return builder.compile()
 
-    def analyze_claim(self, claim_dir: Path) -> Path:
+    def analyze_claim(self, claim_dir: Path, *, run_id: str | None = None) -> Path:
         """Run claim analysis for one claim and write analysis_result.json.
 
         :param claim_dir: Claim folder whose ``name`` is the safe path segment.
             When the folder already contains preprocessed artifacts, those are
             loaded directly; otherwise artifacts are read from config
             ``preprocessed_dir`` / ``claim_dir.name`` (process_then_analyze path).
+        :param run_id: Generation id for this claim; minted when the caller
+            passes none so single-claim and API entry points still publish under
+            a run-scoped identity.
         :return: Path to the written analysis_result.json under results_dir.
         :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
         """
         _validate_claim_dir_name(claim_dir.name)
         input_root = self._input_root_for_claim(claim_dir)
+        resolved_run_id = run_id if run_id is not None else new_run_id()
         log_branch_decision(
             logger,
             branch="claim_analysis",
             outcome="START",
             reason="analyze_claim",
             claim=claim_dir.name,
+            run_id=resolved_run_id,
         )
         graph = self.build_graph()
-        graph.invoke({"claim_id": claim_dir.name, "input_root": str(input_root)})
+        graph.invoke({
+            "claim_id": claim_dir.name,
+            "input_root": str(input_root),
+            "run_id": resolved_run_id,
+        })
         return self._analysis_result_path(claim_dir.name)
 
     def run(self, source: Path | None = None) -> list[Path]:
@@ -373,6 +390,7 @@ class ClaimPipeline:
         :return: Paths to successfully written analysis_result.json files.
         """
         self.results_root.mkdir(parents=True, exist_ok=True)
+        run_id = new_run_id()
 
         if source is not None and _is_claim_folder(source):
             log_branch_decision(
@@ -381,13 +399,14 @@ class ClaimPipeline:
                 outcome="SINGLE",
                 reason="caller_claim_folder",
                 claim=source.name,
+                run_id=run_id,
             )
-            return [self.analyze_claim(source)]
+            return [self.analyze_claim(source, run_id=run_id)]
 
         root = self.preprocessed_root if source is None else source
         folders = _discover_claim_folders(root)
         logger.info("Discovered %d claim folders under %s", len(folders), root)
-        written = self._written_analysis_outputs(folders)
+        written = self._written_analysis_outputs(folders, run_id=run_id)
         log_branch_decision(
             logger,
             branch="analysis_batch",
@@ -395,6 +414,7 @@ class ClaimPipeline:
             reason="soft_fail_batch",
             written=len(written),
             total=len(folders),
+            run_id=run_id,
         )
         return written
 
@@ -409,10 +429,11 @@ class ClaimPipeline:
             return claim_dir
         return self.preprocessed_root / claim_dir.name
 
-    def _written_analysis_outputs(self, folders: list[Path]) -> list[Path]:
+    def _written_analysis_outputs(self, folders: list[Path], *, run_id: str) -> list[Path]:
         """Analyze each claim folder; soft-fail and continue on errors.
 
         :param folders: Claim directories under preprocessed_dir.
+        :param run_id: Shared generation id for every claim in this run.
         :return: Paths of analysis_result.json files written successfully.
         """
         written: list[Path] = []
@@ -420,7 +441,7 @@ class ClaimPipeline:
             logger.info("Analyzing %s", claim_dir.name)
             try:
                 _validate_claim_dir_name(claim_dir.name)
-                written.append(self.analyze_claim(claim_dir))
+                written.append(self.analyze_claim(claim_dir, run_id=run_id))
             except Exception as exc:
                 log_branch_decision(
                     logger,
@@ -606,16 +627,17 @@ class ClaimPipeline:
         # also flip document_metadata; preprocess-HITL is already stored there.
         if hitl and not bool(state.get("human_in_the_loop")):
             self._persist_human_in_the_loop_metadata(state)
-        path = self._written_analysis_result(state)
-        predicted_path = self._written_predicted_answer(state)
+        published = self._published_generation(state)
         log_branch_decision(
             logger,
             branch="persist",
             outcome="WROTE",
             reason="analysis_result",
             claim=state.get("claim_id"),
-            path=str(path),
-            predicted_answer=str(predicted_path),
+            path=str(published.artifacts[0]) if published.artifacts else None,
+            predicted_answer=str(published.artifacts[1]) if len(published.artifacts) > 1 else None,
+            manifest=str(published.manifest),
+            run_id=published.run_id,
             human_in_the_loop=hitl,
         )
         return {"human_in_the_loop": hitl}
@@ -1063,6 +1085,7 @@ class ClaimPipeline:
         decision = self._decision_from_state(state)
         payload["decision"] = decision.decision
         payload["decision_explanation"] = decision.explanation if isinstance(decision.explanation, str) else None
+        payload["run_id"] = state["run_id"]
         return payload
 
     def _document_stage_for_coverage(self, routed: RoutedCoverage) -> ClassificationConfig:
@@ -1293,34 +1316,29 @@ class ClaimPipeline:
             explanation="checker_consistent",
         )
 
-    def _written_analysis_result(self, state: ClaimAnalysisState) -> Path:
-        """Persist analysis_result.json under results_dir/{claim_id}/.
+    def _published_generation(self, state: ClaimAnalysisState) -> PublishedGeneration:
+        """Publish analysis_result + predicted_answer as one run-scoped generation.
 
-        :param state: Final ClaimAnalysisState.
-        :return: Path to the written analysis_result.json file.
+        :param state: Final ClaimAnalysisState with ``run_id``.
+        :return: Paths of the promoted artifacts and the committed manifest.
         """
-        claim_id = state["claim_id"]
-        _validate_claim_dir_name(claim_id)
-        path = self._analysis_result_path(claim_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self._analysis_result_payload(state)
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        return path
-
-    def _written_predicted_answer(self, state: ClaimAnalysisState) -> Path:
-        """Persist predicted_answer.json for the evaluator from analysis decision.
-
-        Includes ``human_in_the_loop`` from preprocess metadata, classifier
-        ``False`` abstention, or any analysis UNCERTAIN (checker dating /
-        departure / identity unclear) so operators see the flag on the prediction.
-
-        :param state: Final ClaimAnalysisState.
-        :return: Path to the written predicted_answer.json file.
-        """
-        claim_id = state["claim_id"]
-        _validate_claim_dir_name(claim_id)
-        path = self._predicted_answer_path(claim_id)
-        return write_analysis_predicted_answer(path, self._predicted_answer_decision(state))
+        artifacts = self._config.preprocessing.artifacts
+        run_id = state["run_id"]
+        bodies = {
+            artifacts.analysis_result: json.dumps(self._analysis_result_payload(state), indent=2) + "\n",
+            artifacts.predicted_answer: analysis_predicted_answer_text(
+                self._predicted_answer_decision(state),
+                run_id=run_id,
+            ),
+        }
+        return publish_claim_generation(
+            results_root=self.results_root,
+            claim_id=state["claim_id"],
+            run_id=run_id,
+            bodies=bodies,
+            manifest_name=artifacts.run_manifest,
+            source="analysis",
+        )
 
     def _predicted_answer_decision(self, state: ClaimAnalysisState) -> GroundTruth:
         """Build evaluator GroundTruth from analysis decision + resolved HITL.

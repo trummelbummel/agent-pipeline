@@ -450,6 +450,47 @@ def test_analyze_claim_cancellation_path_writes_analysis_result(
     assert predicted["decision"] == "APPROVE"
     assert predicted["source"] == "analysis"
     assert chat_fn.call_count >= 1
+    artifacts = config.preprocessing.artifacts
+    results_claim = Path(config.preprocessing.results_dir) / claim_dir.name
+    manifest_path = results_claim / artifacts.run_manifest
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert payload["run_id"] == predicted["run_id"] == manifest["run_id"]
+    assert set(manifest["artifacts"]) == {artifacts.analysis_result, artifacts.predicted_answer}
+    assert not (Path(config.preprocessing.results_dir) / ".staging").exists()
+    assert {p.name for p in results_claim.iterdir()} == {
+        artifacts.analysis_result,
+        artifacts.predicted_answer,
+        artifacts.run_manifest,
+    }
+
+
+def test_failed_rerun_keeps_last_successful_generation(
+    tmp_path: Path,
+    cancellation_chat_factory: CancellationChatFactory,
+) -> None:
+    """D-02: a failed rerun publishes nothing; last successful generation stays intact."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config)
+    chat_fn = _cancellation_chat_fn(cancellation_chat_factory)
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+    pipeline.analyze_claim(claim_dir)
+
+    artifacts = config.preprocessing.artifacts
+    results_claim = Path(config.preprocessing.results_dir) / claim_dir.name
+    first_bytes = {
+        name: (results_claim / name).read_bytes()
+        for name in (artifacts.analysis_result, artifacts.predicted_answer, artifacts.run_manifest)
+    }
+
+    failing = MagicMock(side_effect=RuntimeError("chat transport failed"))
+    failing_pipeline = ClaimPipeline(config, chat_fn=failing)
+    with pytest.raises(RuntimeError, match="chat transport failed"):
+        failing_pipeline.analyze_claim(claim_dir)
+
+    for name, content in first_bytes.items():
+        assert (results_claim / name).read_bytes() == content
 
 
 def test_coverage_node(

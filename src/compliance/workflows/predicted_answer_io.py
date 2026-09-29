@@ -33,33 +33,66 @@ def is_preprocess_origin_prediction(data: dict[str, Any]) -> bool:
     return _explanation_looks_like_fraud(data.get("explanation"))
 
 
-def write_preprocess_predicted_answer(path: Path, prediction: GroundTruth) -> Path:
+def analysis_predicted_answer_text(prediction: GroundTruth, *, run_id: str) -> str:
+    """Build analysis-origin predicted_answer JSON text stamped with ``run_id``.
+
+    :param prediction: GroundTruth decision from analysis (may include HITL).
+    :param run_id: Generation id shared with the sibling analysis_result.
+    :return: Pretty-printed JSON with trailing newline for staging/publication.
+    """
+    return _sourced_predicted_answer_payload(
+        prediction,
+        source=SOURCE_ANALYSIS,
+        run_id=run_id,
+    )
+
+
+def write_preprocess_predicted_answer(
+    path: Path,
+    prediction: GroundTruth,
+    *,
+    run_id: str | None = None,
+) -> Path:
     """Write a preprocess-origin predicted_answer.json under ``path``.
 
     :param path: Destination path for predicted_answer.json.
     :param prediction: GroundTruth decision from document-level preprocess.
+    :param run_id: Optional generation id; omitted from the body when None.
     :return: Path written.
     """
-    return _write_sourced_predicted_answer(
-        path,
+    text = _sourced_predicted_answer_payload(
         prediction,
         source=SOURCE_PREPROCESS,
-        reason=_log_reason_from_prediction(prediction),
+        run_id=run_id,
     )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    log_branch_decision(
+        logger,
+        branch="predicted_answer",
+        outcome="WROTE",
+        reason=_log_reason_from_prediction(prediction),
+        decision=prediction.decision,
+        path=str(path),
+    )
+    return path
 
 
-def write_analysis_predicted_answer(path: Path, prediction: GroundTruth) -> Path:
-    """Write an analysis-origin predicted_answer.json under ``path``.
+def preprocess_predicted_answer_text(
+    prediction: GroundTruth,
+    *,
+    run_id: str,
+) -> str:
+    """Build preprocess-origin predicted_answer JSON text stamped with ``run_id``.
 
-    :param path: Destination path for predicted_answer.json.
-    :param prediction: GroundTruth decision from analysis (may include HITL).
-    :return: Path written.
+    :param prediction: GroundTruth decision from document-level preprocess.
+    :param run_id: Generation id for the published prediction.
+    :return: Pretty-printed JSON with trailing newline for staging/publication.
     """
-    return _write_sourced_predicted_answer(
-        path,
+    return _sourced_predicted_answer_payload(
         prediction,
-        source=SOURCE_ANALYSIS,
-        reason="analysis_decision",
+        source=SOURCE_PREPROCESS,
+        run_id=run_id,
     )
 
 
@@ -96,25 +129,25 @@ def remove_stale_preprocess_prediction(
     return True
 
 
-def _write_sourced_predicted_answer(
-    path: Path,
+def _sourced_predicted_answer_payload(
     prediction: GroundTruth,
     *,
     source: str,
-    reason: str,
-) -> Path:
+    run_id: str | None,
+) -> str:
+    """Shared payload builder for analysis and preprocess predicted_answer bodies.
+
+    :param prediction: Decision to serialize.
+    :param source: ``SOURCE_ANALYSIS`` or ``SOURCE_PREPROCESS``.
+    :param run_id: Generation stamp; omitted from the body when None so legacy
+        preprocess writers stay unchanged until they pass a run id.
+    :return: Pretty-printed JSON with trailing newline.
+    """
     payload = json.loads(prediction.model_dump_json())
     payload["source"] = source
-    _write_predicted_answer_file(path, payload)
-    log_branch_decision(
-        logger,
-        branch="predicted_answer",
-        outcome="WROTE",
-        reason=reason,
-        decision=prediction.decision,
-        path=str(path),
-    )
-    return path
+    if run_id is not None:
+        payload["run_id"] = run_id
+    return json.dumps(payload, indent=2, allow_nan=False) + "\n"
 
 
 def _stale_skip_reason(
@@ -129,14 +162,6 @@ def _stale_skip_reason(
     if not is_preprocess_origin_prediction(data):
         return "not_preprocess_origin"
     return None
-
-
-def _write_predicted_answer_file(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
 
 
 def _log_reason_from_prediction(prediction: GroundTruth) -> str:

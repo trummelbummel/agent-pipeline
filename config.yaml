@@ -20,6 +20,7 @@ preprocessing:
     answer: answer.json
     predicted_answer: predicted_answer.json
     analysis_result: analysis_result.json
+    run_manifest: run_manifest.json
     supporting_document: supporting_document.md
     supporting_documents: supporting_documents.md
     document_metadata: document_metadata.json

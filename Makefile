@@ -1,6 +1,6 @@
 .PHONY: install install-python install-ollama ollama-serve \
 	ollama-pull-preprocess ollama-pull-analyze ollama-pull-all \
-	preprocess analyze evaluation serve check test build clean-build help
+	preprocess analyze evaluation serve check test test-integration build clean-build help
 
 CONFIG ?= config.yaml
 UV ?= uv
@@ -108,9 +108,13 @@ check: ## Run code quality tools.
 	@echo "🚀 Static type checking: Running mypy"
 	@$(UV) run mypy
 
-test: ## Test the code with pytest
-	@echo "🚀 Testing code: Running pytest"
-	@$(UV) run python -m pytest --doctest-modules
+test: ## Fast lane (default local/merge check): unit tests + public-package import smoke; deselects integration
+	@echo "🚀 Testing code: Running pytest fast lane (not integration)"
+	@$(UV) run python -m pytest --doctest-modules -m "not integration"
+
+test-integration: ## Opt-in integration lane: pytest -m integration (Docling over real data/raw; slow)
+	@echo "🚀 Testing code: Running pytest integration lane (-m integration)"
+	@$(UV) run python -m pytest -m integration
 
 build: clean-build ## Build wheel file
 	@echo "🚀 Creating wheel file"

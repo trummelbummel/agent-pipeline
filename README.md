@@ -182,9 +182,12 @@ HOST=0.0.0.0 PORT=8080 RELOAD=0 make serve
 ## Tests & quality
 
 ```bash
-make test
+make test              # fast lane (default local/merge check): unit tests + public-package import smoke
+make test-integration  # opt-in: integration-marked tests (Docling over real data/raw, slow)
 make check
 ```
+
+`make test` runs `pytest -m "not integration"`, so integration tests are deselected unless you run `make test-integration`.
 
 ## Algorithm design choices
 

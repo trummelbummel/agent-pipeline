@@ -789,14 +789,15 @@ class DocumentReader(Reader):
             return float(_MISSING)
         return min(scores)
 
-    def _to_model(self, processed: Any, *, source_file: str) -> BaseModel:
+    def _to_model(self, processed: Any, *, source_file: str = "") -> BaseModel:
         """Build DocumentData with DocumentMetaData (signature, probability, HITL).
 
         ``ExtractionFailure`` marks unusable OCR as ``faulty_extraction`` and forces
         ``human_in_the_loop``. Low ``extraction_probability`` also forces HITL.
 
         :param processed: Output of DocumentPreprocessor.preprocess.
-        :param source_file: Basename of the source document path.
+        :param source_file: Basename of the source document path, or empty
+            when the caller (the base ``Reader.read`` contract) has none.
         :return: DocumentData instance including populated metadata.
         """
         confidence = processed.get("confidence", _MISSING)

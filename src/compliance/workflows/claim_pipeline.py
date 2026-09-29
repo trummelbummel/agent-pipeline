@@ -508,15 +508,13 @@ class ClaimPipeline:
         documents = self._document_metadata_entries(claim_id, input_root=input_root)
         found: set[str] = set()
         for entry in documents:
-            reasons = entry.get("failure_reasons") or []
+            reasons = entry.get("failure_reasons")
+            if not isinstance(reasons, list):
+                continue
             for code in ("ocr_read_failure", "ocr_failure"):
                 if code in reasons:
                     found.add(code)
-        if "ocr_read_failure" in found:
-            return "ocr_read_failure"
-        if "ocr_failure" in found:
-            return "ocr_failure"
-        return None
+        return next((code for code in ("ocr_read_failure", "ocr_failure") if code in found), None)
 
     @staticmethod
     def _classifier_returned_false(state: ClaimAnalysisState) -> bool:
@@ -532,7 +530,9 @@ class ClaimPipeline:
         """
         if state["routed_coverage"].label == "False":
             return True
-        return any("False" in (state.get(key) or []) for key in ("reason_labels", "document_labels"))
+        return any(
+            "False" in labels for labels in (state.get("reason_labels") or [], state.get("document_labels") or [])
+        )
 
     def _resolved_human_in_the_loop(self, state: ClaimAnalysisState) -> bool:
         """HITL from preprocess, classifier ``False``, or any UNCERTAIN decision.
@@ -567,9 +567,7 @@ class ClaimPipeline:
             json.dumps({"documents": updated}, indent=2) + "\n",
             encoding="utf-8",
         )
-        reason = "classifier_false"
-        if not self._classifier_returned_false(state):
-            reason = self._decision_from_state(state).explanation or "uncertain"
+        reason = self._human_in_the_loop_reason(state)
         log_branch_decision(
             logger,
             branch="human_in_the_loop",
@@ -578,6 +576,18 @@ class ClaimPipeline:
             claim=claim_id,
             path=str(path),
         )
+
+    def _human_in_the_loop_reason(self, state: ClaimAnalysisState) -> str:
+        """Produce the log reason for the human-in-the-loop flag.
+
+        :param state: Graph state used to resolve the classifier and decision outcome.
+        :return: ``classifier_false`` when the classifier drove the flag; otherwise the
+            decision explanation when it is a non-empty string, else ``uncertain``.
+        """
+        if self._classifier_returned_false(state):
+            return "classifier_false"
+        explanation = self._decision_from_state(state).explanation
+        return explanation if isinstance(explanation, str) and explanation else "uncertain"
 
     def _document_metadata_entries(self, claim_id: str, *, input_root: Path | None = None) -> list[dict[str, object]]:
         """Load document metadata entries for a claim folder.

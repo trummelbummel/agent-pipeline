@@ -135,6 +135,7 @@ def detect_signature_with_yolo(
     """
     try:
         from ultralytics import YOLO
+        from ultralytics.engine.results import Results
     except ImportError as exc:
         raise SignatureDependencyError("ultralytics") from exc
 
@@ -152,7 +153,7 @@ def detect_signature_with_yolo(
         raise SignatureInferenceError(image_path, exc) from exc
     scores: list[float] = []
     for result in results:
-        boxes = result.boxes
+        boxes = result.boxes if isinstance(result, Results) else None
         if boxes is None or len(boxes) == 0:
             continue
         scores.extend(float(value) for value in boxes.conf.tolist())

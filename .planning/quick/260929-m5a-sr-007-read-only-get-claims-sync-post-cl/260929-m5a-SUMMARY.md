@@ -252,4 +252,4 @@ None beyond the plan's mitigated register (T-SR007-01..08); T-SR007-09 remains t
 - `src/main.py` — FOUND (`analyze_claim_exclusively`, `ClaimAnalysisBusyError`)
 - `README.md` — FOUND (`claims/{claim_id}/analysis`, `analysis_in_progress`, `run_manifest`)
 - `.gsd/review_backlog.md` — FOUND (`### [x] SR-007`, steered done row); never staged
-- Commits `ef3f055`, `4d733f1`, `753fe73`, `ec03fa8`, `63c263d` — FOUND
+- Commits `ef3f055`, `4d733f1`, `753fe73`, `ec03fa8`, `63c263d`, `0428029`, `18addae` — FOUND

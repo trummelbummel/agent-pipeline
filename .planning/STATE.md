@@ -5,11 +5,11 @@ current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
 current_plan: 4
 status: executing
-stopped_at: Completed 260929-lni-PLAN.md (SR-006)
-last_updated: "2026-09-29T13:56:13Z"
+stopped_at: Completed 260929-m5a-PLAN.md (SR-007)
+last_updated: "2026-09-29T14:21:33.759Z"
 last_activity: 2026-09-29
 last_activity_desc: Completed quick task 260929-lni (SR-006)
-state_head: 794151378f28ea5319258809dcba03742dd4c088
+state_head: ec03fa8ba7b8f158b9691678c453b2cde83101be
 progress:
   total_phases: 8
   completed_phases: 4
@@ -113,6 +113,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 07]: SR-005: stage under results_dir/.staging/{run_id}/{claim}/; os.replace; run_manifest.json last as commit point
 - [Phase 07]: SR-005: HITL clears per run via provenance on analysis artifacts; analysis never mutates document_metadata.json
 - [Phase 07]: SR-006: GT-first eval; missing pred=incorrect + coverage_rate; raw vs policy named metrics
+- [Phase 07]: SR-007: sync POST /claims/{id}/analysis; idempotency=claim_id; GET read-only (breaking)
+- [Phase 07]: SR-007: non-blocking flock at results_dir/.locks/{claim_id}.lock; 409 on contention
 
 ### Blockers/Concerns
 
@@ -138,8 +140,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-29T13:56:12.967Z
-Stopped at: Completed 260929-lni-PLAN.md (SR-006)
+Last session: 2026-09-29T14:21:33.307Z
+Stopped at: Completed 260929-m5a-PLAN.md (SR-007)
 Resume file: None
 
 ## Performance Metrics
@@ -170,3 +172,4 @@ Resume file: None
 | Phase 260929-kia P01 | 8min | 3 tasks | 5 files |
 | Phase 260929-l16 P01 | 11min | 3 tasks | 15 files |
 | Phase 260929-lni P01 | 9min | 3 tasks | 12 files |
+| Phase 260929-m5a P01 | 11min | 3 tasks | 13 files |

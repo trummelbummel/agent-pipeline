@@ -177,11 +177,15 @@ make serve
 Pulls all config models, then starts FastAPI on `http://127.0.0.1:8000` (OpenAPI docs at `/docs`).
 
 
-| Method | Path                 | Purpose                                          |
-| ------ | -------------------- | ------------------------------------------------ |
-| `POST` | `/claims`            | Multipart submit → writes `data/raw/{claim_id}/` |
-| `GET`  | `/claims/{claim_id}` | Preprocess + analyze one claim → decision JSON   |
-| `GET`  | `/claims`            | List processed claims from `data/results/`       |
+| Method | Path                          | Purpose                                                                 |
+| ------ | ----------------------------- | ----------------------------------------------------------------------- |
+| `POST` | `/claims`                     | Multipart submit → writes `data/raw/{claim_id}/`                        |
+| `POST` | `/claims/{claim_id}/analysis` | Preprocess + analyse one claim under a per-claim lock → decision JSON   |
+| `GET`  | `/claims/{claim_id}`          | Read the published decision from `data/results/` (never writes or LLMs) |
+| `GET`  | `/claims`                     | List processed claims from `data/results/`                              |
+
+
+Analysis is synchronous and triggered only by `POST /claims/{claim_id}/analysis`. The decision GET is a pure read of the published generation: it never writes artifacts and never calls OCR or the LLM. It returns `404` (`analysis_not_found`) when nothing has been analysed yet, and `409` with a reason code (`invalid_json`, `run_id_missing`, `run_id_mismatch`, or `artifact_missing`) when the stored generation is unparseable or disagrees with its `run_manifest.json`. The analysis POST holds an exclusive per-claim lock keyed on `claim_id` alone, so a second concurrent request for the same claim is refused with `409` (`analysis_in_progress`) rather than queued or duplicated; a repeat POST after completion re-runs the analysis. `GET /claims` stays `200` when an artifact is unreadable and reports the reason per item under `errors` (same reason codes). **Breaking change:** clients that previously called the decision GET to produce a decision must now call the analysis POST first.
 
 
 ```bash

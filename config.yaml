@@ -32,15 +32,17 @@ extraction:
 
 classification:
   # Numeric coverage labels; semantic names in label_names (prompts keep the mapping too).
+  # "False" = abstain when no positive class fits (shared with analysis stages).
   labels:
     - "1"
     - "2"
     - "3"
+    - "False"
   label_names:
     "1": Trip cancellation or rescheduling
     "2": Personal Effects
     "3": Missed Departure or Missed Connection
-  other_label: Other
+  other_label: "False"
   model: qwen2.5:7b
   prompt: |
     Classify the claim description into one or more of the allowed coverage labels.
@@ -121,19 +123,27 @@ checking:
   # Only OCR dates within ±n years of reference today are considered for
   # suspicious dating; farther dates are treated as DOB / irrelevant history.
   suspicious_dating_consider_within_years: 2
+  # Checker chat transport failures (connection / timeout / server error) are
+  # retried with delay backoff_seconds * 2**attempt; after exhaustion the check
+  # is recorded as ERROR → UNCERTAIN + human_in_the_loop (SR-008).
+  transport_retry:
+    max_retries: 2
+    backoff_seconds: 1.0
 
 analysis:
   coverage:
     # Numeric coverage labels; descriptions live in the prompt mapping below.
+    # "False" = abstain (replaces the old "None" token — see README Tests/Algorithm notes).
     labels:
       - "1"
       - "2"
       - "3"
+      - "False"
     label_names:
       "1": Trip cancellation or rescheduling
       "2": Personal Effects
       "3": Missed Departure or Missed Connection
-    other_label: "None"
+    other_label: "False"
     model: qwen2.5:7b
     prompt: |
       Classify the claim description into one or more of the allowed coverage labels.
@@ -157,12 +167,13 @@ analysis:
       - "2"
       - "3"
       - "4"
+      - "False"
     label_names:
       "1": Jury duty
       "2": Medical emergency
       "3": Theft or criminal incident
       "4": Other specified personal emergencies
-    other_label: "None"
+    other_label: "False"
     model: qwen2.5:7b
     prompt: |
       Classify the cancellation reason from the claim description into the allowed labels.
@@ -184,12 +195,13 @@ analysis:
       - "2"
       - "3"
       - "4"
+      - "False"
     label_names:
       "1": medical certificate
       "2": police report
       "3": jury summon letter
       "4": hospital admission
-    other_label: "None"
+    other_label: "False"
     model: qwen2.5:7b
     prompt: |
       Classify the supporting document type from the document text into the allowed labels.
@@ -208,9 +220,10 @@ analysis:
     # Numeric document-type labels; descriptions live in the prompt mapping below.
     labels:
       - "1"
+      - "False"
     label_names:
       "1": Proof of theft, loss, or damage
-    other_label: "None"
+    other_label: "False"
     model: qwen2.5:7b
     prompt: |
       Classify the personal-effects supporting document from the document text.
@@ -228,10 +241,11 @@ analysis:
     labels:
       - "1"
       - "2"
+      - "False"
     label_names:
       "1": Incident report or documentation explaining the cause of delay
       "2": Proof of booking
-    other_label: "None"
+    other_label: "False"
     model: qwen2.5:7b
     prompt: |
       Classify the missed-departure supporting document from the document text.

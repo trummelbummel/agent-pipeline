@@ -4,13 +4,13 @@ Boolean LLM modes. ``result`` is the validated ``{"result": bool}`` field
 parsed from the LLM JSON response. The outcome comes from one per-mode
 polarity table lookup — there is no per-mode if/elif polarity logic.
 
-| Mode          | result true  | result false | malformed JSON / missing or non-bool result / empty |
-|---------------|--------------|--------------|--------------------------------------------------------|
-| containment   | PASS         | ABSTAIN      | ERROR                                                   |
-| contradicts   | VIOLATION    | PASS         | ERROR                                                   |
-| healthy       | VIOLATION    | PASS         | ERROR                                                   |
-| not_authentic | VIOLATION    | PASS         | ERROR                                                   |
-| incomplete    | VIOLATION    | PASS         | ERROR                                                   |
+| Mode          | result true  | result false | malformed JSON / missing or non-bool result / empty | transport error after retries |
+|---------------|--------------|--------------|--------------------------------------------------------|-------------------------------|
+| containment   | PASS         | ABSTAIN      | ERROR                                                   | ERROR                         |
+| contradicts   | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
+| healthy       | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
+| not_authentic | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
+| incomplete    | VIOLATION    | PASS         | ERROR                                                   | ERROR                         |
 
 A deterministic containment hit (normalized claim substring of the text) is
 PASS with no LLM call.
@@ -22,13 +22,13 @@ still does not (record-only).
 
 Identity:
 
-| Situation                                                            | Outcome   |
-|-----------------------------------------------------------------------|-----------|
-| booking name field contained in OCR (no role note), no LLM call       | PASS      |
-| both names extracted, within identity_max_edit_distance               | PASS      |
-| both names extracted, beyond identity_max_edit_distance                | VIOLATION |
-| an extraction returned {"name": null} or a blank name, none errored   | ABSTAIN   |
-| an extraction was unparseable / schema-invalid                        | ERROR     |
+| Situation                                                                      | Outcome   |
+|---------------------------------------------------------------------------------|-----------|
+| booking name field contained in OCR (no role note), no LLM call                 | PASS      |
+| both names extracted, within identity_max_edit_distance                         | PASS      |
+| both names extracted, beyond identity_max_edit_distance                          | VIOLATION |
+| an extraction returned {"name": null} or a blank name, none errored             | ABSTAIN   |
+| an extraction was unparseable / schema-invalid / transport error after retries  | ERROR     |
 
 See ``compliance.workflows.claim_pipeline`` for how ``CheckOutcome`` folds
 into the claim decision (VIOLATION -> DENY; ERROR -> UNCERTAIN, except
@@ -46,7 +46,8 @@ from typing import Literal, NamedTuple
 import ollama
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from compliance.llm.chat import ChatFn, parse_llm_json_object, response_content
+from compliance.config.settings import TransportRetryConfig
+from compliance.llm.chat import ChatFn, chat_content_with_retry, parse_llm_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,7 @@ class Checker:
         chat_fn: ChatFn | None = None,
         *,
         identity_max_edit_distance: int = 3,
+        transport_retry: TransportRetryConfig | None = None,
     ) -> None:
         """Bind model, prompts, and optional chat seam.
 
@@ -178,6 +180,8 @@ class Checker:
         :param chat_fn: Optional chat callable for tests; defaults to ollama.chat.
         :param identity_max_edit_distance: Max Levenshtein distance (lowercased
             names) for identity PASS after name extraction.
+        :param transport_retry: Bounded retry for chat transport failures; defaults
+            to ``TransportRetryConfig()`` when omitted.
         """
         self.model_name = model_name
         self.containment_prompt = containment_prompt
@@ -187,6 +191,7 @@ class Checker:
         self.authenticity_prompt = authenticity_prompt
         self.incomplete_prompt = incomplete_prompt
         self.identity_max_edit_distance = identity_max_edit_distance
+        self._transport_retry = transport_retry if transport_retry is not None else TransportRetryConfig()
         self._chat: ChatFn = chat_fn or ollama.chat
 
     def check(
@@ -286,7 +291,10 @@ class Checker:
                 "and requester / applicant / 'solicitud del' / 'a solicitud de' names "
                 f"(those are not the patient):\n{text}"
             )
-        response = self._chat(
+        content = chat_content_with_retry(
+            self._chat,
+            self._transport_retry,
+            context=f"checker identity {role}",
             model=self.model_name,
             messages=[
                 {"role": "system", "content": self.identity_prompt},
@@ -294,7 +302,9 @@ class Checker:
             ],
             format="json",
         )
-        return self._parsed_name_extraction(response_content(response))
+        if content is None:
+            return _NameExtraction(name=None, failed=True)
+        return self._parsed_name_extraction(content)
 
     def _containment_outcome(self, claim: str, text: str) -> CheckOutcome:
         normalized_claim = self._normalized_text(claim)
@@ -317,12 +327,17 @@ class Checker:
         return prompts[mode]
 
     def _boolean_check(self, prompt: str, claim: str, text: str, *, mode: CheckerMode) -> CheckOutcome:
-        response = self._chat(
+        content = chat_content_with_retry(
+            self._chat,
+            self._transport_retry,
+            context=f"checker {mode}",
             model=self.model_name,
             messages=self._check_messages(prompt, claim, text, mode=mode),
             format="json",
         )
-        return self._boolean_outcome(response_content(response), mode=mode)
+        if content is None:
+            return CheckOutcome.ERROR
+        return self._boolean_outcome(content, mode=mode)
 
     @staticmethod
     def _booking_name(booking_text: str) -> str | None:

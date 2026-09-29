@@ -5,15 +5,23 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import httpx
+import ollama
 import pytest
 
+from compliance.config.settings import TransportRetryConfig
 from compliance.llm.checker import Checker, CheckOutcome
 
 if TYPE_CHECKING:
     from conftest import ChatReturningFactory
 
 
-def _make_checker(chat: MagicMock, *, identity_max_edit_distance: int = 3) -> Checker:
+def _make_checker(
+    chat: MagicMock,
+    *,
+    identity_max_edit_distance: int = 3,
+    transport_retry: TransportRetryConfig | None = None,
+) -> Checker:
     return Checker(
         model_name="test-model",
         containment_prompt="check containment of claim in text",
@@ -24,6 +32,9 @@ def _make_checker(chat: MagicMock, *, identity_max_edit_distance: int = 3) -> Ch
         incomplete_prompt="check whether medical fields are incomplete",
         chat_fn=chat,
         identity_max_edit_distance=identity_max_edit_distance,
+        transport_retry=transport_retry
+        if transport_retry is not None
+        else TransportRetryConfig(max_retries=2, backoff_seconds=0.0),
     )
 
 
@@ -475,3 +486,70 @@ def test_checker_incomplete_parse_failure_returns_error(
 
     assert result == CheckOutcome.ERROR
     chat.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        pytest.param(ConnectionError("down"), id="connection_error"),
+        pytest.param(httpx.ConnectTimeout("timeout"), id="connect_timeout"),
+        pytest.param(ollama.ResponseError("unavailable", status_code=503), id="response_error_503"),
+    ],
+)
+@pytest.mark.parametrize("max_retries", [0, 2])
+def test_checker_transport_retry_count_honoured(exc: Exception, max_retries: int) -> None:
+    """Transport failures retry max_retries times then return ERROR (D-03)."""
+    chat = MagicMock(side_effect=[exc] * (max_retries + 1))
+    checker = _make_checker(
+        chat,
+        transport_retry=TransportRetryConfig(max_retries=max_retries, backoff_seconds=0.0),
+    )
+
+    result = checker.check(
+        claim="The flight was cancelled",
+        text="The flight departed on time.",
+        mode="contradicts",
+    )
+
+    assert result == CheckOutcome.ERROR
+    assert chat.call_count == max_retries + 1
+
+
+def test_checker_transport_recovers_after_transient_failure() -> None:
+    """One ConnectionError then valid True → VIOLATION after exactly 2 calls."""
+    chat = MagicMock(
+        side_effect=[
+            ConnectionError("transient"),
+            SimpleNamespace(message=SimpleNamespace(content=json.dumps({"result": True}))),
+        ]
+    )
+    checker = _make_checker(
+        chat,
+        transport_retry=TransportRetryConfig(max_retries=2, backoff_seconds=0.0),
+    )
+
+    result = checker.check(
+        claim="The flight was cancelled",
+        text="The flight departed on time.",
+        mode="contradicts",
+    )
+
+    assert result == CheckOutcome.VIOLATION
+    assert chat.call_count == 2
+
+
+def test_identity_transport_error_is_error() -> None:
+    """Document extraction that always raises ConnectionError → ERROR after retries."""
+    chat = MagicMock(side_effect=[ConnectionError("down")] * 3)
+    checker = _make_checker(
+        chat,
+        transport_retry=TransportRetryConfig(max_retries=2, backoff_seconds=0.0),
+    )
+
+    status = checker.check_identity(
+        "**name**: Roy Hoffman\n",
+        "unrelated OCR text with no name field\n",
+    )
+
+    assert status == CheckOutcome.ERROR
+    assert chat.call_count == 3

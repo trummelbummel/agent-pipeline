@@ -100,6 +100,19 @@ class ClassificationConfig(BaseModel):
         return [label for label in self.labels if label != "False"]
 
 
+class TransportRetryConfig(BaseModel):
+    """Bounded retry for checker chat transport failures (SR-008).
+
+    :param max_retries: Extra attempts after the first try (total attempts =
+        ``max_retries + 1``). Exhaustion records the check as ERROR.
+    :param backoff_seconds: Base delay for exponential backoff between attempts
+        (``backoff_seconds * 2**attempt``); no sleep after the final failure.
+    """
+
+    max_retries: int = Field(default=2, ge=0)
+    backoff_seconds: float = Field(default=1.0, ge=0.0)
+
+
 class CheckingConfig(BaseModel):
     """LLM claim-checking settings for Checker modes.
 
@@ -129,6 +142,8 @@ class CheckingConfig(BaseModel):
     :param suspicious_dating_consider_within_years: Only OCR dates within this
         many years of reference today are eligible for suspicious dating;
         farther dates are ignored as date-of-birth / history.
+    :param transport_retry: Retry/backoff for checker chat transport failures
+        (connection / timeout / server error); exhaustion → CheckOutcome.ERROR.
     """
 
     model: str
@@ -143,6 +158,7 @@ class CheckingConfig(BaseModel):
     departure_uncertain_within_days: int = 14
     suspicious_dating_max_month_delta: int = 1
     suspicious_dating_consider_within_years: int = 2
+    transport_retry: TransportRetryConfig = Field(default_factory=TransportRetryConfig)
 
 
 class RequiredDocumentsConfig(BaseModel):

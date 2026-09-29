@@ -5,11 +5,11 @@ current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
 current_plan: 4
 status: executing
-stopped_at: Completed 260929-m5a-PLAN.md (SR-007)
-last_updated: "2026-09-29T14:21:33.759Z"
+stopped_at: Completed 260929-mqy-PLAN.md (SR-009)
+last_updated: "2026-09-29T14:42:23.130Z"
 last_activity: 2026-09-29
-last_activity_desc: Completed quick task 260929-m5a (SR-007)
-state_head: ec03fa8ba7b8f158b9691678c453b2cde83101be
+last_activity_desc: Completed quick task 260929-mqy (SR-009)
+state_head: 0807f87ababad78509dcb1863d0868c03f90dd1c
 progress:
   total_phases: 8
   completed_phases: 4
@@ -32,7 +32,7 @@ Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
 Current Plan: 4
 Total Plans in Phase: 5
 Status: Ready to execute
-Last activity: 2026-09-29 - Completed quick task 260929-m5a: SR-007 read-only GET + locked analysis POST
+Last activity: 2026-09-29 - Completed quick task 260929-mqy: SR-009 harden upload/path/symlink boundaries
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -115,6 +115,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 07]: SR-006: GT-first eval; missing pred=incorrect + coverage_rate; raw vs policy named metrics
 - [Phase 07]: SR-007: sync POST /claims/{id}/analysis; idempotency=claim_id; GET read-only (breaking)
 - [Phase 07]: SR-007: non-blocking flock at results_dir/.locks/{claim_id}.lock; 409 on contention
+- [Quick 260929-mqy]: SR-009: api.upload 25/50 MiB; Content-Length middleware + chunked writer; hard-reject symlink claim roots; artifact basenames at load
+- [Phase 260929-mqy]: SR-009: api.upload 25/50 MiB; Content-Length middleware + chunked writer; hard-reject symlink claim roots; artifact basenames at load — D-01..D-03 steered; closes last input-boundary hole
 
 ### Blockers/Concerns
 
@@ -129,6 +131,7 @@ None.
 | 260929-k1p | SR-011: strong config policy validation (named coverage.branches; extra=forbid; cross-refs) | 2026-09-29 | 1a190a5 | [260929-k1p-sr-011-strong-config-policy-validation-n](./quick/260929-k1p-sr-011-strong-config-policy-validation-n/) |
 | 260929-hxe | SR-008: typed CheckOutcome policy matrix + transport retry (ERROR→UNCERTAIN; VIOLATION beats ERROR) | 2026-09-29 | ff6da56 | [260929-hxe-sr-008-typed-checker-outcome-policy-matr](./quick/260929-hxe-sr-008-typed-checker-outcome-policy-matr/) |
 | 260929-i89 | SR-012: deterministic CI fast lane + coverage (pytest-cov floor 90, addopts deselect integration, fast-lane gates matrix) | 2026-09-29 | 54da2be | [260929-i89-sr-012-deterministic-ci-fast-lane-and-co](./quick/260929-i89-sr-012-deterministic-ci-fast-lane-and-co/) |
+| 260929-mqy | SR-009: harden upload/path/symlink boundaries (25/50 MiB; hard-reject symlink roots; artifact basenames) | 2026-09-29 | 0807f87 | [260929-mqy-sr-009-harden-upload-path-symlink-bounda](./quick/260929-mqy-sr-009-harden-upload-path-symlink-bounda/) |
 | 260929-ftg | SR-004: single authoritative coverage route via highest-probability label | 2026-09-29 | uncommitted | [260929-ftg-sr-004-single-authoritative-coverage-rou](./quick/260929-ftg-sr-004-single-authoritative-coverage-rou/) |
 | 260928-o5k | Fix ruff lint errors blocking pre-commit on staged files (S101, TRY003, TRY300, TRY400, TRY401, S105, SIM103, SIM110, RUF002, C901) | 2026-09-28 | uncommitted | [260928-o5k-fix-ruff-lint-errors-s101-try003-try401-](./quick/260928-o5k-fix-ruff-lint-errors-s101-try003-try401-/) |
 | 260926-gij | Create common fixtures across API tests and update dedup-review fixture detection | 2026-09-26 | 3c1582d | [260926-gij-create-common-fixtures-across-api-tests-](./quick/260926-gij-create-common-fixtures-across-api-tests-/) |
@@ -140,8 +143,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-29T14:21:33.307Z
-Stopped at: Completed 260929-m5a-PLAN.md (SR-007)
+Last session: 2026-09-29T14:42:23.107Z
+Stopped at: Completed 260929-mqy-PLAN.md (SR-009)
 Resume file: None
 
 ## Performance Metrics
@@ -173,3 +176,4 @@ Resume file: None
 | Phase 260929-l16 P01 | 11min | 3 tasks | 15 files |
 | Phase 260929-lni P01 | 9min | 3 tasks | 12 files |
 | Phase 260929-m5a P01 | 11min | 3 tasks | 13 files |
+| Phase 260929-mqy P01 | 8min | 3 tasks | 17 files |

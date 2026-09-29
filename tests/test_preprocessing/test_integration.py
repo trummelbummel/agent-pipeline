@@ -28,9 +28,7 @@ def _ollama_available() -> bool:
 
 def _passthrough_description_reader() -> DescriptionReader:
     """DescriptionReader that skips live LLM and returns empty BookingData."""
-    chat = MagicMock(
-        return_value=SimpleNamespace(message=SimpleNamespace(content="{}"))
-    )
+    chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content="{}")))
     extractor = InformationExtractor(
         target_model=BookingData,
         model_name="unused",
@@ -42,11 +40,7 @@ def _passthrough_description_reader() -> DescriptionReader:
 
 def _document_suffixes(claim_dir: Path, formats: list[str]) -> list[Path]:
     allowed = {fmt.lower().lstrip(".") for fmt in formats}
-    return sorted(
-        path
-        for path in claim_dir.iterdir()
-        if path.is_file() and path.suffix.lower().lstrip(".") in allowed
-    )
+    return sorted(path for path in claim_dir.iterdir() if path.is_file() and path.suffix.lower().lstrip(".") in allowed)
 
 
 @pytest.mark.integration
@@ -89,9 +83,9 @@ def test_spot_checks_key_claims() -> None:
         return bundles[f"claim {n}"]
 
     claim1 = load_claim(1)
-    assert any(
-        isinstance(doc, DocumentData) for doc in claim1.documents
-    ), "claim 1 should extract booking confirmation png"
+    assert any(isinstance(doc, DocumentData) for doc in claim1.documents), (
+        "claim 1 should extract booking confirmation png"
+    )
     assert len(_document_suffixes(DATA_DIR / "claim 1", formats)) >= 1
 
     claim10 = load_claim(10)
@@ -122,6 +116,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
         AppConfig,
         CheckingConfig,
         ClassificationConfig,
+        CoverageClassificationConfig,
         EvaluationConfig,
         ExtractionConfig,
         PreprocessingConfig,
@@ -137,6 +132,13 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
         other_label="False",
         model="unused",
         prompt="unused",
+    )
+    coverage = CoverageClassificationConfig(
+        labels=["1"],
+        other_label="False",
+        model="unused",
+        prompt="unused",
+        branches={"1": "cancellation"},
     )
     config = AppConfig(
         preprocessing=PreprocessingConfig(
@@ -163,7 +165,7 @@ def test_pipeline_no_uncaught_exceptions_on_partial_claim(tmp_path: Path) -> Non
             incomplete_prompt="incomplete",
         ),
         analysis=AnalysisConfig(
-            coverage=stage,
+            coverage=coverage,
             cancellation_reason=stage,
             cancellation_document=stage,
             personal_effects_document=stage,

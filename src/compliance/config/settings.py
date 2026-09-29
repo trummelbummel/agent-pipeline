@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Shared vocabulary between the config contract and pipeline routing branches so the two cannot drift.
+CoverageRoute = Literal["cancellation", "personal_effects", "missed_departure"]
 
 
 class PreprocessedArtifactNames(BaseModel):
@@ -100,6 +103,39 @@ class ClassificationConfig(BaseModel):
         return [label for label in self.labels if label != "False"]
 
 
+class CoverageClassificationConfig(ClassificationConfig):
+    """Coverage-stage classifier with an authoritative label→branch map (D-01).
+
+    ``branches`` maps each positive coverage label CODE to its routing branch.
+    The mapping is authoritative: the order of ``labels`` carries no routing meaning.
+
+    :param branches: Map from coverage label code to routing branch
+        (``cancellation`` / ``personal_effects`` / ``missed_departure``).
+    """
+
+    branches: dict[str, CoverageRoute]
+
+    @model_validator(mode="after")
+    def _validated_branch_map(self) -> CoverageClassificationConfig:
+        """Reject unrouted positives, unknown keys, and duplicate branch values.
+
+        :return: Self after the branch map passes all checks.
+        """
+        positives = set(self.positive_labels())
+        branch_keys = set(self.branches)
+        unrouted = sorted(positives - branch_keys)
+        unknown = sorted(branch_keys - positives)
+        if unrouted or unknown:
+            raise CoverageBranchMappingError(unrouted=unrouted, unknown=unknown, allowed=sorted(positives))
+        seen: dict[str, list[str]] = {}
+        for code, route in self.branches.items():
+            seen.setdefault(route, []).append(code)
+        for duplicate_route, codes in seen.items():
+            if len(codes) > 1:
+                raise DuplicateCoverageBranchError(branch=duplicate_route, codes=sorted(codes))
+        return self
+
+
 class TransportRetryConfig(BaseModel):
     """Bounded retry for checker chat transport failures (SR-008).
 
@@ -189,8 +225,10 @@ class AnalysisConfig(BaseModel):
     """Multi-stage claim-analysis classifier settings for ClaimPipeline.
 
     Each stage reuses ClassificationConfig (labels, other_label, model, prompt).
+    Coverage additionally carries a named ``branches`` map (D-01).
 
-    :param coverage: Coverage-type classifier on description text.
+    :param coverage: Coverage-type classifier on description text, with named
+        label→branch routing map.
     :param cancellation_reason: Cancellation-reason classifier (trip-cancellation path).
     :param cancellation_document: Supporting-document type on the cancellation path.
     :param personal_effects_document: Document type for personal-effects coverage.
@@ -198,7 +236,7 @@ class AnalysisConfig(BaseModel):
     :param required_documents: Acceptable document codes per coverage/reason path.
     """
 
-    coverage: ClassificationConfig
+    coverage: CoverageClassificationConfig
     cancellation_reason: ClassificationConfig
     cancellation_document: ClassificationConfig
     personal_effects_document: ClassificationConfig
@@ -336,6 +374,36 @@ class ConfigFileNotFoundError(FileNotFoundError):
         :param path: Config file path that was checked and not found.
         """
         super().__init__(f"Config file not found: {path}")
+
+
+class CoverageBranchMappingError(ValueError):
+    """Coverage ``branches`` keys do not match the positive label vocabulary."""
+
+    def __init__(self, unrouted: list[str], unknown: list[str], allowed: list[str]) -> None:
+        """Name unrouted positives and/or unknown branch keys.
+
+        :param unrouted: Positive labels missing from ``branches``.
+        :param unknown: ``branches`` keys outside the positive vocabulary.
+        :param allowed: The positive label set that keys must equal.
+        """
+        parts: list[str] = []
+        if unrouted:
+            parts.append(f"unrouted coverage codes {unrouted}")
+        if unknown:
+            parts.append(f"unknown branch keys {unknown} (allowed {allowed})")
+        super().__init__(f"Invalid coverage.branches: {'; '.join(parts)}")
+
+
+class DuplicateCoverageBranchError(ValueError):
+    """Two coverage codes map to the same routing branch."""
+
+    def __init__(self, branch: str, codes: list[str]) -> None:
+        """Name the duplicated branch and the codes that share it.
+
+        :param branch: Branch value claimed by more than one code.
+        :param codes: Coverage codes that all map to ``branch``.
+        """
+        super().__init__(f"Duplicate coverage branch {branch!r} shared by codes {codes}")
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:

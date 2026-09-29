@@ -15,6 +15,7 @@ from compliance.config.settings import (
     AnalysisConfig,
     AppConfig,
     ClassificationConfig,
+    CoverageClassificationConfig,
     OcrRetryConfig,
     RequiredDocumentsConfig,
     TransportRetryConfig,
@@ -52,7 +53,7 @@ def _claim_pipeline_cls() -> type:
 
 
 def _analysis_config() -> AnalysisConfig:
-    coverage = ClassificationConfig(
+    coverage = CoverageClassificationConfig(
         labels=[
             "1",
             "2",
@@ -67,6 +68,11 @@ def _analysis_config() -> AnalysisConfig:
             "2": "Personal Effects",
             "3": "Missed Departure or Missed Connection",
             "False": "False",
+        },
+        branches={
+            "1": "cancellation",
+            "2": "personal_effects",
+            "3": "missed_departure",
         },
     )
     cancellation_reason = ClassificationConfig(
@@ -365,6 +371,43 @@ def test_coverage_route_by_probability(
     assert payload["human_in_the_loop"] is expected["human_in_the_loop"]
     assert chat_fn.call_count == expected["call_count"]
     assert ("checker_document_not_authentic" in payload) is expected["not_authentic_present"]
+
+
+def test_coverage_label_order_does_not_remap_branch(tmp_path: Path) -> None:
+    """Reversed coverage ``labels`` must not change which branch a code routes to (D-01).
+
+    Probabilities are unambiguous on purpose (P-08): SR-004 tie-break still follows
+    ``labels`` order, so this test only proves branch remapping is gone.
+    """
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    reordered = config.model_copy(
+        update={
+            "analysis": config.analysis.model_copy(
+                update={
+                    "coverage": config.analysis.coverage.model_copy(
+                        update={"labels": ["3", "2", "1", "False"]},
+                    ),
+                },
+            ),
+        },
+    )
+    claim_dir = _seed_preprocessed_claim(reordered, claim_name="claim reorder-branch")
+    chat_fn = _coverage_route_chat_fn(["1"], {"1": 0.9}, TRIP_CANCELLATION)
+    pipeline = ClaimPipeline(reordered, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    expected = _COVERAGE_WINNER_EXPECTATIONS[TRIP_CANCELLATION]
+    assert payload["routed_coverage_label_code"] == TRIP_CANCELLATION
+    assert payload["routed_coverage_label"] == expected["routed_coverage_label"]
+    assert payload.get("reason_label_codes", []) == expected["reason_label_codes"]
+    assert payload.get("document_labels", []) == expected["document_labels"]
+    assert payload["decision"] == expected["decision"]
+    assert payload["decision_explanation"] == expected["decision_explanation"]
+    assert payload["human_in_the_loop"] is expected["human_in_the_loop"]
+    assert chat_fn.call_count == expected["call_count"]
 
 
 def test_analyze_claim_cancellation_path_writes_analysis_result(
@@ -1219,6 +1262,14 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
         "    model: test-model",
         "    prompt: classify",
     ])
+    coverage_stage = "\n".join([
+        '    labels: ["1"]',
+        "    branches:",
+        '      "1": cancellation',
+        '    other_label: "False"',
+        "    model: test-model",
+        "    prompt: classify",
+    ])
     cfg_path.write_text(
         "\n".join([
             "preprocessing:",
@@ -1245,7 +1296,7 @@ def _minimal_cli_config_yaml(tmp_path: Path) -> Path:
             "  incomplete_prompt: incomplete",
             "analysis:",
             "  coverage:",
-            stage,
+            coverage_stage,
             "  cancellation_reason:",
             stage,
             "  cancellation_document:",

@@ -38,6 +38,8 @@ checking:
 analysis:
   coverage:
     labels: ["1"]
+    branches:
+      "1": cancellation
     other_label: "False"
     model: test-model
     prompt: classify coverage

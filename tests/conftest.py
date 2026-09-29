@@ -14,6 +14,7 @@ from compliance.config.settings import (
     AppConfig,
     CheckingConfig,
     ClassificationConfig,
+    CoverageClassificationConfig,
     EvaluationConfig,
     ExtractionConfig,
     OcrRetryConfig,
@@ -128,7 +129,7 @@ class CancellationChatFactory(Protocol):
 @pytest.fixture
 def cancellation_analysis_config() -> AnalysisConfig:
     """Provide labeled cancellation analysis stages for decision-path tests."""
-    coverage = ClassificationConfig(
+    coverage = CoverageClassificationConfig(
         labels=["1", "2", "3"],
         other_label="False",
         model="test-model",
@@ -137,6 +138,11 @@ def cancellation_analysis_config() -> AnalysisConfig:
             "1": "Trip cancellation or rescheduling",
             "2": "Personal Effects",
             "3": "Missed Departure or Missed Connection",
+        },
+        branches={
+            "1": "cancellation",
+            "2": "personal_effects",
+            "3": "missed_departure",
         },
     )
     cancellation_reason = ClassificationConfig(
@@ -189,8 +195,15 @@ def minimal_analysis_config_factory() -> MinimalAnalysisConfigFactory:
             model="test-model",
             prompt="classify",
         )
+        coverage = CoverageClassificationConfig(
+            labels=["1"],
+            other_label="False",
+            model="test-model",
+            prompt="classify",
+            branches={"1": "cancellation"},
+        )
         return AnalysisConfig(
-            coverage=stage,
+            coverage=coverage,
             cancellation_reason=stage,
             cancellation_document=stage,
             personal_effects_document=stage,

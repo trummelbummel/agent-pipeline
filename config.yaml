@@ -139,6 +139,11 @@ analysis:
       - "2"
       - "3"
       - "False"
+    # Authoritative label-code → routing-branch map; label order carries no routing meaning (D-01).
+    branches:
+      "1": cancellation
+      "2": personal_effects
+      "3": missed_departure
     label_names:
       "1": Trip cancellation or rescheduling
       "2": Personal Effects

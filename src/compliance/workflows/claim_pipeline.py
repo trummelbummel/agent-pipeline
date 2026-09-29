@@ -9,7 +9,7 @@ from typing import Any, Literal, NamedTuple, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from compliance.branch_log import log_branch_decision
-from compliance.config.settings import AppConfig, ClassificationConfig
+from compliance.config.settings import AppConfig, ClassificationConfig, CoverageRoute
 from compliance.llm.chat import ChatFn
 from compliance.llm.checker import Checker, CheckerMode, CheckOutcome
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
@@ -33,7 +33,7 @@ from compliance.workflows.predicted_answer_io import write_analysis_predicted_an
 
 logger = logging.getLogger(__name__)
 
-CoverageBranch = Literal["cancellation", "personal_effects", "missed_departure", "abstention"]
+CoverageBranch = CoverageRoute | Literal["abstention"]
 CoverageNextNode = Literal["classify_reason", "classify_pe_document", "classify_missed_document", "persist"]
 
 
@@ -798,16 +798,15 @@ class ClaimPipeline:
         return {label: index for index, label in enumerate(ordered)}
 
     def _coverage_branch(self, label: str) -> CoverageBranch:
-        """Map a winning coverage code to its routing branch (P-03).
+        """Map a winning coverage code to its routing branch from config (D-01).
+
+        The branch comes from the configured ``analysis.coverage.branches`` map.
+        Unmapped or abstention codes route to abstention.
 
         :param label: Winning coverage code from ``_winning_coverage_label``.
-        :return: The routed branch; a code outside positive labels abstains.
+        :return: The routed branch; a code outside the map abstains.
         """
-        branches: tuple[CoverageBranch, ...] = ("cancellation", "personal_effects", "missed_departure")
-        for code, branch in zip(self._config.analysis.coverage.positive_labels(), branches, strict=False):
-            if code == label:
-                return branch
-        return "abstention"
+        return self._config.analysis.coverage.branches.get(label, "abstention")
 
     def _coverage_classification(self, description_text: str) -> ClassificationResult:
         return self._stage_classifier(self._config.analysis.coverage).classify(description_text)

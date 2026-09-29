@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from compliance.config import AnalysisConfig, CheckingConfig, ClassificationConfig, load_config
+from compliance.config import (
+    AnalysisConfig,
+    CheckingConfig,
+    ClassificationConfig,
+    CoverageClassificationConfig,
+    load_config,
+)
 from compliance.llm import CaseClassifier, ClassificationResult, Classifier
 
 _MINIMAL_EVALUATION_YAML = """
@@ -35,6 +41,10 @@ _MINIMAL_ANALYSIS_YAML = """
 analysis:
   coverage:
     labels: ["1", "2", "3"]
+    branches:
+      "1": cancellation
+      "2": personal_effects
+      "3": missed_departure
     other_label: "False"
     model: test-model
     prompt: |
@@ -309,3 +319,132 @@ def test_load_config_missing_file_raises(tmp_path: Path) -> None:
     missing = tmp_path / "does-not-exist.yaml"
     with pytest.raises(FileNotFoundError, match="Config file not found"):
         load_config(missing)
+
+
+def test_load_config_reads_coverage_branches() -> None:
+    """analysis.coverage.branches is the authoritative label→branch map (D-01)."""
+    config = load_config("config.yaml")
+    assert config.analysis.coverage.branches == {
+        "1": "cancellation",
+        "2": "personal_effects",
+        "3": "missed_departure",
+    }
+
+
+_COVERAGE_STAGE_KWARGS: dict[str, object] = {
+    "labels": ["1", "2", "3"],
+    "other_label": "False",
+    "model": "test-model",
+    "prompt": "classify coverage",
+}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        pytest.param(
+            {"branches": {"1": "cancellation", "2": "personal_effects"}},
+            r"unrouted|3",
+            id="missing_branch",
+        ),
+        pytest.param(
+            {
+                "branches": {
+                    "1": "cancellation",
+                    "2": "personal_effects",
+                    "3": "missed_departure",
+                    "9": "cancellation",
+                }
+            },
+            r"unknown|9",
+            id="unknown_key",
+        ),
+        pytest.param(
+            {
+                "branches": {
+                    "1": "cancellation",
+                    "2": "cancellation",
+                    "3": "missed_departure",
+                }
+            },
+            r"duplicate|cancellation",
+            id="duplicate_branch",
+        ),
+        pytest.param(
+            {
+                "branches": {
+                    "1": "cancellation",
+                    "2": "personal_effects",
+                    "3": "not_a_branch",
+                }
+            },
+            r"not_a_branch|Input should be",
+            id="invalid_branch_value",
+        ),
+    ],
+)
+def test_invalid_coverage_branches_rejected(kwargs: dict[str, object], match: str) -> None:
+    """Coverage branch map must be complete, exclusive, and use known branches."""
+    with pytest.raises(ValidationError, match=match):
+        CoverageClassificationConfig(**_COVERAGE_STAGE_KWARGS, **kwargs)  # type: ignore[arg-type]
+
+
+def test_invalid_coverage_branches_absent_field_rejected(tmp_path: Path) -> None:
+    """A coverage stage without branches fails as a missing required field."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+preprocessing:
+  data_dir: data
+  document_formats: [webp]
+  confidence_threshold: 0.7
+  preprocessed_dir: data/preprocessed
+  results_dir: data/results
+extraction:
+  model: test-model
+  prompt: extract
+classification:
+  labels: ["1", "2", "3"]
+  other_label: "False"
+  model: test-model
+  prompt: classify
+"""
+        + _MINIMAL_CHECKING_YAML
+        + """
+analysis:
+  coverage:
+    labels: ["1", "2", "3"]
+    other_label: "False"
+    model: test-model
+    prompt: |
+      classify coverage
+  cancellation_reason:
+    labels: ["1", "2"]
+    other_label: "False"
+    model: test-model
+    prompt: |
+      classify reason
+  cancellation_document:
+    labels: ["1"]
+    other_label: "False"
+    model: test-model
+    prompt: |
+      classify cancel doc
+  personal_effects_document:
+    labels: ["1"]
+    other_label: "False"
+    model: test-model
+    prompt: |
+      classify pe doc
+  missed_departure_document:
+    labels: ["1"]
+    other_label: "False"
+    model: test-model
+    prompt: |
+      classify missed doc
+"""
+        + _MINIMAL_EVALUATION_YAML,
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match=r"branches"):
+        load_config(config_path)

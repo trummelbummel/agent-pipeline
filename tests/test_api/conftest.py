@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from conftest import MinimalAppConfigFactory
 
-from compliance.config.settings import AnalysisConfig, AppConfig, ClassificationConfig
+from compliance.config.settings import AnalysisConfig, AppConfig, ClassificationConfig, CoverageClassificationConfig
 
 if TYPE_CHECKING:
     from conftest import CancellationChatFactory
@@ -34,8 +34,19 @@ def compact_analysis_config() -> AnalysisConfig:
         model="test-model",
         prompt="classify",
     )
+    coverage = CoverageClassificationConfig(
+        labels=["1", "2", "3"],
+        other_label="False",
+        model="test-model",
+        prompt="classify",
+        branches={
+            "1": "cancellation",
+            "2": "personal_effects",
+            "3": "missed_departure",
+        },
+    )
     return AnalysisConfig(
-        coverage=stage,
+        coverage=coverage,
         cancellation_reason=stage,
         cancellation_document=stage,
         personal_effects_document=stage,

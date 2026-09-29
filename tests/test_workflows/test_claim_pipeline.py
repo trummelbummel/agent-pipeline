@@ -1980,3 +1980,346 @@ def test_payload_omits_llm_keys_on_date_uncertain_early_exit(
     assert "checker_document_not_authentic" not in payload
     assert "checker_incomplete_document" not in payload
     assert "checker_suspicious_dating" not in payload
+
+
+# --- SR-008: typed CheckOutcome policy matrix ---
+
+_BOOLEAN_CHECKER_MODES = (
+    "containment",
+    "contradicts",
+    "healthy",
+    "not_authentic",
+    "incomplete",
+)
+
+# Benign defaults for medical checker modes (identity is deterministic PASS when
+# booking/patient names match Ada Lovelace in the seeded OCR).
+_BENIGN_CHECKER_OVERRIDES: dict[str, str] = {
+    "containment": json.dumps({"result": True}),
+    "contradicts": json.dumps({"result": False}),
+    "healthy": json.dumps({"result": False}),
+    "not_authentic": json.dumps({"result": False}),
+    "incomplete": json.dumps({"result": False}),
+}
+
+# Containment ERROR is record-only (D-01 / P-01 locked): outcome ERROR, decision APPROVE.
+_POLICY_MATRIX: list[tuple[str, str, str, str, str | None]] = []
+for _mode in _BOOLEAN_CHECKER_MODES:
+    _deny_key = {
+        "containment": None,
+        "contradicts": "checker_contradicts",
+        "healthy": "healthy_check",
+        "not_authentic": "checker_document_not_authentic",
+        "incomplete": "checker_incomplete_document",
+    }[_mode]
+    _true_outcome = "PASS" if _mode == "containment" else "VIOLATION"
+    _false_outcome = "ABSTAIN" if _mode == "containment" else "PASS"
+    _true_decision = "APPROVE" if _mode == "containment" else "DENY"
+    _true_explanation = "checker_consistent" if _mode == "containment" else _deny_key
+    _error_decision = "APPROVE" if _mode == "containment" else "UNCERTAIN"
+    _error_explanation = "checker_consistent" if _mode == "containment" else f"checker_error:{_mode}"
+    _POLICY_MATRIX.extend([
+        (_mode, "valid_true", _true_outcome, _true_decision, _true_explanation),
+        (_mode, "valid_false", _false_outcome, "APPROVE", "checker_consistent"),
+        (_mode, "malformed_json", "ERROR", _error_decision, _error_explanation),
+        (_mode, "missing_field", "ERROR", _error_decision, _error_explanation),
+        (_mode, "empty", "ERROR", _error_decision, _error_explanation),
+    ])
+
+_CASE_RAW_CONTENT: dict[str, str] = {
+    "valid_true": json.dumps({"result": True}),
+    "valid_false": json.dumps({"result": False}),
+    "malformed_json": '{"result": tru',
+    "missing_field": json.dumps({"verdict": True}),
+    "empty": "",
+}
+
+
+def _chat_raw_response(content: str) -> SimpleNamespace:
+    """Build a chat response whose message content is an exact raw string."""
+    return SimpleNamespace(message=SimpleNamespace(content=content))
+
+
+def _seed_policy_matrix_claim(
+    config: AppConfig,
+    claim_name: str = "claim policy matrix",
+    *,
+    booking_name: str = "Ada Lovelace",
+    patient_line: str = "Patient: Ada Lovelace",
+) -> Path:
+    """Seed a medical-certificate claim that always hits the containment LLM.
+
+    Description is intentionally NOT embedded in supporting_document so
+    containment goes to the LLM. Default patient line keeps identity
+    deterministic (no LLM). Override booking/patient for identity LLM rows.
+    """
+    claim_dir = _seed_preprocessed_claim(config, claim_name=claim_name)
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.description).write_text(
+        "I had to cancel my flight to Paris because of a medical emergency.",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_document).write_text(
+        f"# Supporting document\n\n{patient_line}\nMedical certificate attached.\n",
+        encoding="utf-8",
+    )
+    (claim_dir / artifacts.supporting_documents).write_text(
+        f"# Supporting documents\n\n**name**: {booking_name}\n",
+        encoding="utf-8",
+    )
+    return claim_dir
+
+
+def _classifier_responses() -> list[SimpleNamespace]:
+    """Coverage → reason → cancel-doc responses for a medical-certificate claim."""
+    return [
+        _chat_response({
+            "labels": [TRIP_CANCELLATION],
+            "probabilities": {TRIP_CANCELLATION: 0.9, "False": 0.1},
+        }),
+        _chat_response({
+            "labels": [MEDICAL_EMERGENCY],
+            "probabilities": {MEDICAL_EMERGENCY: 0.85, "False": 0.15},
+        }),
+        _chat_response({
+            "labels": [MEDICAL_CERTIFICATE],
+            "probabilities": {MEDICAL_CERTIFICATE: 0.8, "False": 0.2},
+        }),
+    ]
+
+
+def _policy_matrix_chat_side_effect(
+    overrides: dict[str, str | Exception | list[str | Exception]],
+    *,
+    identity_response: str | Exception | None = None,
+) -> list[object]:
+    """Build MagicMock side_effect: 3 classifier responses then checker responses.
+
+    Benign defaults cover every boolean mode. ``overrides`` replace per-mode
+    content (raw strings) or exception instances. When ``identity_response`` is
+    set, it is inserted between contradicts and healthy (identity LLM path).
+    """
+    responses: list[object] = list(_classifier_responses())
+    mode_order = list(_BOOLEAN_CHECKER_MODES)
+    if identity_response is not None:
+        # Insert identity between contradicts and healthy.
+        insert_at = mode_order.index("healthy")
+        mode_order.insert(insert_at, "identity")
+
+    for mode in mode_order:
+        if mode == "identity":
+            responses.append(
+                identity_response if isinstance(identity_response, Exception) else _chat_raw_response(identity_response)  # type: ignore[arg-type]
+            )
+            continue
+        raw = overrides.get(mode, _BENIGN_CHECKER_OVERRIDES[mode])
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, Exception):
+                    responses.append(item)
+                else:
+                    responses.append(_chat_raw_response(item))
+        elif isinstance(raw, Exception):
+            responses.append(raw)
+        else:
+            responses.append(_chat_raw_response(raw))
+    return responses
+
+
+@pytest.mark.parametrize(
+    ("mode", "case", "expected_outcome", "expected_decision", "expected_explanation"),
+    _POLICY_MATRIX,
+    ids=[f"{m}-{c}" for m, c, *_ in _POLICY_MATRIX],
+)
+def test_checker_policy_matrix(
+    tmp_path: Path,
+    mode: str,
+    case: str,
+    expected_outcome: str,
+    expected_decision: str,
+    expected_explanation: str | None,
+) -> None:
+    """Mode x parse-case matrix: outcome, decision, explanation, chat call count."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_policy_matrix_claim(config, claim_name=f"claim matrix {mode} {case}")
+    overrides: dict[str, str | Exception | list[str | Exception]] = {
+        mode: _CASE_RAW_CONTENT[case],
+    }
+    side_effect = _policy_matrix_chat_side_effect(overrides)
+    chat_fn = MagicMock(side_effect=side_effect)
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    predicted = json.loads(
+        (
+            Path(config.preprocessing.results_dir) / claim_dir.name / config.preprocessing.artifacts.predicted_answer
+        ).read_text(encoding="utf-8")
+    )
+
+    assert payload["checker_outcomes"][mode] == expected_outcome
+    assert payload["decision"] == expected_decision
+    assert payload["decision_explanation"] == expected_explanation
+    assert predicted["decision"] == expected_decision
+    assert predicted["human_in_the_loop"] is (expected_decision == "UNCERTAIN")
+    assert chat_fn.call_count == len(side_effect)
+
+
+@pytest.mark.parametrize(
+    (
+        "case_id",
+        "identity_content",
+        "expected_outcome",
+        "expected_decision",
+        "expected_explanation",
+        "legacy_identity_check",
+        "legacy_identity_unclear",
+    ),
+    [
+        pytest.param(
+            "close_name",
+            json.dumps({"name": "Roy Hofman"}),
+            "PASS",
+            "APPROVE",
+            "checker_consistent",
+            True,
+            False,
+            id="close_name",
+        ),
+        pytest.param(
+            "far_name",
+            json.dumps({"name": "Someone Completely Different"}),
+            "VIOLATION",
+            "DENY",
+            "identity_check",
+            False,
+            False,
+            id="far_name",
+        ),
+        pytest.param(
+            "null_name",
+            json.dumps({"name": None}),
+            "ABSTAIN",
+            "UNCERTAIN",
+            "identity_unclear",
+            False,
+            True,
+            id="null_name",
+        ),
+        pytest.param(
+            "unparseable",
+            "not-json-at-all",
+            "ERROR",
+            "UNCERTAIN",
+            "checker_error:identity",
+            False,
+            True,
+            id="unparseable",
+        ),
+    ],
+)
+def test_identity_outcome_policy(
+    tmp_path: Path,
+    case_id: str,
+    identity_content: str,
+    expected_outcome: str,
+    expected_decision: str,
+    expected_explanation: str,
+    legacy_identity_check: bool,
+    legacy_identity_unclear: bool,
+) -> None:
+    """Identity extraction outcomes fold into decision + legacy booleans (D-02, P-02)."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_policy_matrix_claim(
+        config,
+        claim_name=f"claim identity {case_id}",
+        booking_name="Roy Hoffman",
+        patient_line="Patient: Roy Hofman",
+    )
+    side_effect = _policy_matrix_chat_side_effect({}, identity_response=identity_content)
+    chat_fn = MagicMock(side_effect=side_effect)
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    predicted = json.loads(
+        (
+            Path(config.preprocessing.results_dir) / claim_dir.name / config.preprocessing.artifacts.predicted_answer
+        ).read_text(encoding="utf-8")
+    )
+
+    assert payload["checker_outcomes"]["identity"] == expected_outcome
+    assert payload["identity_check"] is legacy_identity_check
+    assert payload["identity_unclear"] is legacy_identity_unclear
+    assert payload["decision"] == expected_decision
+    assert payload["decision_explanation"] == expected_explanation
+    assert predicted["decision"] == expected_decision
+    assert predicted["human_in_the_loop"] is (expected_decision == "UNCERTAIN")
+    assert chat_fn.call_count == len(side_effect)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "identity_content", "expected_decision", "expected_explanation"),
+    [
+        pytest.param(
+            {"healthy": json.dumps({"result": True}), "contradicts": '{"result": tru'},
+            None,
+            "DENY",
+            "healthy_check",
+            id="violation_beats_error",
+        ),
+        pytest.param(
+            {"contradicts": '{"result": tru', "healthy": ""},
+            None,
+            "UNCERTAIN",
+            "checker_error:contradicts,healthy",
+            id="two_errors",
+        ),
+        pytest.param(
+            {"contradicts": '{"result": tru'},
+            json.dumps({"name": None}),
+            "UNCERTAIN",
+            "checker_error:contradicts",
+            id="error_beats_identity_abstain",
+        ),
+        pytest.param(
+            {"incomplete": ""},
+            json.dumps({"name": "Someone Completely Different"}),
+            "DENY",
+            "identity_check",
+            id="identity_violation_beats_incomplete_error",
+        ),
+    ],
+)
+def test_checker_outcome_precedence(
+    tmp_path: Path,
+    overrides: dict[str, str],
+    identity_content: str | None,
+    expected_decision: str,
+    expected_explanation: str,
+) -> None:
+    """VIOLATION beats ERROR; ERROR beats identity ABSTAIN (D-01 precedence)."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    needs_identity_llm = identity_content is not None
+    claim_dir = _seed_policy_matrix_claim(
+        config,
+        claim_name=f"claim precedence {expected_explanation}",
+        booking_name="Roy Hoffman" if needs_identity_llm else "Ada Lovelace",
+        patient_line="Patient: Roy Hofman" if needs_identity_llm else "Patient: Ada Lovelace",
+    )
+    side_effect = _policy_matrix_chat_side_effect(
+        overrides,
+        identity_response=identity_content,
+    )
+    chat_fn = MagicMock(side_effect=side_effect)
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["decision"] == expected_decision
+    assert payload["decision_explanation"] == expected_explanation
+    assert chat_fn.call_count == len(side_effect)

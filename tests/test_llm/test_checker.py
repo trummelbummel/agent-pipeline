@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
-from compliance.llm.checker import Checker
+from compliance.llm.checker import Checker, CheckOutcome
 
 if TYPE_CHECKING:
     from conftest import ChatReturningFactory
@@ -35,7 +37,7 @@ def test_checker_containment_deterministic_hit_skips_llm() -> None:
         mode="containment",
     )
 
-    assert result is True
+    assert result == CheckOutcome.PASS
     chat.assert_not_called()
 
 
@@ -51,7 +53,7 @@ def test_checker_containment_llm_fallback_true(
         mode="containment",
     )
 
-    assert result is True
+    assert result == CheckOutcome.PASS
     chat.assert_called_once()
     call_kwargs = chat.call_args.kwargs
     assert call_kwargs["model"] == "test-model"
@@ -59,9 +61,10 @@ def test_checker_containment_llm_fallback_true(
     assert "check containment" in call_kwargs["messages"][0]["content"]
 
 
-def test_checker_containment_llm_fallback_false(
+def test_checker_containment_llm_fallback_false_is_abstain(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
+    """Containment result false is recorded ABSTAIN; it never drives DENY (P-01)."""
     chat = chat_returning_factory({"result": False})
     checker = _make_checker(chat)
 
@@ -71,7 +74,7 @@ def test_checker_containment_llm_fallback_false(
         mode="containment",
     )
 
-    assert result is False
+    assert result == CheckOutcome.ABSTAIN
     chat.assert_called_once()
 
 
@@ -87,7 +90,7 @@ def test_checker_contradicts_true_when_claim_conflicts(
         mode="contradicts",
     )
 
-    assert result is True
+    assert result == CheckOutcome.VIOLATION
     chat.assert_called_once()
     call_kwargs = chat.call_args.kwargs
     assert call_kwargs["format"] == "json"
@@ -106,14 +109,14 @@ def test_checker_contradicts_false_when_supported(
         mode="contradicts",
     )
 
-    assert result is False
+    assert result == CheckOutcome.PASS
     chat.assert_called_once()
 
 
 def test_checker_identity_false_when_name_obscured(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """Extracted initial vs full booking name → edit distance fails → mismatch."""
+    """Extracted initial vs full booking name -> edit distance fails -> VIOLATION."""
     chat = chat_returning_factory({"name": "R"})
     checker = _make_checker(chat)
 
@@ -123,7 +126,7 @@ def test_checker_identity_false_when_name_obscured(
         mode="identity",
     )
 
-    assert result is False
+    assert result == CheckOutcome.VIOLATION
     chat.assert_called_once()
     call_kwargs = chat.call_args.kwargs
     user = call_kwargs["messages"][1]["content"]
@@ -132,7 +135,7 @@ def test_checker_identity_false_when_name_obscured(
 
 
 def test_checker_identity_deterministic_containment_skips_llm() -> None:
-    """Lowercase name containment in OCR → match without calling the LLM."""
+    """Lowercase name containment in OCR -> PASS without calling the LLM."""
     chat = MagicMock()
     checker = _make_checker(chat)
 
@@ -141,12 +144,12 @@ def test_checker_identity_deterministic_containment_skips_llm() -> None:
         "Je soussigné certifie que Mme Amy NDIAYE, née le 21/12/1981 est hospitalisée depuis le 01/12/2022.\n",
     )
 
-    assert status == "match"
+    assert status == CheckOutcome.PASS
     chat.assert_not_called()
 
 
 def test_checker_identity_deterministic_token_containment_handles_glue_and_order() -> None:
-    """All booking-name tokens in OCR (glued / reordered) → match, skip LLM."""
+    """All booking-name tokens in OCR (glued / reordered) -> PASS, skip LLM."""
     chat = MagicMock()
     checker = _make_checker(chat)
 
@@ -155,7 +158,7 @@ def test_checker_identity_deterministic_token_containment_handles_glue_and_order
         "**name**: Kacou Meitiale Evelyne\n",
         "docteur KOUASSI KONE FRANCOIS que l'état de santé de Mme KACOU MEITIALE EVELYNEnécessite unehospitalisation\n",
     )
-    assert status == "match"
+    assert status == CheckOutcome.PASS
     chat.assert_not_called()
 
     # Exact token reorder with matching spelling skips LLM.
@@ -163,7 +166,7 @@ def test_checker_identity_deterministic_token_containment_handles_glue_and_order
         "**name**: Bastidas Angulo Daisy Mariuxi\n",
         "paciente BASTIDAS ANGULO DAISY MARIUXI cédula\n",
     )
-    assert status == "match"
+    assert status == CheckOutcome.PASS
     chat.assert_not_called()
 
 
@@ -173,7 +176,7 @@ def test_checker_identity_partner_note_skips_containment_requester_false_pass(
     """Booking ``(partner)`` name in OCR as requester must not short-circuit match.
 
     Claim-6 shape: partner tokens appear under 'a solicitud del…' while the
-    patient is a different person → extract + edit-distance → mismatch.
+    patient is a different person -> extract + edit-distance -> VIOLATION.
     """
     chat = chat_returning_factory({"name": "VELOSA RUIZ JORGE LUIS"})
     checker = _make_checker(chat)
@@ -185,7 +188,7 @@ def test_checker_identity_partner_note_skips_containment_requester_false_pass(
         "Señora ROJAS VALBUENA MARTA ISABEL Identificada con C.C. 41.541.380.\n",
     )
 
-    assert status == "mismatch"
+    assert status == CheckOutcome.VIOLATION
     chat.assert_called_once()
     user = chat.call_args.kwargs["messages"][1]["content"]
     assert "solicitud" in user.lower() or "patient" in user.lower()
@@ -194,7 +197,7 @@ def test_checker_identity_partner_note_skips_containment_requester_false_pass(
 def test_checker_identity_extract_null_when_not_contained(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """No patient name in OCR → extraction null → unclear."""
+    """No patient name in OCR -> extraction null -> ABSTAIN."""
     chat = chat_returning_factory({"name": None})
     checker = _make_checker(chat)
 
@@ -203,7 +206,7 @@ def test_checker_identity_extract_null_when_not_contained(
         "31. X. 20u\nSignature\nuv\n",
     )
 
-    assert status == "unclear"
+    assert status == CheckOutcome.ABSTAIN
     chat.assert_called_once()
 
 
@@ -220,14 +223,14 @@ def test_checker_identity_true_when_edit_distance_within_threshold(
         mode="identity",
     )
 
-    assert result is True
+    assert result == CheckOutcome.PASS
     chat.assert_called_once()
 
 
 def test_checker_identity_mismatch_when_edit_distance_above_threshold(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """Different person names → distance above threshold → mismatch."""
+    """Different person names -> distance above threshold -> VIOLATION."""
     chat = chat_returning_factory({"name": "Maria Rossi"})
     checker = _make_checker(chat, identity_max_edit_distance=3)
 
@@ -236,7 +239,7 @@ def test_checker_identity_mismatch_when_edit_distance_above_threshold(
         "Patient: Maria Rossi\n",
     )
 
-    assert status == "mismatch"
+    assert status == CheckOutcome.VIOLATION
     chat.assert_called_once()
 
 
@@ -251,14 +254,14 @@ def test_checker_identity_unclear_when_no_patient_field(
         "Dr. Rossi\nAmbulatorio\n",
     )
 
-    assert status == "unclear"
+    assert status == CheckOutcome.ABSTAIN
     assert (
         checker.check(
             claim="# Supporting documents\n\n**name**: Olivier Bayante\n",
             text="Dr. Rossi\nAmbulatorio\n",
             mode="identity",
         )
-        is False
+        == CheckOutcome.ABSTAIN
     )
 
 
@@ -271,9 +274,52 @@ def test_checker_identity_exact_containment_skips_llm_for_ada() -> None:
             "**name**: Ada Lovelace\n",
             "Patient: Ada Lovelace\n",
         )
-        == "match"
+        == CheckOutcome.PASS
     )
     chat.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("document_payload", "expected"),
+    [
+        pytest.param({"name": 7}, CheckOutcome.ERROR, id="schema_invalid_name_type"),
+        pytest.param({"name": "   "}, CheckOutcome.ABSTAIN, id="blank_name"),
+    ],
+)
+def test_identity_extraction_outcomes_document_side(
+    document_payload: dict[str, object],
+    expected: CheckOutcome,
+) -> None:
+    """Document-side extraction: schema-invalid name type -> ERROR; blank -> ABSTAIN."""
+    chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=json.dumps(document_payload))))
+    checker = _make_checker(chat)
+
+    status = checker.check_identity(
+        "**name**: Roy Hoffman\n",
+        "unrelated OCR text with no name field\n",
+    )
+
+    assert status == expected
+    chat.assert_called_once()
+
+
+def test_identity_extraction_unparseable_booking_name_gives_error() -> None:
+    """Unparseable booking-name extraction (no markdown field) -> ERROR."""
+    chat = MagicMock(
+        side_effect=[
+            SimpleNamespace(message=SimpleNamespace(content="not json")),
+            SimpleNamespace(message=SimpleNamespace(content=json.dumps({"name": "Someone"}))),
+        ]
+    )
+    checker = _make_checker(chat)
+
+    status = checker.check_identity(
+        "no name field here at all\n",
+        "Patient: Someone\n",
+    )
+
+    assert status == CheckOutcome.ERROR
+    assert chat.call_count == 2
 
 
 def test_checker_healthy_true_when_document_says_healthy(
@@ -288,7 +334,7 @@ def test_checker_healthy_true_when_document_says_healthy(
         mode="healthy",
     )
 
-    assert result is True
+    assert result == CheckOutcome.VIOLATION
     chat.assert_called_once()
     user = chat.call_args.kwargs["messages"][1]["content"]
     assert "CLÍNICAMENTE SANA" in user
@@ -307,7 +353,7 @@ def test_checker_healthy_false_when_illness_documented(
         mode="healthy",
     )
 
-    assert result is False
+    assert result == CheckOutcome.PASS
     chat.assert_called_once()
 
 
@@ -317,7 +363,7 @@ def test_checker_invalid_mode_raises() -> None:
         checker.check("claim", "text", mode="unsupported")  # type: ignore[arg-type]
 
 
-def test_checker_unparseable_llm_response_returns_false(
+def test_checker_unparseable_llm_response_returns_error(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
     chat = chat_returning_factory("")
@@ -329,7 +375,7 @@ def test_checker_unparseable_llm_response_returns_false(
         mode="containment",
     )
 
-    assert result is False
+    assert result == CheckOutcome.ERROR
     chat.assert_called_once()
 
 
@@ -353,7 +399,7 @@ def test_checker_not_authentic_true_when_ocr_format_suspect(
         mode="not_authentic",
     )
 
-    assert result is True
+    assert result == CheckOutcome.VIOLATION
     chat.assert_called_once()
     user = chat.call_args.kwargs["messages"][1]["content"]
     assert "Supporting document" in user
@@ -363,7 +409,7 @@ def test_checker_not_authentic_true_when_ocr_format_suspect(
 def test_checker_not_authentic_false_on_llm_false(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """mode=not_authentic: LLM {"result": false} → False (document looks authentic)."""
+    """mode=not_authentic: LLM {"result": false} -> PASS (document looks authentic)."""
     chat = chat_returning_factory({"result": False})
     checker = _make_checker(chat)
 
@@ -373,14 +419,14 @@ def test_checker_not_authentic_false_on_llm_false(
         mode="not_authentic",
     )
 
-    assert result is False
+    assert result == CheckOutcome.PASS
     chat.assert_called_once()
 
 
-def test_checker_not_authentic_parse_failure_fail_closed_true(
+def test_checker_not_authentic_parse_failure_returns_error(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """Deny-on-True mode: malformed JSON / missing result → fail-closed True."""
+    """Malformed JSON / missing result -> ERROR (D-01; no longer fail-closed True)."""
     chat = chat_returning_factory("")
     checker = _make_checker(chat)
 
@@ -390,7 +436,7 @@ def test_checker_not_authentic_parse_failure_fail_closed_true(
         mode="not_authentic",
     )
 
-    assert result is True
+    assert result == CheckOutcome.ERROR
     chat.assert_called_once()
 
 
@@ -407,17 +453,17 @@ def test_checker_incomplete_true_when_required_medical_fields_missing(
         mode="incomplete",
     )
 
-    assert result is True
+    assert result == CheckOutcome.VIOLATION
     chat.assert_called_once()
     user = chat.call_args.kwargs["messages"][1]["content"]
     assert "Supporting document" in user
     assert "No diagnosis" in user
 
 
-def test_checker_incomplete_parse_failure_fail_closed_true(
+def test_checker_incomplete_parse_failure_returns_error(
     chat_returning_factory: ChatReturningFactory,
 ) -> None:
-    """Deny-on-True mode: missing result key → fail-closed True (unlike containment)."""
+    """Missing result key -> ERROR (D-01; no longer fail-closed True)."""
     chat = chat_returning_factory({"other": True})
     checker = _make_checker(chat)
 
@@ -427,5 +473,5 @@ def test_checker_incomplete_parse_failure_fail_closed_true(
         mode="incomplete",
     )
 
-    assert result is True
+    assert result == CheckOutcome.ERROR
     chat.assert_called_once()

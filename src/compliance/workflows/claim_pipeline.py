@@ -11,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig, ClassificationConfig
 from compliance.llm.chat import ChatFn
-from compliance.llm.checker import Checker
+from compliance.llm.checker import Checker, CheckerMode, CheckOutcome
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
 from compliance.models.claim import GroundTruth
 from compliance.models.decisions import (
@@ -48,6 +48,38 @@ class RoutedCoverage(NamedTuple):
     label: str
 
 
+def _legacy_booleans_from_outcomes(
+    outcomes: dict[CheckerMode, CheckOutcome],
+) -> dict[str, bool]:
+    """Derive analysis_result.json boolean keys from typed checker outcomes.
+
+    Polarity is already resolved inside ``Checker``; this only maps outcome →
+    the legacy boolean contract (P-02 / P-03 of SR-008).
+
+    :param outcomes: Modes that actually ran, keyed by CheckerMode.
+    :return: Legacy boolean flags for persistence and DENY explanations.
+    """
+    flags: dict[str, bool] = {}
+    if "containment" in outcomes:
+        flags["checker_containment"] = outcomes["containment"] is CheckOutcome.PASS
+    if "contradicts" in outcomes:
+        flags["checker_contradicts"] = outcomes["contradicts"] is CheckOutcome.VIOLATION
+    if "identity" in outcomes:
+        identity = outcomes["identity"]
+        flags["identity_check"] = identity is CheckOutcome.PASS
+        flags["identity_unclear"] = identity in (CheckOutcome.ABSTAIN, CheckOutcome.ERROR)
+    else:
+        flags["identity_check"] = True
+        flags["identity_unclear"] = False
+    if "healthy" in outcomes:
+        flags["healthy_check"] = outcomes["healthy"] is CheckOutcome.VIOLATION
+    if "not_authentic" in outcomes:
+        flags["checker_document_not_authentic"] = outcomes["not_authentic"] is CheckOutcome.VIOLATION
+    if "incomplete" in outcomes:
+        flags["checker_incomplete_document"] = outcomes["incomplete"] is CheckOutcome.VIOLATION
+    return flags
+
+
 _COVERAGE_BRANCH_NEXT_NODE: dict[CoverageBranch, CoverageNextNode] = {
     "cancellation": "classify_reason",
     "personal_effects": "classify_pe_document",
@@ -70,6 +102,44 @@ _STATE_BOOLEAN_KEYS: tuple[str, ...] = (
     "checker_suspicious_dating",
 )
 
+# Checker VIOLATION → legacy DENY explanation key (order matches _violated_checkers).
+_VIOLATION_LEGACY_KEYS: tuple[tuple[CheckerMode, str], ...] = (
+    ("identity", "identity_check"),
+    ("healthy", "healthy_check"),
+    ("not_authentic", "checker_document_not_authentic"),
+    ("incomplete", "checker_incomplete_document"),
+    ("contradicts", "checker_contradicts"),
+)
+
+# Modes whose ABSTAIN drives UNCERTAIN (identity only; containment ABSTAIN is record-only).
+_ABSTAIN_UNCERTAIN_MODES: frozenset[CheckerMode] = frozenset({"identity"})
+
+# Modes whose ERROR drives UNCERTAIN. Containment ERROR is record-only (checker docstring).
+_ERROR_DECISION_MODES: frozenset[CheckerMode] = frozenset({
+    "contradicts",
+    "healthy",
+    "not_authentic",
+    "incomplete",
+    "identity",
+})
+
+
+class CheckerRunResult(NamedTuple):
+    """Structured output of ``_checker_results`` (SR-008).
+
+    :param departure_within_days: Deterministic far-departure UNCERTAIN gate.
+    :param suspicious_dating: Deterministic suspicious-dating UNCERTAIN gate.
+    :param outcomes: Per-mode ``CheckOutcome`` for every LLM checker that ran
+        (empty when a date gate short-circuits before constructing ``Checker``).
+    :param legacy_booleans: Analysis-result-compatible booleans derived from
+        ``outcomes`` (empty when outcomes are empty).
+    """
+
+    departure_within_days: bool
+    suspicious_dating: bool
+    outcomes: dict[CheckerMode, CheckOutcome]
+    legacy_booleans: dict[str, bool]
+
 
 class ClaimAnalysisState(TypedDict, total=False):
     """LangGraph state for one-shot claim analysis.
@@ -89,18 +159,20 @@ class ClaimAnalysisState(TypedDict, total=False):
         rule reads this instead of the raw coverage label list.
     :param reason_labels: Labels from the cancellation-reason stage.
     :param document_labels: Labels from the cancellation-document stage.
-    :param checker_containment: Checker containment mode result.
-    :param checker_contradicts: Checker contradicts mode result.
-    :param identity_check: True when booking name matches patient/subject name,
-        or identity was skipped (non-medical document).
-    :param identity_unclear: True when OCR has no clear patient/subject name field.
+    :param checker_outcomes: Per-mode ``CheckOutcome`` for every Checker mode
+        that ran (SR-008). Legacy boolean keys below are derived from this map.
+    :param checker_containment: True when containment outcome is PASS.
+    :param checker_contradicts: True when contradicts outcome is VIOLATION.
+    :param identity_check: True when identity outcome is PASS, or identity was
+        skipped (non-medical document).
+    :param identity_unclear: True when identity outcome is ABSTAIN or ERROR.
     :param document_has_signature: True when document_metadata reports has_signature.
     :param signature_check: True when signature requirement passes (or N/A).
-    :param healthy_check: True when supporting_document asserts patient is healthy.
-    :param checker_document_not_authentic: True when OCR/format authenticity check
-        fails (medical/hospital docs only).
-    :param checker_incomplete_document: True when required medical fields
-        (discharge/diagnosis/condition) are missing (medical/hospital docs only).
+    :param healthy_check: True when healthy outcome is VIOLATION.
+    :param checker_document_not_authentic: True when not_authentic outcome is
+        VIOLATION (medical/hospital docs only).
+    :param checker_incomplete_document: True when incomplete outcome is VIOLATION
+        (medical/hospital docs only).
     :param departure_within_days: True on the medical path when departure is
         farther than the configured day window from reference today
         (deterministic UNCERTAIN — recovery / ability-to-fly still unclear).
@@ -109,7 +181,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param human_in_the_loop: True when OCR metadata already flagged review, the
         routed coverage label is ``False``, a raw reason/document classifier
         label is ``False``, or analysis decision is UNCERTAIN (checker dating /
-        departure / identity unclear, coverage abstention).
+        departure / identity unclear / checker ERROR, coverage abstention).
     """
 
     claim_id: str
@@ -122,6 +194,7 @@ class ClaimAnalysisState(TypedDict, total=False):
     routed_coverage: RoutedCoverage
     reason_labels: list[str]
     document_labels: list[str]
+    checker_outcomes: dict[CheckerMode, CheckOutcome]
     checker_containment: bool
     checker_contradicts: bool
     identity_check: bool
@@ -401,40 +474,34 @@ class ClaimPipeline:
             run_medical_document_checks=run_medical_document_checks,
         )
         signature_check = self._signature_check_result(state)
-        early_uncertain = bool(results.get("departure_within_days")) or bool(results.get("checker_suspicious_dating"))
+        early_uncertain = results.departure_within_days or results.suspicious_dating
         reason = "date_uncertain_skip_llm" if early_uncertain else "containment_contradicts_identity_signature_healthy"
+        legacy = results.legacy_booleans
         log_branch_decision(
             logger,
             branch="run_checker",
             outcome="CHECKED",
             reason=reason,
             claim=state.get("claim_id"),
-            identity_check=results.get("identity_check"),
-            identity_unclear=results.get("identity_unclear"),
+            identity_check=legacy.get("identity_check"),
+            identity_unclear=legacy.get("identity_unclear"),
             signature_check=signature_check,
-            healthy_check=results.get("healthy_check"),
-            checker_document_not_authentic=results.get("checker_document_not_authentic"),
-            checker_incomplete_document=results.get("checker_incomplete_document"),
-            departure_within_days=results.get("departure_within_days"),
-            checker_suspicious_dating=results.get("checker_suspicious_dating"),
+            healthy_check=legacy.get("healthy_check"),
+            checker_document_not_authentic=legacy.get("checker_document_not_authentic"),
+            checker_incomplete_document=legacy.get("checker_incomplete_document"),
+            departure_within_days=results.departure_within_days,
+            checker_suspicious_dating=results.suspicious_dating,
         )
         payload: dict[str, object] = {
-            "departure_within_days": results["departure_within_days"],
+            "departure_within_days": results.departure_within_days,
             "signature_check": signature_check,
         }
-        if results.get("checker_suspicious_dating"):
+        if results.suspicious_dating:
             payload["checker_suspicious_dating"] = True
         if not early_uncertain:
-            payload["checker_containment"] = results["checker_containment"]
-            payload["checker_contradicts"] = results["checker_contradicts"]
-            payload["identity_check"] = results["identity_check"]
-            payload["identity_unclear"] = results["identity_unclear"]
-            payload["healthy_check"] = results["healthy_check"]
-            payload["checker_suspicious_dating"] = results["checker_suspicious_dating"]
-            if "checker_document_not_authentic" in results:
-                payload["checker_document_not_authentic"] = results["checker_document_not_authentic"]
-            if "checker_incomplete_document" in results:
-                payload["checker_incomplete_document"] = results["checker_incomplete_document"]
+            payload["checker_outcomes"] = results.outcomes
+            payload.update(legacy)
+            payload["checker_suspicious_dating"] = results.suspicious_dating
         return payload
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
@@ -767,35 +834,25 @@ class ClaimPipeline:
         *,
         run_identity: bool,
         run_medical_document_checks: bool,
-    ) -> dict[str, bool]:
+    ) -> CheckerRunResult:
         """Run deterministic date checks, then Checker LLM modes when needed.
 
         Always computes ``departure_within_days`` (medical path only: True when
         |departure - today| > ``departure_uncertain_within_days``) and
-        ``checker_suspicious_dating``. When either is True, returns early without
-        constructing ``Checker`` / calling chat — LLM keys are omitted from the
-        result dict.
-
-        Identity extracts booking and patient names (markdown ``name`` field and/or
-        LLM), then matches when lowercased Levenshtein distance is within
-        ``identity_max_edit_distance`` (containment short-circuit first). Skipped
-        when the classified document is not medical certificate / hospital admission.
-
-        Authenticity and incomplete run only when ``run_medical_document_checks``
-        is True (medical/hospital codes on cancellation coverage).
+        ``suspicious_dating``. When either is True, returns early without
+        constructing ``Checker`` / calling chat — ``outcomes`` stays empty.
 
         :param description_text: Claim narrative for containment / contradicts.
         :param supporting_document_text: Medical/supporting OCR markdown.
         :param supporting_documents_text: Booking/internal markdown with ``name``.
-        :param run_identity: When False, identity passes without an LLM call.
+        :param run_identity: When False, identity is omitted (legacy identity_check
+            True / identity_unclear False).
         :param run_medical_document_checks: When False, authenticity and incomplete
-            keys are omitted.
-        :return: Dict with date flags and optionally checker LLM results.
+            modes are omitted.
+        :return: Date flags, per-mode outcomes, and derived legacy booleans.
         """
         checking = self._config.checking
         today = _reference_today(supporting_documents_text, fallback=date.today())
-        # Medical/hospital only: far departure → UNCERTAIN; near departure continues
-        # through the remaining checkers (claim-6-shaped timing uncertainty).
         departure_flag = (
             checking.departure_uncertain_enabled
             and run_identity
@@ -812,14 +869,35 @@ class ClaimPipeline:
             max_month_delta=checking.suspicious_dating_max_month_delta,
             consider_within_years=checking.suspicious_dating_consider_within_years,
         )
-        date_flags = {
-            "departure_within_days": departure_flag,
-            "checker_suspicious_dating": suspicious_dating_flag,
-        }
         if departure_flag or suspicious_dating_flag:
-            return date_flags
+            return CheckerRunResult(
+                departure_within_days=departure_flag,
+                suspicious_dating=suspicious_dating_flag,
+                outcomes={},
+                legacy_booleans={},
+            )
 
-        checker = Checker(
+        outcomes = self._checker_outcomes(
+            description_text,
+            supporting_document_text,
+            supporting_documents_text,
+            run_identity=run_identity,
+            run_medical_document_checks=run_medical_document_checks,
+        )
+        return CheckerRunResult(
+            departure_within_days=False,
+            suspicious_dating=False,
+            outcomes=outcomes,
+            legacy_booleans=_legacy_booleans_from_outcomes(outcomes),
+        )
+
+    def _build_checker(self) -> Checker:
+        """Construct a ``Checker`` from checking config and the shared chat seam.
+
+        :return: Configured Checker instance for this pipeline run.
+        """
+        checking = self._config.checking
+        return Checker(
             model_name=checking.model,
             containment_prompt=checking.containment_prompt,
             contradicts_prompt=checking.contradicts_prompt,
@@ -830,40 +908,56 @@ class ClaimPipeline:
             chat_fn=self._chat_fn,
             identity_max_edit_distance=checking.identity_max_edit_distance,
         )
-        containment = checker.check(description_text, supporting_document_text, mode="containment")
-        contradicts = checker.check(description_text, supporting_document_text, mode="contradicts")
+
+    def _checker_outcomes(
+        self,
+        description_text: str,
+        supporting_document_text: str,
+        supporting_documents_text: str,
+        *,
+        run_identity: bool,
+        run_medical_document_checks: bool,
+    ) -> dict[CheckerMode, CheckOutcome]:
+        """Run Checker modes in fixed order; record only modes that ran.
+
+        Order: containment → contradicts → identity (optional) → healthy →
+        not_authentic / incomplete (optional medical). Do not reorder — MagicMock
+        side_effect sequences in tests depend on it.
+
+        :param description_text: Claim narrative text.
+        :param supporting_document_text: Supporting OCR markdown.
+        :param supporting_documents_text: Booking/internal markdown.
+        :param run_identity: Include identity when True.
+        :param run_medical_document_checks: Include authenticity/incomplete when True.
+        :return: Mode → CheckOutcome for every mode that executed.
+        """
+        checker = self._build_checker()
+        outcomes: dict[CheckerMode, CheckOutcome] = {
+            "containment": checker.check(description_text, supporting_document_text, mode="containment"),
+            "contradicts": checker.check(description_text, supporting_document_text, mode="contradicts"),
+        }
         if run_identity:
-            identity_status = checker.check_identity(supporting_documents_text, supporting_document_text)
-            identity_check = identity_status == "match"
-            identity_unclear = identity_status == "unclear"
-        else:
-            identity_check = True
-            identity_unclear = False
-        healthy = checker.check(
+            outcomes["identity"] = checker.check_identity(
+                supporting_documents_text,
+                supporting_document_text,
+            )
+        outcomes["healthy"] = checker.check(
             description_text,
             supporting_document_text,
             mode="healthy",
         )
-        results: dict[str, bool] = {
-            **date_flags,
-            "checker_containment": containment,
-            "checker_contradicts": contradicts,
-            "identity_check": identity_check,
-            "identity_unclear": identity_unclear,
-            "healthy_check": healthy,
-        }
         if run_medical_document_checks:
-            results["checker_document_not_authentic"] = checker.check(
+            outcomes["not_authentic"] = checker.check(
                 description_text,
                 supporting_document_text,
                 mode="not_authentic",
             )
-            results["checker_incomplete_document"] = checker.check(
+            outcomes["incomplete"] = checker.check(
                 description_text,
                 supporting_document_text,
                 mode="incomplete",
             )
-        return results
+        return outcomes
 
     @staticmethod
     def _state_boolean_flags(state: ClaimAnalysisState) -> dict[str, bool]:
@@ -904,6 +998,8 @@ class ClaimPipeline:
             "document_label_codes": document_codes,
         }
         payload.update(self._state_boolean_flags(state))
+        if state.get("checker_outcomes"):
+            payload["checker_outcomes"] = {mode: outcome.value for mode, outcome in state["checker_outcomes"].items()}
         if "document_labels" in state:
             payload["checker_missing_documentation"] = self._is_missing_documentation(state)
         hitl = self._resolved_human_in_the_loop(state)
@@ -997,17 +1093,10 @@ class ClaimPipeline:
 
         Missing documentation is document-type acceptability for the claim path —
         not failed containment (certs rarely contain the claim letter).
-        ``identity_check`` False means a clear mismatch / redaction on a medical
-        document → DENY. ``identity_unclear`` is handled separately as UNCERTAIN.
+        Checker VIOLATIONs are read from ``checker_outcomes`` when present
+        (SR-008); otherwise legacy boolean keys are used (date early-exit path).
         ``signature_check`` False means a medical certificate / hospital admission
         lacks ``has_signature`` in ``document_metadata.json`` → DENY.
-        ``healthy_check`` True means ``supporting_document.md`` asserts the patient
-        is healthy / fit → DENY.
-        ``checker_document_not_authentic`` True means OCR/format authenticity
-        failed on a medical/hospital document → DENY.
-        ``checker_incomplete_document`` True means required clinical fields
-        (discharge/diagnosis/condition) are missing → DENY. Separate from
-        ``signature_check``.
 
         :param state: Final graph state after Checker (or coverage-only).
         :return: Ordered list of violated keys that drive DENY.
@@ -1015,37 +1104,91 @@ class ClaimPipeline:
         violated: list[str] = []
         if self._is_missing_documentation(state):
             violated.append("checker_missing_documentation")
-        if "identity_check" in state and not bool(state["identity_check"]) and not bool(state.get("identity_unclear")):
-            violated.append("identity_check")
+        violated.extend(self._checker_violation_keys(state))
         if "signature_check" in state and not bool(state["signature_check"]):
             violated.append("signature_check")
+        return self._ordered_violated_keys(violated)
+
+    def _checker_violation_keys(self, state: ClaimAnalysisState) -> list[str]:
+        """Legacy DENY keys for checker VIOLATIONs (or legacy bool fallback).
+
+        :param state: Graph state with optional ``checker_outcomes``.
+        :return: Unordered DENY explanation keys from checker modes.
+        """
+        outcomes = state.get("checker_outcomes") or {}
+        if outcomes:
+            return [key for mode, key in _VIOLATION_LEGACY_KEYS if outcomes.get(mode) is CheckOutcome.VIOLATION]
+        keys: list[str] = []
+        if "identity_check" in state and not bool(state["identity_check"]) and not bool(state.get("identity_unclear")):
+            keys.append("identity_check")
         if "healthy_check" in state and bool(state["healthy_check"]):
-            violated.append("healthy_check")
+            keys.append("healthy_check")
         if "checker_document_not_authentic" in state and bool(state["checker_document_not_authentic"]):
-            violated.append("checker_document_not_authentic")
+            keys.append("checker_document_not_authentic")
         if "checker_incomplete_document" in state and bool(state["checker_incomplete_document"]):
-            violated.append("checker_incomplete_document")
+            keys.append("checker_incomplete_document")
         if "checker_contradicts" in state and bool(state["checker_contradicts"]):
-            violated.append("checker_contradicts")
-        return violated
+            keys.append("checker_contradicts")
+        return keys
+
+    @staticmethod
+    def _ordered_violated_keys(violated: list[str]) -> list[str]:
+        """Stable DENY explanation key order (matches historical fold).
+
+        :param violated: Unordered or partially ordered violated keys.
+        :return: Keys filtered to the canonical order, preserving only those present.
+        """
+        order = (
+            "checker_missing_documentation",
+            "identity_check",
+            "signature_check",
+            "healthy_check",
+            "checker_document_not_authentic",
+            "checker_incomplete_document",
+            "checker_contradicts",
+        )
+        present = set(violated)
+        return [key for key in order if key in present]
+
+    def _errored_checkers(self, state: ClaimAnalysisState) -> list[str]:
+        """Modes whose ERROR should drive UNCERTAIN (excludes containment).
+
+        :param state: Graph state with optional ``checker_outcomes``.
+        :return: Errored mode names in recorded (insertion) order.
+        """
+        outcomes = state.get("checker_outcomes") or {}
+        return [
+            mode
+            for mode, outcome in outcomes.items()
+            if outcome is CheckOutcome.ERROR and mode in _ERROR_DECISION_MODES
+        ]
+
+    def _identity_abstain_unclear(self, state: ClaimAnalysisState) -> bool:
+        """Whether identity ABSTAIN should yield UNCERTAIN ``identity_unclear``.
+
+        :param state: Graph state with optional ``checker_outcomes`` / legacy flags.
+        :return: True when identity abstained (or legacy identity_unclear is set).
+        """
+        outcomes = state.get("checker_outcomes") or {}
+        if outcomes:
+            return any(
+                mode in _ABSTAIN_UNCERTAIN_MODES and outcome is CheckOutcome.ABSTAIN
+                for mode, outcome in outcomes.items()
+            )
+        return "identity_unclear" in state and bool(state["identity_unclear"])
 
     def _decision_from_state(self, state: ClaimAnalysisState) -> GroundTruth:
         """Derive APPROVE/DENY/UNCERTAIN for evaluator-facing predicted_answer.
 
-        Precedence (locked):
-        1. Preprocess OCR failure (``ocr_read_failure`` / ``ocr_failure``) → UNCERTAIN
-        2. Routed coverage branch is abstention → UNCERTAIN ``coverage_false_label``
-        3. ``departure_within_days`` → UNCERTAIN (medical; departure farther than
-           ``n`` days — before DENY)
-        4. ``checker_suspicious_dating`` → UNCERTAIN (before DENY)
-        5. ``_violated_checkers`` non-empty → DENY
-        6. ``identity_unclear`` → UNCERTAIN
-        7. APPROVE ``checker_consistent``
-
-        Date UNCERTAIN flags sit before DENY so an early-exit path cannot fall
-        through to signature/identity deny when proximity/dating fired.
-        Missing documentation uses required document types for the coverage/reason
-        path. Containment is recorded but does not drive DENY.
+        Precedence (locked, SR-008):
+        1. Preprocess OCR failure → UNCERTAIN
+        2. Routed coverage abstention → UNCERTAIN ``coverage_false_label``
+        3. ``departure_within_days`` → UNCERTAIN
+        4. ``checker_suspicious_dating`` → UNCERTAIN
+        5. Any VIOLATION (checker or missing-doc / signature) → DENY
+        6. Any ERROR (except containment) → UNCERTAIN ``checker_error:<modes>``
+        7. Identity ABSTAIN → UNCERTAIN ``identity_unclear``
+        8. APPROVE ``checker_consistent``
 
         :param state: Final graph state.
         :return: GroundTruth decision written beside analysis_result.
@@ -1078,7 +1221,13 @@ class ClaimPipeline:
                 decision=DECISION_DENY,
                 explanation=",".join(violated),
             )
-        if "identity_unclear" in state and bool(state["identity_unclear"]):
+        errored = self._errored_checkers(state)
+        if errored:
+            return GroundTruth(
+                decision=DECISION_UNCERTAIN,
+                explanation="checker_error:" + ",".join(errored),
+            )
+        if self._identity_abstain_unclear(state):
             return GroundTruth(
                 decision=DECISION_UNCERTAIN,
                 explanation="identity_unclear",

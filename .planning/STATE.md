@@ -5,11 +5,11 @@ current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
 current_plan: 4
 status: executing
-stopped_at: Completed 260929-hxe-PLAN.md (SR-008)
-last_updated: "2026-09-29T12:25:41.466Z"
+stopped_at: Completed 260929-k1p-PLAN.md (SR-011)
+last_updated: "2026-09-29T12:45:35.863Z"
 last_activity: 2026-09-29
-last_activity_desc: Phase 07 execution started
-state_head: ff6da56d18195bb668e4f9c3bec5d00a41871ad3
+last_activity_desc: Completed quick task 260929-k1p (SR-011)
+state_head: 1a190a554d62afd6898e4d816ed5887ae6aebe15
 progress:
   total_phases: 8
   completed_phases: 4
@@ -32,7 +32,7 @@ Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
 Current Plan: 4
 Total Plans in Phase: 5
 Status: Ready to execute
-Last activity: 2026-09-29 - Completed quick task 260929-hxe: SR-008 typed checker outcome policy matrix
+Last activity: 2026-09-29 - Completed quick task 260929-k1p: SR-011 strong config policy validation
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -106,6 +106,8 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 07]: incomplete_prompt stored in 07-01; incomplete mode dispatch deferred to 07-02
 - [Phase 07]: Secondary CheckingConfig helpers use authenticity/incomplete placeholders matching 07-01
 - [Phase 07]: SR-008: CheckOutcome PASS|VIOLATION|ABSTAIN|ERROR; VIOLATION→DENY beats ERROR→UNCERTAIN; containment ERROR record-only; transport retry via checking.transport_retry
+- [Quick 260929-k1p]: SR-011: coverage.branches keyed routing; StrictConfigModel extra=forbid; required-document cross-refs + classification↔coverage vocabulary at load
+- [Phase 07]: SR-011: coverage.branches keyed routing; StrictConfigModel extra=forbid; load-time taxonomy cross-refs
 
 ### Blockers/Concerns
 
@@ -115,6 +117,7 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260929-k1p | SR-011: strong config policy validation (named coverage.branches; extra=forbid; cross-refs) | 2026-09-29 | 1a190a5 | [260929-k1p-sr-011-strong-config-policy-validation-n](./quick/260929-k1p-sr-011-strong-config-policy-validation-n/) |
 | 260929-hxe | SR-008: typed CheckOutcome policy matrix + transport retry (ERROR→UNCERTAIN; VIOLATION beats ERROR) | 2026-09-29 | ff6da56 | [260929-hxe-sr-008-typed-checker-outcome-policy-matr](./quick/260929-hxe-sr-008-typed-checker-outcome-policy-matr/) |
 | 260929-i89 | SR-012: deterministic CI fast lane + coverage (pytest-cov floor 90, addopts deselect integration, fast-lane gates matrix) | 2026-09-29 | 54da2be | [260929-i89-sr-012-deterministic-ci-fast-lane-and-co](./quick/260929-i89-sr-012-deterministic-ci-fast-lane-and-co/) |
 | 260929-ftg | SR-004: single authoritative coverage route via highest-probability label | 2026-09-29 | uncommitted | [260929-ftg-sr-004-single-authoritative-coverage-rou](./quick/260929-ftg-sr-004-single-authoritative-coverage-rou/) |
@@ -128,8 +131,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-29T12:25:41.442Z
-Stopped at: Completed 260929-hxe-PLAN.md (SR-008)
+Last session: 2026-09-29T12:45:35.841Z
+Stopped at: Completed 260929-k1p-PLAN.md (SR-011)
 Resume file: None
 
 ## Performance Metrics
@@ -156,3 +159,4 @@ Resume file: None
 | Phase 07 P00 | 3min | 2 tasks | 4 files |
 | Phase 07-denial-rule-checkers-in-analysis-pipeline P01 | 7min | 1 tasks | 9 files |
 | Phase 07 P01b | 3min | 1 tasks | 8 files |
+| Phase 260929-k1p P01 | 7min | 3 tasks | 11 files |

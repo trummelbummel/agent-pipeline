@@ -25,9 +25,10 @@ from compliance.preprocessing.claim_batch import (
 )
 from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter
+from compliance.workflows.artifact_publication import new_run_id, publish_claim_generation
 from compliance.workflows.predicted_answer_io import (
+    preprocess_predicted_answer_text,
     remove_stale_preprocess_prediction,
-    write_preprocess_predicted_answer,
 )
 
 # Re-export path-safety helpers for callers that historically imported from here.
@@ -138,14 +139,22 @@ def _document_metadata_entries(bundle: ClaimBundle) -> list[DocumentMetaData]:
     ]
 
 
-def _document_metadata_json_text(bundle: ClaimBundle) -> str:
-    """JSON body for document_metadata.json.
+def _document_metadata_json_text(bundle: ClaimBundle, *, run_id: str) -> str:
+    """JSON body for document_metadata.json under the preprocessed tree.
+
+    Mirrored preprocessed artifacts (including this metadata file) keep direct
+    writes because they are deterministically re-derivable inputs; only scored
+    results under ``results_dir`` publish transactionally.
 
     :param bundle: Populated ClaimBundle.
-    :return: Pretty-printed JSON with a ``documents`` metadata list.
+    :param run_id: Preprocess run id stamped beside ``documents`` for provenance.
+    :return: Pretty-printed JSON with ``run_id`` and a ``documents`` metadata list.
     """
     entries = _document_metadata_entries(bundle)
-    payload = {"documents": [entry.model_dump(mode="json") for entry in entries]}
+    payload = {
+        "run_id": run_id,
+        "documents": [entry.model_dump(mode="json") for entry in entries],
+    }
     return json.dumps(payload, indent=2)
 
 
@@ -194,22 +203,31 @@ class PreprocessingPipeline:
         """Configured preprocessed artifact filenames."""
         return self._config.preprocessing.artifacts
 
-    def process_claim(self, claim_dir: Path, output_root: Path | None = None) -> Path:
+    def process_claim(
+        self,
+        claim_dir: Path,
+        output_root: Path | None = None,
+        *,
+        run_id: str | None = None,
+    ) -> Path:
         """Project one claim folder into a mirrored preprocessed artifact tree.
 
         :param claim_dir: Source claim folder path.
         :param output_root: Destination root; defaults to ``self.output_root``.
+        :param run_id: Generation id for this claim; minted when the caller
+            passes none so single-claim entry points still stamp provenance.
         :return: Path to the written claim output directory.
         :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
         """
         _validate_claim_dir_name(claim_dir.name)
 
         root = self.output_root if output_root is None else output_root
+        resolved_run_id = run_id if run_id is not None else new_run_id()
         bundle = _process_single_claim(claim_dir, self._config, **self._reader_overrides)
 
         claim_out = root / claim_dir.name
         claim_out.mkdir(parents=True, exist_ok=True)
-        predicted_path = self._write_claim_artifacts(claim_out, bundle)
+        predicted_path = self._write_claim_artifacts(claim_out, bundle, run_id=resolved_run_id)
         summary = _claim_document_summary(bundle)
         _log_preprocessed_documents(claim_dir.name, bundle)
         log_branch_decision(
@@ -218,6 +236,7 @@ class PreprocessingPipeline:
             outcome="WROTE",
             reason="artifact_tree",
             claim=claim_dir.name,
+            run_id=resolved_run_id,
             fraud_deny=summary["fraud_deny"],
             hitl=summary["hitl"],
             extracted=summary["extracted"],
@@ -235,6 +254,7 @@ class PreprocessingPipeline:
         output_root = self.output_root
         output_root.mkdir(parents=True, exist_ok=True)
         self.results_root.mkdir(parents=True, exist_ok=True)
+        run_id = new_run_id()
 
         if source is not None and _is_claim_folder(source):
             log_branch_decision(
@@ -243,14 +263,15 @@ class PreprocessingPipeline:
                 outcome="SINGLE",
                 reason="caller_claim_folder",
                 claim=source.name,
+                run_id=run_id,
             )
-            return [self.process_claim(source, output_root)]
+            return [self.process_claim(source, output_root, run_id=run_id)]
 
         data_dir = Path(self._config.preprocessing.data_dir) if source is None else source
         folders = _discover_claim_folders(data_dir)
         logger.info("Discovered %d claim folders under %s", len(folders), data_dir)
 
-        written = self._written_claim_outputs(folders, output_root)
+        written = self._written_claim_outputs(folders, output_root, run_id=run_id)
         log_branch_decision(
             logger,
             branch="workflow_batch",
@@ -258,15 +279,22 @@ class PreprocessingPipeline:
             reason="soft_fail_batch",
             written=len(written),
             total=len(folders),
+            run_id=run_id,
         )
         return written
 
-    def _written_claim_outputs(self, folders: list[Path], output_root: Path) -> list[Path]:
+    def _written_claim_outputs(
+        self,
+        folders: list[Path],
+        output_root: Path,
+        *,
+        run_id: str,
+    ) -> list[Path]:
         written: list[Path] = []
         for claim_dir in folders:
             logger.info("Processing %s", claim_dir.name)
             try:
-                written.append(self.process_claim(claim_dir, output_root))
+                written.append(self.process_claim(claim_dir, output_root, run_id=run_id))
             except Exception as exc:
                 log_branch_decision(
                     logger,
@@ -284,7 +312,7 @@ class PreprocessingPipeline:
         names = self.artifacts
         written_names = [names.description, names.answer]
         if predicted_path is not None:
-            written_names.append(names.predicted_answer)
+            written_names.extend([names.predicted_answer, names.run_manifest])
         written_names.extend([
             names.supporting_document,
             names.supporting_documents,
@@ -293,17 +321,24 @@ class PreprocessingPipeline:
         ])
         return written_names
 
-    def _write_claim_artifacts(self, claim_out: Path, bundle: ClaimBundle) -> Path | None:
+    def _write_claim_artifacts(
+        self,
+        claim_out: Path,
+        bundle: ClaimBundle,
+        *,
+        run_id: str,
+    ) -> Path | None:
         """Write preprocessed artifacts and optional predicted_answer under results_dir.
 
         :param claim_out: Destination claim output directory (preprocessed tree).
         :param bundle: Populated ClaimBundle for this claim.
+        :param run_id: Preprocess generation id for metadata and prediction stamps.
         :return: Path to predicted_answer when written; otherwise None.
         """
-        self._write_mirrored_artifacts(claim_out, bundle)
-        return self._predicted_answer_path(claim_out, bundle)
+        self._write_mirrored_artifacts(claim_out, bundle, run_id=run_id)
+        return self._predicted_answer_path(claim_out, bundle, run_id=run_id)
 
-    def _write_mirrored_artifacts(self, claim_out: Path, bundle: ClaimBundle) -> None:
+    def _write_mirrored_artifacts(self, claim_out: Path, bundle: ClaimBundle, *, run_id: str) -> None:
         names = self.artifacts
         (claim_out / names.description).write_bytes(_description_txt_bytes(bundle))
         (claim_out / names.answer).write_text(_answer_json_text(bundle) + "\n", encoding="utf-8")
@@ -316,20 +351,28 @@ class PreprocessingPipeline:
             encoding="utf-8",
         )
         (claim_out / names.document_metadata).write_text(
-            _document_metadata_json_text(bundle) + "\n",
+            _document_metadata_json_text(bundle, run_id=run_id) + "\n",
             encoding="utf-8",
         )
         self._write_document_pngs(claim_out, bundle)
 
-    def _predicted_answer_path(self, claim_out: Path, bundle: ClaimBundle) -> Path | None:
-        """Write preprocess predicted_answer under results_dir, or clear stale leftovers.
+    def _predicted_answer_path(
+        self,
+        claim_out: Path,
+        bundle: ClaimBundle,
+        *,
+        run_id: str,
+    ) -> Path | None:
+        """Publish preprocess predicted_answer under results_dir, or clear stale leftovers.
 
         When the bundle has no pipeline decision, removes only preprocess-origin
         predicted_answer files (e.g. Benford DENYs) if analysis has not authored a
         sibling result — never wipes evaluator predictions from ClaimPipeline.
+        A removal is not a publication and writes no manifest.
 
         :param claim_out: Destination claim output directory (preprocessed tree).
         :param bundle: Populated ClaimBundle for this claim.
+        :param run_id: Generation id for the published prediction.
         :return: Path to predicted_answer when written; otherwise None.
         """
         results_claim = self.results_root / claim_out.name
@@ -342,7 +385,29 @@ class PreprocessingPipeline:
                 analysis_result_path=analysis_result_path,
             )
             return None
-        return write_preprocess_predicted_answer(predicted_path, predicted)
+        published = publish_claim_generation(
+            results_root=self.results_root,
+            claim_id=claim_out.name,
+            run_id=run_id,
+            bodies={
+                self.artifacts.predicted_answer: preprocess_predicted_answer_text(
+                    predicted,
+                    run_id=run_id,
+                ),
+            },
+            manifest_name=self.artifacts.run_manifest,
+            source="preprocess",
+        )
+        log_branch_decision(
+            logger,
+            branch="predicted_answer",
+            outcome="WROTE",
+            reason=predicted.explanation if isinstance(predicted.explanation, str) else "decision",
+            decision=predicted.decision,
+            path=str(published.artifacts[0]),
+            run_id=run_id,
+        )
+        return published.artifacts[0]
 
     def _write_document_pngs(self, claim_out: Path, bundle: ClaimBundle) -> list[Path]:
         """Copy or convert claim raster documents to PNG under ``claim_out``.

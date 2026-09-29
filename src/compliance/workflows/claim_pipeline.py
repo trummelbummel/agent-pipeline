@@ -25,9 +25,11 @@ from compliance.preprocessing.claim_batch import (
     _validate_claim_dir_name,
 )
 from compliance.workflows.artifact_publication import (
+    ClaimRunOutcome,
     PublishedGeneration,
     new_run_id,
     publish_claim_generation,
+    write_failed_run_manifest,
 )
 from compliance.workflows.claim_dates import (
     _departure_beyond_days,
@@ -211,6 +213,17 @@ class CheckerRunResult(NamedTuple):
     legacy_booleans: dict[str, bool]
 
 
+class BatchAnalysisResult(NamedTuple):
+    """Structured result of a soft-fail analysis batch.
+
+    :param paths: Successfully published analysis_result.json paths.
+    :param outcomes: Per-claim status for the run (ok or failed).
+    """
+
+    paths: list[Path]
+    outcomes: tuple[ClaimRunOutcome, ...]
+
+
 class ClaimAnalysisState(TypedDict, total=False):
     """LangGraph state for one-shot claim analysis.
 
@@ -256,10 +269,11 @@ class ClaimAnalysisState(TypedDict, total=False):
     :param checker_suspicious_dating: True when OCR dating is implausible
         (year skew vs reference today, or issue/stamp before care window);
         absent when the suspicious-dating check is skipped.
-    :param human_in_the_loop: True when OCR metadata already flagged review, the
-        routed coverage label is ``False``, a raw reason/document classifier
-        label is ``False``, or analysis decision is UNCERTAIN (checker dating /
-        departure / identity unclear / checker ERROR, coverage abstention).
+    :param human_in_the_loop: True when OCR metadata already flagged review for
+        this run's inputs. Analysis-driven HITL (classifier ``False`` or
+        UNCERTAIN) is resolved at persist time and recorded on the published
+        artifacts via ``human_in_the_loop_source`` — it is not written back into
+        the preprocessed tree.
     :param run_id: Generation id stamped into every artifact published for this
         claim in the current run.
     """
@@ -406,17 +420,27 @@ class ClaimPipeline:
         root = self.preprocessed_root if source is None else source
         folders = _discover_claim_folders(root)
         logger.info("Discovered %d claim folders under %s", len(folders), root)
-        written = self._written_analysis_outputs(folders, run_id=run_id)
+        batch = self._batch_analysis_outcomes(folders, run_id=run_id)
+        failed_manifest = write_failed_run_manifest(self.results_root, run_id, batch.outcomes)
+        if failed_manifest is not None:
+            log_branch_decision(
+                logger,
+                branch="analysis_batch",
+                outcome="FAILED_RUN_MANIFEST",
+                reason="claim_failures",
+                run_id=run_id,
+                path=str(failed_manifest),
+            )
         log_branch_decision(
             logger,
             branch="analysis_batch",
             outcome="COMPLETE",
             reason="soft_fail_batch",
-            written=len(written),
+            written=len(batch.paths),
             total=len(folders),
             run_id=run_id,
         )
-        return written
+        return batch.paths
 
     def _input_root_for_claim(self, claim_dir: Path) -> Path:
         """Resolve which directory holds preprocessed artifacts for ``claim_dir``.
@@ -429,20 +453,23 @@ class ClaimPipeline:
             return claim_dir
         return self.preprocessed_root / claim_dir.name
 
-    def _written_analysis_outputs(self, folders: list[Path], *, run_id: str) -> list[Path]:
+    def _batch_analysis_outcomes(self, folders: list[Path], *, run_id: str) -> BatchAnalysisResult:
         """Analyze each claim folder; soft-fail and continue on errors.
 
         :param folders: Claim directories under preprocessed_dir.
         :param run_id: Shared generation id for every claim in this run.
-        :return: Paths of analysis_result.json files written successfully.
+        :return: Successful analysis_result paths plus per-claim outcomes.
         """
         written: list[Path] = []
+        outcomes: list[ClaimRunOutcome] = []
         for claim_dir in folders:
             logger.info("Analyzing %s", claim_dir.name)
             try:
                 _validate_claim_dir_name(claim_dir.name)
                 written.append(self.analyze_claim(claim_dir, run_id=run_id))
+                outcomes.append(ClaimRunOutcome(claim_id=claim_dir.name, status="ok", error=None))
             except Exception as exc:
+                outcomes.append(ClaimRunOutcome(claim_id=claim_dir.name, status="failed", error=type(exc).__name__))
                 log_branch_decision(
                     logger,
                     branch="analysis_write",
@@ -453,7 +480,7 @@ class ClaimPipeline:
                     error=type(exc).__name__,
                 )
                 logger.exception("Failed to analyze %s: %s", claim_dir.name, type(exc).__name__)
-        return written
+        return BatchAnalysisResult(paths=written, outcomes=tuple(outcomes))
 
     def _route_after_coverage(self, state: ClaimAnalysisState) -> CoverageNextNode:
         """Route to the next node from the single routed coverage decision (SR-004).
@@ -623,10 +650,7 @@ class ClaimPipeline:
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         hitl = self._resolved_human_in_the_loop(state)
-        # Analysis-driven HITL (classifier abstain or checker UNCERTAIN) must
-        # also flip document_metadata; preprocess-HITL is already stored there.
-        if hitl and not bool(state.get("human_in_the_loop")):
-            self._persist_human_in_the_loop_metadata(state)
+        hitl_source = self._human_in_the_loop_provenance(state)
         published = self._published_generation(state)
         log_branch_decision(
             logger,
@@ -639,6 +663,7 @@ class ClaimPipeline:
             manifest=str(published.manifest),
             run_id=published.run_id,
             human_in_the_loop=hitl,
+            hitl_source=hitl_source,
         )
         return {"human_in_the_loop": hitl}
 
@@ -735,44 +760,26 @@ class ClaimPipeline:
             return True
         return self._decision_from_state(state).decision == DECISION_UNCERTAIN
 
-    def _persist_human_in_the_loop_metadata(self, state: ClaimAnalysisState) -> None:
-        """Set ``human_in_the_loop: true`` on every document_metadata entry.
+    def _human_in_the_loop_provenance(self, state: ClaimAnalysisState) -> str:
+        """Return the stable source code that drove HITL for this run.
 
-        :param state: Graph state with claim_id and optional input_root.
-        """
-        claim_id = state["claim_id"]
-        claim_in = self._claim_input_root(state)
-        artifacts = self._config.preprocessing.artifacts
-        path = claim_in / artifacts.document_metadata
-        entries = self._document_metadata_entries(claim_id, input_root=claim_in)
-        if not entries:
-            entries = [{"source_file": "", "has_signature": False}]
-        updated = [{**entry, "human_in_the_loop": True} for entry in entries]
-        path.write_text(
-            json.dumps({"documents": updated}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        reason = self._human_in_the_loop_reason(state)
-        log_branch_decision(
-            logger,
-            branch="human_in_the_loop",
-            outcome="FLAGGED",
-            reason=reason,
-            claim=claim_id,
-            path=str(path),
-        )
+        Check order (first match wins): ``classifier_false`` when the routed
+        coverage or a raw reason/document label is the confident-negative;
+        ``preprocess_metadata`` when the flag came in from the metadata read;
+        ``uncertain_decision`` when the decision resolves to UNCERTAIN; else
+        ``none``.
 
-    def _human_in_the_loop_reason(self, state: ClaimAnalysisState) -> str:
-        """Produce the log reason for the human-in-the-loop flag.
-
-        :param state: Graph state used to resolve the classifier and decision outcome.
-        :return: ``classifier_false`` when the classifier drove the flag; otherwise the
-            decision explanation when it is a non-empty string, else ``uncertain``.
+        :param state: Final graph state after checker (or coverage-only).
+        :return: One of ``classifier_false``, ``preprocess_metadata``,
+            ``uncertain_decision``, or ``none``.
         """
         if self._classifier_returned_false(state):
             return "classifier_false"
-        explanation = self._decision_from_state(state).explanation
-        return explanation if isinstance(explanation, str) and explanation else "uncertain"
+        if bool(state.get("human_in_the_loop")):
+            return "preprocess_metadata"
+        if self._decision_from_state(state).decision == DECISION_UNCERTAIN:
+            return "uncertain_decision"
+        return "none"
 
     def _document_metadata_entries(self, claim_id: str, *, input_root: Path | None = None) -> list[dict[str, object]]:
         """Load document metadata entries for a claim folder.
@@ -781,16 +788,39 @@ class ClaimPipeline:
         :param input_root: Directory holding artifacts; defaults to preprocessed claim.
         :return: List of metadata dicts (empty when missing/invalid).
         """
+        raw = self._document_metadata_raw(claim_id, input_root=input_root)
+        documents = raw.get("documents") if raw else None
+        if not isinstance(documents, list):
+            return []
+        return [entry for entry in documents if isinstance(entry, dict)]
+
+    def _document_metadata_run_id(self, claim_id: str, *, input_root: Path | None = None) -> str | None:
+        """Return the preprocess ``run_id`` stamped on document_metadata.json, if any.
+
+        :param claim_id: Validated claim folder segment.
+        :param input_root: Directory holding artifacts; defaults to preprocessed claim.
+        :return: Run id string, or None when absent (pre-SR-005 trees).
+        """
+        raw = self._document_metadata_raw(claim_id, input_root=input_root)
+        if raw is None:
+            return None
+        value = raw.get("run_id")
+        return value if isinstance(value, str) else None
+
+    def _document_metadata_raw(self, claim_id: str, *, input_root: Path | None = None) -> dict[str, object] | None:
+        """Parse document_metadata.json once for entries and provenance readers.
+
+        :param claim_id: Validated claim folder segment.
+        :param input_root: Directory holding artifacts; defaults to preprocessed claim.
+        :return: Parsed object, or None when missing/invalid.
+        """
         artifacts = self._config.preprocessing.artifacts
         claim_in = input_root if input_root is not None else self.preprocessed_root / claim_id
         path = claim_in / artifacts.document_metadata
         if not path.is_file():
-            return []
+            return None
         raw = json.loads(path.read_text(encoding="utf-8"))
-        documents = raw.get("documents") if isinstance(raw, dict) else None
-        if not isinstance(documents, list):
-            return []
-        return [entry for entry in documents if isinstance(entry, dict)]
+        return raw if isinstance(raw, dict) else None
 
     def _checker_rule_set(self, state: ClaimAnalysisState) -> CheckerRuleSet:
         """Compute the single per-claim medical rule set from branch + document codes.
@@ -1082,6 +1112,13 @@ class ClaimPipeline:
             payload["checker_missing_documentation"] = self._is_missing_documentation(state)
         hitl = self._resolved_human_in_the_loop(state)
         payload["human_in_the_loop"] = hitl
+        payload["human_in_the_loop_source"] = self._human_in_the_loop_provenance(state)
+        metadata_run_id = self._document_metadata_run_id(
+            state["claim_id"],
+            input_root=self._claim_input_root(state),
+        )
+        if metadata_run_id is not None:
+            payload["document_metadata_run_id"] = metadata_run_id
         decision = self._decision_from_state(state)
         payload["decision"] = decision.decision
         payload["decision_explanation"] = decision.explanation if isinstance(decision.explanation, str) else None

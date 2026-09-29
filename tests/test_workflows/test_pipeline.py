@@ -99,6 +99,76 @@ def test_process_claim_writes_predicted_answer_on_fraud_deny(
     assert answer["decision"] == "APPROVE"
 
 
+def test_preprocess_prediction_publishes_generation(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    mock_document_reader_factory: MockDocumentReaderFactory,
+) -> None:
+    """Preprocess prediction publishes under run_id; older analysis_result stays readable."""
+    from compliance.workflows.artifact_publication import generation_mismatch
+
+    claim = tmp_path / "claim 7"
+    claim.mkdir()
+    (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
+    (claim / "description.txt").write_text("Please refund.", encoding="utf-8")
+    (claim / "scan.png").write_bytes(b"png")
+
+    fraud_doc = DocumentData.model_validate({
+        "decision": "DENY",
+        "reason": "fraud",
+        "fields": {
+            "decision": "DENY",
+            "reason": "fraud",
+            "benford_chi_squared": 99.5,
+            "benford_conformity": False,
+        },
+    })
+    output_root = tmp_path / "preprocessed_out"
+    results_root = tmp_path / "results_out"
+    results_claim = results_root / "claim 7"
+    results_claim.mkdir(parents=True)
+    old_run = "20260929T100000-oldgen01"
+    (results_claim / "analysis_result.json").write_text(
+        json.dumps({"run_id": old_run, "decision": "APPROVE"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (results_claim / "predicted_answer.json").write_text(
+        json.dumps({"run_id": old_run, "decision": "APPROVE", "source": "analysis"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (results_claim / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": old_run,
+                "published_at": "2026-09-29T10:00:00Z",
+                "source": "analysis",
+                "artifacts": ["analysis_result.json", "predicted_answer.json"],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = minimal_app_config_factory(tmp_path, results_dir=results_root)
+    PreprocessingPipeline(
+        config,
+        description_reader=mock_description_reader_factory(),
+        document_reader=mock_document_reader_factory({"scan.png": fraud_doc}),
+    ).process_claim(claim, output_root)
+
+    artifacts = config.preprocessing.artifacts
+    manifest = json.loads((results_claim / artifacts.run_manifest).read_text(encoding="utf-8"))
+    predicted = json.loads((results_claim / artifacts.predicted_answer).read_text(encoding="utf-8"))
+    assert manifest["artifacts"] == [artifacts.predicted_answer]
+    assert predicted["run_id"] == manifest["run_id"]
+    assert predicted["source"] == "preprocess"
+    analysis = json.loads((results_claim / artifacts.analysis_result).read_text(encoding="utf-8"))
+    assert analysis["run_id"] == old_run
+    assert generation_mismatch(results_claim, artifacts.analysis_result, artifacts.run_manifest) == "run_id_mismatch"
+    assert not (results_root / ".staging").exists()
+
+
 def test_process_claim_skips_predicted_answer_without_pipeline_decision(
     tmp_path: Path,
     minimal_app_config_factory: MinimalAppConfigFactory,
@@ -287,6 +357,7 @@ def test_process_claim_missing_optionals_still_emits_four_files(
     metadata = json.loads((claim_out / config.preprocessing.artifacts.document_metadata).read_text(encoding="utf-8"))
     assert metadata["documents"][0]["faulty_extraction"] is True
     assert metadata["documents"][0]["human_in_the_loop"] is True
+    assert isinstance(metadata.get("run_id"), str) and metadata["run_id"]
 
 
 def test_process_claim_refuses_unsafe_claim_dir_name(

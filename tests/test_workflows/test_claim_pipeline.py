@@ -676,6 +676,8 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
         ]
     )
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+    meta_path = claim_dir / artifacts.document_metadata
+    before_meta = meta_path.read_bytes()
 
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
@@ -691,8 +693,8 @@ def test_uncertain_when_identity_unclear(tmp_path: Path) -> None:
         )
     )
     assert predicted["human_in_the_loop"] is True
-    meta = json.loads((claim_dir / artifacts.document_metadata).read_text(encoding="utf-8"))
-    assert meta["documents"][0]["human_in_the_loop"] is True
+    assert meta_path.read_bytes() == before_meta
+    assert payload["human_in_the_loop_source"] == "uncertain_decision"
 
 
 def test_identity_skipped_for_non_medical_document(tmp_path: Path) -> None:
@@ -1503,6 +1505,8 @@ def test_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
     })
     chat_fn = MagicMock(side_effect=[coverage])
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+    meta_path = claim_dir / artifacts.document_metadata
+    before_meta = meta_path.read_bytes()
 
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
@@ -1514,10 +1518,10 @@ def test_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> None:
 
     assert payload["coverage_label_codes"] == [COVERAGE_FALSE]
     assert payload["human_in_the_loop"] is True
+    assert payload["human_in_the_loop_source"] == "classifier_false"
     assert payload["decision"] == "UNCERTAIN"
     assert predicted["human_in_the_loop"] is True
-    meta = json.loads((claim_dir / artifacts.document_metadata).read_text(encoding="utf-8"))
-    assert meta["documents"][0]["human_in_the_loop"] is True
+    assert meta_path.read_bytes() == before_meta
     assert chat_fn.call_count == 1
 
 
@@ -1544,14 +1548,113 @@ def test_document_classifier_false_sets_human_in_the_loop(tmp_path: Path) -> Non
     healthy = _chat_response({"result": False})
     chat_fn = MagicMock(side_effect=[coverage, reason, document, containment, contradicts, healthy])
     pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+    meta_path = claim_dir / artifacts.document_metadata
+    before_meta = meta_path.read_bytes()
 
     result_path = pipeline.analyze_claim(claim_dir)
     payload = json.loads(result_path.read_text(encoding="utf-8"))
 
     assert COVERAGE_FALSE in payload["document_label_codes"]
     assert payload["human_in_the_loop"] is True
-    meta = json.loads((claim_dir / artifacts.document_metadata).read_text(encoding="utf-8"))
-    assert meta["documents"][0]["human_in_the_loop"] is True
+    assert payload["human_in_the_loop_source"] == "classifier_false"
+    assert meta_path.read_bytes() == before_meta
+
+
+def test_preprocess_hitl_clears_across_runs(tmp_path: Path) -> None:
+    """D-03: preprocess HITL is recomputed per run and does not stick."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    claim_dir = _seed_preprocessed_claim(config, claim_name="claim hitl clear")
+    artifacts = config.preprocessing.artifacts
+    meta_path = claim_dir / artifacts.document_metadata
+    meta_path.write_text(
+        json.dumps({
+            "documents": [
+                {
+                    "source_file": "medical.png",
+                    "has_signature": True,
+                    "extraction_probability": 0.9,
+                    "faulty_extraction": False,
+                    "human_in_the_loop": True,
+                }
+            ]
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    first = json.loads(pipeline.analyze_claim(claim_dir).read_text(encoding="utf-8"))
+    assert first["human_in_the_loop"] is True
+    assert first["human_in_the_loop_source"] == "preprocess_metadata"
+
+    meta_path.write_text(
+        json.dumps({
+            "documents": [
+                {
+                    "source_file": "medical.png",
+                    "has_signature": True,
+                    "extraction_probability": 0.9,
+                    "faulty_extraction": False,
+                    "human_in_the_loop": False,
+                }
+            ]
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    second = json.loads(pipeline.analyze_claim(claim_dir).read_text(encoding="utf-8"))
+    assert second["human_in_the_loop"] is False
+    assert second["human_in_the_loop_source"] == "none"
+
+
+def test_failed_claim_in_batch_writes_run_manifest(tmp_path: Path) -> None:
+    """P-08: a batch with one failure writes results_dir/.runs/{run_id}.json."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    _seed_preprocessed_claim(config, claim_name="claim fail")
+    _seed_preprocessed_claim(config, claim_name="claim ok")
+    inner = _repeating_cancellation_chat_fn()
+    seen: list[str] = []
+
+    def _chat(**kwargs: object) -> object:
+        # First claim folder alphabetically is "claim fail" — fail its first call.
+        if not seen:
+            seen.append("fail")
+            raise RuntimeError
+        return inner(**kwargs)
+
+    chat_fn = MagicMock(side_effect=_chat)
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+    written = pipeline.run(Path(config.preprocessing.preprocessed_dir))
+
+    assert len(written) == 1
+    assert written[0].parent.name == "claim ok"
+    runs_dir = Path(config.preprocessing.results_dir) / ".runs"
+    manifests = list(runs_dir.glob("*.json"))
+    assert len(manifests) == 1
+    payload = json.loads(manifests[0].read_text(encoding="utf-8"))
+    failed = [o for o in payload["outcomes"] if o["status"] == "failed"]
+    assert failed == [{"claim_id": "claim fail", "status": "failed", "error": "RuntimeError"}]
+    ok_manifest = Path(config.preprocessing.results_dir) / "claim ok" / config.preprocessing.artifacts.run_manifest
+    assert ok_manifest.is_file()
+
+
+def test_successful_batch_writes_no_run_manifest(
+    tmp_path: Path,
+) -> None:
+    """P-08: a fully successful batch leaves no results_dir/.runs file."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    _seed_preprocessed_claim(config, claim_name="claim a")
+    _seed_preprocessed_claim(config, claim_name="claim b")
+    chat_fn = _repeating_cancellation_chat_fn()
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    written = pipeline.run(Path(config.preprocessing.preprocessed_dir))
+    assert len(written) == 2
+    assert not (Path(config.preprocessing.results_dir) / ".runs").exists()
 
 
 def test_refuses_unsafe_claim_dir_name(tmp_path: Path) -> None:

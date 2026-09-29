@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ from compliance.config.settings import (
     ClassificationConfig,
     OcrRetryConfig,
     RequiredDocumentsConfig,
+    TransportRetryConfig,
 )
 
 if TYPE_CHECKING:
@@ -1417,6 +1419,27 @@ def _with_departure_uncertain_enabled(config: AppConfig) -> AppConfig:
     )
 
 
+def _with_transport_retry(
+    config: AppConfig,
+    *,
+    max_retries: int,
+    backoff_seconds: float,
+) -> AppConfig:
+    """Return a copy of ``config`` with checker transport_retry overridden."""
+    return config.model_copy(
+        update={
+            "checking": config.checking.model_copy(
+                update={
+                    "transport_retry": TransportRetryConfig(
+                        max_retries=max_retries,
+                        backoff_seconds=backoff_seconds,
+                    )
+                }
+            )
+        }
+    )
+
+
 def test_uncertain_departure_within_days_skips_llm_checkers(tmp_path: Path) -> None:
     """Medical path: departure farther than n days → UNCERTAIN; skip LLM checkers."""
     from datetime import date
@@ -2024,14 +2047,17 @@ for _mode in _BOOLEAN_CHECKER_MODES:
         (_mode, "malformed_json", "ERROR", _error_decision, _error_explanation),
         (_mode, "missing_field", "ERROR", _error_decision, _error_explanation),
         (_mode, "empty", "ERROR", _error_decision, _error_explanation),
+        (_mode, "transport_error", "ERROR", _error_decision, _error_explanation),
     ])
 
-_CASE_RAW_CONTENT: dict[str, str] = {
+_CASE_RAW_CONTENT: dict[str, str | Sequence[str | Exception]] = {
     "valid_true": json.dumps({"result": True}),
     "valid_false": json.dumps({"result": False}),
     "malformed_json": '{"result": tru',
     "missing_field": json.dumps({"verdict": True}),
     "empty": "",
+    # Two failures: proves pipeline honours max_retries=1 (not the default 2).
+    "transport_error": [ConnectionError("down"), ConnectionError("down")],
 }
 
 
@@ -2088,10 +2114,23 @@ def _classifier_responses() -> list[SimpleNamespace]:
     ]
 
 
+def _append_chat_items(
+    responses: list[object],
+    raw: str | Exception | Sequence[str | Exception],
+) -> None:
+    """Append one or more chat responses / raised exceptions to ``responses``."""
+    items: Sequence[str | Exception] = raw if isinstance(raw, (list, tuple)) else (raw,)
+    for item in items:
+        if isinstance(item, Exception):
+            responses.append(item)
+        else:
+            responses.append(_chat_raw_response(item))
+
+
 def _policy_matrix_chat_side_effect(
-    overrides: dict[str, str | Exception | list[str | Exception]],
+    overrides: Mapping[str, str | Exception | Sequence[str | Exception]] | None = None,
     *,
-    identity_response: str | Exception | None = None,
+    identity_response: str | Exception | Sequence[str | Exception] | None = None,
 ) -> list[object]:
     """Build MagicMock side_effect: 3 classifier responses then checker responses.
 
@@ -2099,6 +2138,7 @@ def _policy_matrix_chat_side_effect(
     content (raw strings) or exception instances. When ``identity_response`` is
     set, it is inserted between contradicts and healthy (identity LLM path).
     """
+    resolved: dict[str, str | Exception | Sequence[str | Exception]] = dict(overrides or {})
     responses: list[object] = list(_classifier_responses())
     mode_order = list(_BOOLEAN_CHECKER_MODES)
     if identity_response is not None:
@@ -2108,21 +2148,11 @@ def _policy_matrix_chat_side_effect(
 
     for mode in mode_order:
         if mode == "identity":
-            responses.append(
-                identity_response if isinstance(identity_response, Exception) else _chat_raw_response(identity_response)  # type: ignore[arg-type]
-            )
+            assert identity_response is not None
+            _append_chat_items(responses, identity_response)
             continue
-        raw = overrides.get(mode, _BENIGN_CHECKER_OVERRIDES[mode])
-        if isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, Exception):
-                    responses.append(item)
-                else:
-                    responses.append(_chat_raw_response(item))
-        elif isinstance(raw, Exception):
-            responses.append(raw)
-        else:
-            responses.append(_chat_raw_response(raw))
+        raw: str | Exception | Sequence[str | Exception] = resolved.get(mode, _BENIGN_CHECKER_OVERRIDES[mode])
+        _append_chat_items(responses, raw)
     return responses
 
 
@@ -2141,9 +2171,9 @@ def test_checker_policy_matrix(
 ) -> None:
     """Mode x parse-case matrix: outcome, decision, explanation, chat call count."""
     ClaimPipeline = _claim_pipeline_cls()
-    config = _config(tmp_path)
+    config = _with_transport_retry(_config(tmp_path), max_retries=1, backoff_seconds=0.0)
     claim_dir = _seed_policy_matrix_claim(config, claim_name=f"claim matrix {mode} {case}")
-    overrides: dict[str, str | Exception | list[str | Exception]] = {
+    overrides: dict[str, str | Exception | Sequence[str | Exception]] = {
         mode: _CASE_RAW_CONTENT[case],
     }
     side_effect = _policy_matrix_chat_side_effect(overrides)
@@ -2217,12 +2247,22 @@ def test_checker_policy_matrix(
             True,
             id="unparseable",
         ),
+        pytest.param(
+            "transport_error",
+            [ConnectionError("down"), ConnectionError("down")],
+            "ERROR",
+            "UNCERTAIN",
+            "checker_error:identity",
+            False,
+            True,
+            id="transport_error",
+        ),
     ],
 )
 def test_identity_outcome_policy(
     tmp_path: Path,
     case_id: str,
-    identity_content: str,
+    identity_content: str | Sequence[str | Exception],
     expected_outcome: str,
     expected_decision: str,
     expected_explanation: str,
@@ -2231,7 +2271,7 @@ def test_identity_outcome_policy(
 ) -> None:
     """Identity extraction outcomes fold into decision + legacy booleans (D-02, P-02)."""
     ClaimPipeline = _claim_pipeline_cls()
-    config = _config(tmp_path)
+    config = _with_transport_retry(_config(tmp_path), max_retries=1, backoff_seconds=0.0)
     claim_dir = _seed_policy_matrix_claim(
         config,
         claim_name=f"claim identity {case_id}",
@@ -2302,7 +2342,7 @@ def test_checker_outcome_precedence(
 ) -> None:
     """VIOLATION beats ERROR; ERROR beats identity ABSTAIN (D-01 precedence)."""
     ClaimPipeline = _claim_pipeline_cls()
-    config = _config(tmp_path)
+    config = _with_transport_retry(_config(tmp_path), max_retries=1, backoff_seconds=0.0)
     needs_identity_llm = identity_content is not None
     claim_dir = _seed_policy_matrix_claim(
         config,

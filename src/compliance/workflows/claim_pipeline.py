@@ -287,9 +287,11 @@ class ClaimPipeline:
     def run(self, source: Path | None = None) -> list[Path]:
         """Analyze one claim folder or soft-fail batch under a claims directory.
 
-        Per-claim failures are logged and skipped so the full run continues.
-        Logs claim names, counts, and exception types only — never description
-        or OCR payloads (T-04-02).
+        Per-claim failures (classifier / I/O) are logged and skipped so the full
+        run continues. Checker chat transport failures are retried then recorded
+        as ERROR → UNCERTAIN on the claim (not skipped). Logs claim names,
+        counts, and exception types only — never description or OCR payloads
+        (T-04-02).
 
         :param source: Caller-supplied path — one claim folder, a directory of
             claims, or ``None`` to use config ``preprocessed_dir``.
@@ -907,6 +909,7 @@ class ClaimPipeline:
             incomplete_prompt=checking.incomplete_prompt,
             chat_fn=self._chat_fn,
             identity_max_edit_distance=checking.identity_max_edit_distance,
+            transport_retry=checking.transport_retry,
         )
 
     def _checker_outcomes(

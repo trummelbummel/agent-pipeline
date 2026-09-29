@@ -102,7 +102,7 @@ Rules:
 | -------------------- | ---------------------------------------------------------------------------------------------- |
 | `data/raw/`          | Input claims for batch preprocess / analyze / evaluate                                         |
 | `data/preprocessed/` | Mirrored artifacts after `make preprocess`                                                     |
-| `data/results/`      | Predictions (`predicted_answer.json`), analysis (`analysis_result.json`), evaluation artifacts |
+| `data/results/`      | Predictions (`predicted_answer.json`), analysis (`analysis_result.json`), commit marker (`run_manifest.json`), evaluation artifacts |
 
 
 ## Batch pipeline (make)
@@ -273,9 +273,11 @@ Skipping `(partner)` containment does **not** skip the extract + edit-distance p
 
 Low-quality or abstaining cases are flagged so a **human operator** can review instead of trusting an automatic APPROVE/DENY. The boolean is written on:
 
-- `document_metadata.json` (preprocess)
-- `analysis_result.json` (analysis)
+- `document_metadata.json` (preprocess owns this file)
+- `analysis_result.json` (analysis — also records `human_in_the_loop_source`)
 - `**predicted_answer.json**` (prediction — union of preprocess + analysis flags)
+
+Analysis publishes `analysis_result.json` + `predicted_answer.json` atomically under a `run_id` with `run_manifest.json` as the commit marker; a prediction that disagrees with its manifest is not scored.
 
 **What sets `human_in_the_loop: true`:**
 
@@ -287,8 +289,8 @@ Low-quality or abstaining cases are flagged so a **human operator** can review i
 | **Preprocess / YOLO**      | Signature verify ran and max box confidence is missing or below `ocr_retry.signature_confidence` → HITL; score stored as `signature_probability`                                    |
 | **Preprocess**            | Flag stored per document in `document_metadata.json` (may trigger optional `ocr_retry`); early `predicted_answer.json` (e.g. Benford DENY) copies HITL when any document is flagged |
 | **Analyze / load**        | Any preprocessed document already has `human_in_the_loop: true` → carried into graph state                                                                                          |
-| **Analyze / classifiers** | Any stage returns `**"False"`** (none of the positive classes / abstain) → HITL on analysis + prediction; metadata entries flipped to `true` on persist                             |
-| **Analyze / checkers**    | Any checker path that resolves to **UNCERTAIN** (suspicious dating, far departure when enabled, `identity_unclear`, OCR failure) → HITL on analysis + prediction + metadata      |
+| **Analyze / classifiers** | Any stage returns `**"False"`** (none of the positive classes / abstain) → HITL on analysis + prediction (`human_in_the_loop_source=classifier_false`); preprocess metadata is not mutated |
+| **Analyze / checkers**    | Any checker path that resolves to **UNCERTAIN** (suspicious dating, far departure when enabled, `identity_unclear`, OCR failure) → HITL on analysis + prediction (`human_in_the_loop_source=uncertain_decision`) |
 
 
 Coverage-only `"False"` also routes to persist-only **UNCERTAIN** (`coverage_false_label`) and sets HITL. Checker **DENY** outcomes do not set HITL by themselves.
@@ -307,7 +309,7 @@ HITL is a **backup for weak OCR and signature detection**, not a label-error fla
 
 Date UNCERTAIN flags sit above DENY so a fired proximity/dating gate cannot fall through to signature/identity deny. With departure UNCERTAIN disabled, far-trip medical claims (e.g. claim **6**) can still reach identity/authenticity and DENY.
 
-**HITL on UNCERTAIN:** every analysis **UNCERTAIN** (coverage abstention, suspicious dating, far departure, identity unclear, OCR failure) sets `human_in_the_loop: true` on `analysis_result.json`, `predicted_answer.json`, and `document_metadata.json`. Low OCR confidence / faulty extraction can also flag HITL even when the decision is DENY or APPROVE. That is intentional: **UNCERTAIN + human review is a desirable operating mode** for claims automation — the system should refuse to invent an APPROVE/DENY when evidence is thin, and hand the case to an operator instead of silently deciding.
+**HITL on UNCERTAIN:** every analysis **UNCERTAIN** (coverage abstention, suspicious dating, far departure, identity unclear, OCR failure) sets `human_in_the_loop: true` on `analysis_result.json` and `predicted_answer.json` (with `human_in_the_loop_source`), while preprocess continues to own `document_metadata.json`. Low OCR confidence / faulty extraction can also flag HITL even when the decision is DENY or APPROVE. That is intentional: **UNCERTAIN + human review is a desirable operating mode** for claims automation — the system should refuse to invent an APPROVE/DENY when evidence is thin, and hand the case to an operator instead of silently deciding.
 
 ### Analysis graph (checkers per branch)
 

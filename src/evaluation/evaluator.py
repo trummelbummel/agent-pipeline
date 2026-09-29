@@ -13,6 +13,7 @@ from compliance.preprocessing.claim_batch import (
     _validate_claim_dir_name,
     discover_claim_folder_names,
 )
+from compliance.workflows.artifact_publication import MixedGenerationError, generation_mismatch
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,9 @@ class Evaluator:
         :return: Structured EvaluationResult for the one-claim batch.
         :raises ValueError: When claim_id is unsafe or a decision is outside labels.
         :raises FileNotFoundError: When predicted or ground-truth JSON is missing.
+        :raises MixedGenerationError: When the published run_manifest disagrees with
+            ``predicted_answer.json`` — scoring that prediction would report a number
+            for a run that never completed as a valid generation.
         """
         _validate_claim_dir_name(claim_id)
         pred = self._read_predicted(claim_id)
@@ -285,10 +289,30 @@ class Evaluator:
 
         :param claim_id: Validated claim folder segment.
         :return: Parsed GroundTruth-shaped prediction.
+        :raises MixedGenerationError: When the prediction disagrees with the
+            published run manifest for this claim.
         """
         artifacts = self._config.preprocessing.artifacts
-        path = Path(self._config.preprocessing.results_dir) / claim_id / artifacts.predicted_answer
+        claim_dir = Path(self._config.preprocessing.results_dir) / claim_id
+        self._assert_prediction_generation(claim_id, claim_dir)
+        path = claim_dir / artifacts.predicted_answer
         return cast(GroundTruth, self._reader.read(path))
+
+    def _assert_prediction_generation(self, claim_id: str, claim_dir: Path) -> None:
+        """Refuse to score a prediction that disagrees with the published generation.
+
+        :param claim_id: Claim folder segment (for the error attributes).
+        :param claim_dir: ``results_dir/{claim_id}/``.
+        :raises MixedGenerationError: When ``generation_mismatch`` returns a reason.
+        """
+        artifacts = self._config.preprocessing.artifacts
+        reason = generation_mismatch(
+            claim_dir,
+            artifacts.predicted_answer,
+            artifacts.run_manifest,
+        )
+        if reason is not None:
+            raise MixedGenerationError(claim_id, artifacts.predicted_answer, reason)
 
     def _read_ground_truth(self, claim_id: str) -> GroundTruth:
         """Load answer.json for a claim from data_dir.

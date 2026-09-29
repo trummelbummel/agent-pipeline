@@ -63,6 +63,126 @@ def test_evaluate_claim_perfect_match(
     assert result.confusion_matrix[deny_idx][deny_idx] == 1
 
 
+def test_evaluate_claim_rejects_mixed_generation(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    from compliance.workflows.artifact_publication import MixedGenerationError
+
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    claim_id = "claim 1"
+    _write_pair(
+        data_dir,
+        results_dir,
+        claim_id,
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY", "run_id": "20260929T120000-newrun02"},
+    )
+    (results_dir / claim_id / "run_manifest.json").write_text(
+        json.dumps({
+            "run_id": "20260929T110000-oldrun01",
+            "published_at": "2026-09-29T11:00:00Z",
+            "source": "analysis",
+            "artifacts": ["predicted_answer.json"],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    with pytest.raises(MixedGenerationError) as exc_info:
+        Evaluator(config).evaluate_claim(claim_id)
+    assert exc_info.value.claim_id == claim_id
+    assert exc_info.value.artifact == "predicted_answer.json"
+    assert exc_info.value.reason == "run_id_mismatch"
+
+
+def test_batch_counts_mixed_generation_as_incorrect(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY", "run_id": "20260929T120000-okrun001"},
+    )
+    (results_dir / "claim 1" / "run_manifest.json").write_text(
+        json.dumps({
+            "run_id": "20260929T120000-okrun001",
+            "published_at": "2026-09-29T12:00:00Z",
+            "source": "analysis",
+            "artifacts": ["predicted_answer.json"],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 2",
+        gt={"decision": "APPROVE"},
+        pred={"decision": "APPROVE", "run_id": "20260929T120000-newrun02"},
+    )
+    (results_dir / "claim 2" / "run_manifest.json").write_text(
+        json.dumps({
+            "run_id": "20260929T110000-oldrun01",
+            "published_at": "2026-09-29T11:00:00Z",
+            "source": "analysis",
+            "artifacts": ["predicted_answer.json"],
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.n_evaluated == 2
+    assert "claim 2" in result.claim_ids
+    assert result.y_true == ["DENY"]
+    assert result.y_pred == ["DENY"]
+    assert result.accuracy == 0.5
+
+
+def test_batch_scores_claim_without_manifest(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    """P-04: legacy trees without run_manifest.json still score."""
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.n_evaluated == 1
+    assert result.claim_ids == ["claim 1"]
+    assert result.accuracy == 1.0
+    assert result.matches == [True]
+
+
 def test_evaluate_claim_mismatch(
     tmp_path: Path,
     minimal_app_config_factory: MinimalAppConfigFactory,

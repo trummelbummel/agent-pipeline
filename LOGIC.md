@@ -63,7 +63,7 @@ Missing optional files are allowed: absent fields become `np.nan` / empty lists 
 
 - `description.txt` → coverage / reason classifiers
 - `supporting_document.md` (and related text) → document-type classifiers + Checker
-- Paths stay config-rooted (`preprocessed_dir`, `results_dir`); analysis writes `analysis_result.json` under `results_dir`
+- Paths stay config-rooted (`preprocessed_dir`, `results_dir`); analysis stages `analysis_result.json` + `predicted_answer.json` + `run_manifest.json` under `results_dir/.staging/{run_id}/{claim}/` and promotes them atomically (manifest last). Analysis never writes back into `preprocessed_dir`.
 
 Preprocessing therefore turns heterogeneous claim folders into a uniform, text-first layout so the LangGraph only needs filesystem reads + LLM classify/check steps.
 
@@ -303,8 +303,7 @@ So consistency comes from **topology + shared decision function**, not from aski
   8. Else → **APPROVE** (`checker_consistent`)
     ntainment failure is **not** a deny reason. Identity runs only for `identity_required_codes` (medical certificate / hospital admission). `signature_check` uses preprocessing metadata (e.g. claim 18 hospital admission with `has_signature: false`). `healthy_check` reads the medical OCR only (claims 10, 14, 22). Further denial-rule checkers (authenticity, dating): see [Denial-rule checkers](#denial-rule-checkers).
 10. **Persist** (`persist`)
-  Write `analysis_result.json` and `predicted_answer.json` under `results_dir/claim N/`.
-  If any classifier returned `"False"`, set `human_in_the_loop: true` on the analysis payload and on every entry in `document_metadata.json` so a human reviews the claim.
+  Stage `analysis_result.json` + `predicted_answer.json` under `results_dir/.staging/{run_id}/{claim}/`, fsync, promote with `os.replace`, then rename `run_manifest.json` last as the commit marker. Analysis never writes back into `preprocessed_dir`. HITL provenance is recorded as `human_in_the_loop_source` on the published analysis artifacts. Per-claim failures in a batch are recorded at `results_dir/.runs/{run_id}.json`.
 
 
 
@@ -586,7 +585,7 @@ Full checker inputs and how flags combine with classification: [Denial-rule chec
 
 ## Evaluation: Ground Truth vs Predicted
 
-Per-claim comparison from `answer.json` (ground truth) vs `predicted_answer.json` / `analysis_result.json` (pipeline). Labels are `APPROVE` / `DENY` / `UNCERTAIN`. Pred reasons are `decision_explanation`.
+Per-claim comparison from `answer.json` (ground truth) vs `predicted_answer.json` / `analysis_result.json` (pipeline). Labels are `APPROVE` / `DENY` / `UNCERTAIN`. Pred reasons are `decision_explanation`. A claim whose prediction disagrees with its `run_manifest.json` is counted as incorrect rather than scored.
 
 **Code note:** the deterministic ``multiple_document_dates`` UNCERTAIN early-exit was **removed** (it fired on normal medical forms that mention birth + issue / date ranges). Date UNCERTAIN gates that remain: ``departure_within_days`` and ``checker_suspicious_dating``. Re-run ``make analyze`` + ``make evaluation`` to refresh metrics below after this change.
 

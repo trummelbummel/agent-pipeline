@@ -654,3 +654,133 @@ def test_out_of_range_config_values_rejected(factory: str, kwargs: dict[str, obj
     }
     with pytest.raises(ValidationError):
         builders[factory](**kwargs)  # type: ignore[operator]
+
+
+def _compact_stage(labels: list[str] | None = None) -> ClassificationConfig:
+    return ClassificationConfig(
+        labels=labels or ["1"],
+        other_label="False",
+        model="test-model",
+        prompt="classify",
+    )
+
+
+def _compact_coverage(labels: list[str] | None = None) -> CoverageClassificationConfig:
+    codes = labels or ["1"]
+    branch_cycle = ("cancellation", "personal_effects", "missed_departure")
+    branches = {code: branch_cycle[index] for index, code in enumerate(codes)}
+    return CoverageClassificationConfig(
+        labels=codes,
+        other_label="False",
+        model="test-model",
+        prompt="classify coverage",
+        branches=branches,  # type: ignore[arg-type]
+    )
+
+
+def _compact_analysis(**required_documents_kwargs: object) -> AnalysisConfig:
+    from compliance.config.settings import RequiredDocumentsConfig
+
+    return AnalysisConfig(
+        coverage=_compact_coverage(["1", "2", "3"]),
+        cancellation_reason=_compact_stage(["1", "2", "3", "4"]),
+        cancellation_document=_compact_stage(["1", "2", "3", "4"]),
+        personal_effects_document=_compact_stage(["1"]),
+        missed_departure_document=_compact_stage(["1", "2"]),
+        required_documents=RequiredDocumentsConfig(**required_documents_kwargs),  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize(
+    ("required_kwargs", "match"),
+    [
+        pytest.param(
+            {"cancellation_by_reason": {"9": ["1"]}},
+            r"cancellation_by_reason|9",
+            id="unknown_reason_key",
+        ),
+        pytest.param(
+            {"cancellation_by_reason": {"1": ["9"]}},
+            r"cancellation_by_reason\[1\]|9",
+            id="unknown_doc_value",
+        ),
+        pytest.param(
+            {"cancellation_by_reason": {"1": []}},
+            r"cancellation_by_reason\[1\]|at least one",
+            id="empty_acceptable_list",
+        ),
+        pytest.param(
+            {"signature_required_codes": ["9"]},
+            r"signature_required_codes|9",
+            id="unknown_signature_code",
+        ),
+        pytest.param(
+            {"identity_required_codes": ["9"]},
+            r"identity_required_codes|9",
+            id="unknown_identity_code",
+        ),
+        pytest.param(
+            {"personal_effects": ["9"]},
+            r"personal_effects|9",
+            id="unknown_pe_code",
+        ),
+        pytest.param(
+            {"missed_departure": ["9"]},
+            r"missed_departure|9",
+            id="unknown_missed_code",
+        ),
+    ],
+)
+def test_invalid_required_document_cross_reference_rejected(
+    required_kwargs: dict[str, object],
+    match: str,
+) -> None:
+    """Every required-document cross-reference is checked against its stage vocabulary."""
+    with pytest.raises(ValidationError, match=match):
+        _compact_analysis(**required_kwargs)
+
+
+def test_classification_and_coverage_vocabulary_must_match() -> None:
+    """classification and analysis.coverage positive sets must agree (P-06)."""
+    from compliance.config.settings import (
+        AppConfig,
+        CheckingConfig,
+        ExtractionConfig,
+        PreprocessingConfig,
+    )
+
+    with pytest.raises(ValidationError, match=r"classification positive labels|analysis.coverage"):
+        AppConfig(
+            preprocessing=PreprocessingConfig(
+                data_dir="data",
+                document_formats=["webp"],
+                confidence_threshold=0.7,
+                preprocessed_dir="preprocessed",
+                results_dir="results",
+            ),
+            extraction=ExtractionConfig(model="m", prompt="p"),
+            classification=_compact_stage(["1", "2"]),
+            checking=CheckingConfig(
+                model="m",
+                containment_prompt="c",
+                contradicts_prompt="x",
+                identity_prompt="i",
+                healthy_prompt="h",
+                authenticity_prompt="a",
+                incomplete_prompt="n",
+            ),
+            analysis=AnalysisConfig(
+                coverage=_compact_coverage(["1"]),
+                cancellation_reason=_compact_stage(),
+                cancellation_document=_compact_stage(),
+                personal_effects_document=_compact_stage(),
+                missed_departure_document=_compact_stage(),
+            ),
+        )
+
+
+def test_load_config_validates_required_document_cross_references() -> None:
+    """Shipped config.yaml satisfies required-document cross-references."""
+    config = load_config("config.yaml")
+    assert config.analysis.required_documents.cancellation_by_reason["2"] == ["1", "4"]
+    assert set(config.classification.positive_labels()) == set(config.analysis.coverage.positive_labels())

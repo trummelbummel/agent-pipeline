@@ -238,6 +238,7 @@ class RequiredDocumentsConfig(StrictConfigModel):
 
     Codes match ``analysis.*.labels`` (numeric strings). Missing documentation
     means the classified document type is outside the acceptable set for the claim.
+    Every code is cross-checked against its stage vocabulary at load time.
 
     :param cancellation_by_reason: Map cancellation-reason code → acceptable
         cancellation-document codes (e.g. medical emergency ``"2"`` → ``["1"]``).
@@ -278,6 +279,53 @@ class AnalysisConfig(StrictConfigModel):
     personal_effects_document: ClassificationConfig
     missed_departure_document: ClassificationConfig
     required_documents: RequiredDocumentsConfig = Field(default_factory=RequiredDocumentsConfig)
+
+    @model_validator(mode="after")
+    def _validated_required_document_cross_references(self) -> AnalysisConfig:
+        """Check every required-document code against its target stage vocabulary.
+
+        :return: Self after all cross-references pass.
+        """
+        self._required_document_code_checks()
+        return self
+
+    def _required_document_code_checks(self) -> None:
+        """Raise when any required-document code is outside its stage positives."""
+        reason_positives = set(self.cancellation_reason.positive_labels())
+        cancel_doc_positives = set(self.cancellation_document.positive_labels())
+        pe_positives = set(self.personal_effects_document.positive_labels())
+        missed_positives = set(self.missed_departure_document.positive_labels())
+        docs = self.required_documents
+
+        unknown_reason_keys = sorted(set(docs.cancellation_by_reason) - reason_positives)
+        if unknown_reason_keys:
+            raise UnknownTaxonomyCodeError(
+                field="required_documents.cancellation_by_reason",
+                unknown=unknown_reason_keys,
+                allowed=sorted(reason_positives),
+            )
+
+        for reason, codes in docs.cancellation_by_reason.items():
+            if not codes:
+                raise EmptyAcceptableDocumentCodesError(reason=reason)
+            unknown_codes = sorted(set(codes) - cancel_doc_positives)
+            if unknown_codes:
+                raise UnknownTaxonomyCodeError(
+                    field=f"required_documents.cancellation_by_reason[{reason}]",
+                    unknown=unknown_codes,
+                    allowed=sorted(cancel_doc_positives),
+                )
+
+        checks: list[tuple[str, list[str], set[str]]] = [
+            ("required_documents.signature_required_codes", docs.signature_required_codes, cancel_doc_positives),
+            ("required_documents.identity_required_codes", docs.identity_required_codes, cancel_doc_positives),
+            ("required_documents.personal_effects", docs.personal_effects, pe_positives),
+            ("required_documents.missed_departure", docs.missed_departure, missed_positives),
+        ]
+        for field, codes, allowed in checks:
+            unknown = sorted(set(codes) - allowed)
+            if unknown:
+                raise UnknownTaxonomyCodeError(field=field, unknown=unknown, allowed=sorted(allowed))
 
 
 class BenfordConfig(StrictConfigModel):
@@ -377,6 +425,9 @@ class OcrRetryConfig(StrictConfigModel):
 class AppConfig(StrictConfigModel):
     """Top-level application configuration.
 
+    ``classification`` is the ingest vocabulary; ``analysis.coverage`` is
+    authoritative for routing. Their positive label sets must not drift (P-06).
+
     :param preprocessing: Document discovery and Docling-related settings.
     :param extraction: LLM model and prompt for description extraction.
     :param classification: LLM model, labels, and prompt for case classification.
@@ -399,6 +450,18 @@ class AppConfig(StrictConfigModel):
     extraction_failure: ExtractionFailureConfig = Field(default_factory=ExtractionFailureConfig)
     ocr_retry: OcrRetryConfig = Field(default_factory=OcrRetryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+
+    @model_validator(mode="after")
+    def _validated_coverage_vocabulary_alignment(self) -> AppConfig:
+        """Require classification and analysis.coverage positive sets to match.
+
+        :return: Self when the positive coverage vocabularies agree.
+        """
+        ingest = set(self.classification.positive_labels())
+        routing = set(self.analysis.coverage.positive_labels())
+        if ingest != routing:
+            raise CoverageVocabularyMismatchError(classification=sorted(ingest), coverage=sorted(routing))
+        return self
 
 
 class ConfigFileNotFoundError(FileNotFoundError):
@@ -471,6 +534,46 @@ class UnknownLabelNameKeysError(ValueError):
         :param allowed: The set of labels plus ``other_label``.
         """
         super().__init__(f"Unknown label_names keys {unknown} (allowed {allowed})")
+
+
+class UnknownTaxonomyCodeError(ValueError):
+    """A required-document or taxonomy code is outside its stage vocabulary."""
+
+    def __init__(self, field: str, unknown: list[str], allowed: list[str]) -> None:
+        """Name the config field path, offending codes, and allowed set.
+
+        :param field: Dotted config path of the failing field.
+        :param unknown: Codes not present in the target stage positives.
+        :param allowed: The target stage positive label set.
+        """
+        super().__init__(f"Unknown taxonomy codes in {field}: {unknown} (allowed {allowed})")
+
+
+class EmptyAcceptableDocumentCodesError(ValueError):
+    """A cancellation reason maps to an empty acceptable-document list."""
+
+    def __init__(self, reason: str) -> None:
+        """Name the reason code with an empty acceptable set.
+
+        :param reason: Cancellation-reason code whose acceptable list is empty.
+        """
+        super().__init__(
+            f"required_documents.cancellation_by_reason[{reason}] must list at least one acceptable document code"
+        )
+
+
+class CoverageVocabularyMismatchError(ValueError):
+    """``classification`` and ``analysis.coverage`` positive labels disagree."""
+
+    def __init__(self, classification: list[str], coverage: list[str]) -> None:
+        """Print both positive sets so operators can reconcile the drift.
+
+        :param classification: Positive labels from the ingest classifier.
+        :param coverage: Positive labels from analysis.coverage (routing).
+        """
+        super().__init__(
+            f"classification positive labels {classification} must match analysis.coverage positive labels {coverage}"
+        )
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:

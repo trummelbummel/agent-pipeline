@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
-from compliance.config.settings import EvaluationConfig
+from compliance.config.settings import AppConfig, EvaluationConfig
 from evaluation import Evaluator
 
-if TYPE_CHECKING:
-    from conftest import MinimalAppConfigFactory
+MinimalAppConfigFactory = Callable[..., AppConfig]
 
 
 def _write_pair(

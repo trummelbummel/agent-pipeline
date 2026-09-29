@@ -199,6 +199,7 @@ None beyond the plan's `<threat_model>` mitigations (T-SR006-01..08).
 ## Self-Check: PASSED
 
 - `src/evaluation/evaluator.py` FOUND (ClaimStatus, EvaluationPopulation, coverage_rate, policy)
-- Commits `e7a6942`, `2ff619e`, `d666b14` FOUND
-- SUMMARY path writable under `.planning/quick/260929-lni-.../`
+- Commits `e7a6942`, `2ff619e`, `d666b14`, `7941513` FOUND
+- SUMMARY at `.planning/quick/260929-lni-sr-006-ground-truth-first-evaluation-ali/260929-lni-SUMMARY.md`
 - `.gsd/review_backlog.md` SR-006 checked `[x]`; never staged
+- Final docs commit `87723b3`

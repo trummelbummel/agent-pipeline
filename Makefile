@@ -108,9 +108,9 @@ check: ## Run code quality tools.
 	@echo "🚀 Static type checking: Running mypy"
 	@$(UV) run mypy
 
-test: ## Fast lane (default local/merge check): unit tests + public-package import smoke; deselects integration
-	@echo "🚀 Testing code: Running pytest fast lane (not integration)"
-	@$(UV) run python -m pytest --doctest-modules -m "not integration"
+test: ## Fast lane (default local + CI gate): unit tests + import smoke + branch-coverage floor; integration deselected via pyproject addopts
+	@echo "🚀 Testing code: Running pytest fast lane with coverage (integration deselected)"
+	@$(UV) run python -m pytest --cov
 
 test-integration: ## Opt-in integration lane: pytest -m integration (Docling over real data/raw; slow)
 	@echo "🚀 Testing code: Running pytest integration lane (-m integration)"

@@ -182,12 +182,12 @@ HOST=0.0.0.0 PORT=8080 RELOAD=0 make serve
 ## Tests & quality
 
 ```bash
-make test              # fast lane (default local/merge check): unit tests + public-package import smoke
-make test-integration  # opt-in: integration-marked tests (Docling over real data/raw, slow)
-make check
+make test              # fast lane: unit tests + import smoke + branch-coverage floor (integration deselected)
+make test-integration  # opt-in only: needs provisioned data/raw + local Ollama; never runs in CI
+make check             # lock + pre-commit + mypy
 ```
 
-`make test` runs `pytest -m "not integration"`, so integration tests are deselected unless you run `make test-integration`.
+`make test` is the fast lane: unit tests plus public-package import smoke, with a branch coverage floor (`fail_under = 90` in `[tool.coverage.report]`). pyproject `addopts` deselects `integration`-marked tests for every bare pytest run (make, tox, CI) and uses `--strict-markers`. `make test-integration` is the only integration lane — it needs a provisioned `data/raw` and local Ollama, and it never runs in CI. In CI, the `fast-lane` job (import smoke, then mypy, then `make test` on py3.12) gates the py3.10–3.14 matrix, while `quality` (`make check`) runs in parallel.
 
 ## Algorithm design choices
 

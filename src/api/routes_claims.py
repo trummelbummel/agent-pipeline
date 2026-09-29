@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
@@ -17,13 +17,28 @@ from compliance.preprocessing.claim_batch import (
     _claim_sort_key,
     _validate_claim_dir_name,
 )
+from compliance.workflows.artifact_publication import (
+    ClaimAnalysisBusyError,
+    generation_mismatch,
+)
 from compliance.workflows.claim_pipeline import ClaimPipeline
-from compliance.workflows.orchestration import process_then_analyze
+from compliance.workflows.orchestration import analyze_claim_exclusively
 from compliance.workflows.pipeline import PreprocessingPipeline
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class ArtifactRead(NamedTuple):
+    """Structured result of reading one published claim artifact.
+
+    :param payload: Parsed JSON object when the artifact is readable, else None.
+    :param error: Stable reason code when unreadable, else None.
+    """
+
+    payload: dict[str, Any] | None
+    error: str | None
 
 
 def _next_claim_id(data_dir: Path) -> str:
@@ -86,16 +101,64 @@ def _write_claim_upload(
     (claim_dir / image_basename).write_bytes(image.file.read())
 
 
-def _load_optional_json(path: Path) -> dict[str, Any] | None:
-    """Load a JSON object from disk when the file exists.
+def _artifact_read(
+    claim_results_dir: Path,
+    artifact_name: str,
+    manifest_name: str,
+) -> ArtifactRead:
+    """Read one published artifact, enforcing the SR-005 generation contract.
 
-    :param path: Candidate JSON file path under results_dir.
-    :return: Parsed object, or None when the file is absent.
+    :param claim_results_dir: ``results_dir/{claim_id}/``.
+    :param artifact_name: Configured artifact filename.
+    :param manifest_name: Configured run_manifest filename.
+    :return: Payload and/or a stable reason code.
     """
+    mismatch = generation_mismatch(claim_results_dir, artifact_name, manifest_name)
+    if mismatch is not None:
+        return ArtifactRead(payload=None, error=mismatch)
+    path = claim_results_dir / artifact_name
     if not path.is_file():
-        return None
-    payload: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    return payload
+        return ArtifactRead(payload=None, error=None)
+    try:
+        raw: object = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return ArtifactRead(payload=None, error="invalid_json")
+    if not isinstance(raw, dict):
+        return ArtifactRead(payload=None, error="invalid_json")
+    return ArtifactRead(payload=raw, error=None)
+
+
+def _claim_decision_from_results(
+    claim_id: str,
+    claim_results_dir: Path,
+    *,
+    analysis_name: str,
+    predicted_name: str,
+    manifest_name: str,
+) -> ClaimDecision:
+    """Assemble a ClaimDecision from published artifacts, mapping read errors to HTTP.
+
+    :param claim_id: Claim folder segment.
+    :param claim_results_dir: ``results_dir/{claim_id}/``.
+    :param analysis_name: Configured analysis_result filename.
+    :param predicted_name: Configured predicted_answer filename.
+    :param manifest_name: Configured run_manifest filename.
+    :return: ClaimDecision for a readable published generation.
+    :raises HTTPException: 404 when analysis is absent; 409 on unreadable artifacts.
+    """
+    analysis = _artifact_read(claim_results_dir, analysis_name, manifest_name)
+    if analysis.error is not None:
+        raise HTTPException(status_code=409, detail=analysis.error)
+    if analysis.payload is None:
+        raise HTTPException(status_code=404, detail="analysis_not_found")
+    predicted = _artifact_read(claim_results_dir, predicted_name, manifest_name)
+    if predicted.error is not None:
+        raise HTTPException(status_code=409, detail=predicted.error)
+    return ClaimDecision(
+        claim_id=claim_id,
+        analysis_result=analysis.payload,
+        predicted_answer=predicted.payload,
+    )
 
 
 @router.post("/claims", response_model=ClaimCreated, status_code=201)
@@ -170,11 +233,14 @@ def list_claims(
     artifacts = config.preprocessing.artifacts
     items: list[ClaimListItem] = []
     for folder in folders:
+        analysis = _artifact_read(folder, artifacts.analysis_result, artifacts.run_manifest)
+        predicted = _artifact_read(folder, artifacts.predicted_answer, artifacts.run_manifest)
+        # Task 1 keeps list payloads; Task 2 adds errors. Prefer reader over raw json.loads.
         items.append(
             ClaimListItem(
                 claim_id=folder.name,
-                analysis_result=_load_optional_json(folder / artifacts.analysis_result),
-                predicted_answer=_load_optional_json(folder / artifacts.predicted_answer),
+                analysis_result=analysis.payload if analysis.error is None else None,
+                predicted_answer=predicted.payload if predicted.error is None else None,
             )
         )
     return items
@@ -184,16 +250,47 @@ def list_claims(
 def get_claim(
     claim_id: str,
     config: AppConfig = Depends(get_config),
+) -> ClaimDecision:
+    """Serve the published claim generation; never triggers analysis.
+
+    :param claim_id: Claim folder name under results_dir.
+    :param config: Injected application configuration.
+    :return: Claim decision from the published generation.
+    """
+    try:
+        _validate_claim_dir_name(claim_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    artifacts = config.preprocessing.artifacts
+    claim_results = Path(config.preprocessing.results_dir) / claim_id
+    return _claim_decision_from_results(
+        claim_id,
+        claim_results,
+        analysis_name=artifacts.analysis_result,
+        predicted_name=artifacts.predicted_answer,
+        manifest_name=artifacts.run_manifest,
+    )
+
+
+@router.post("/claims/{claim_id}/analysis", response_model=ClaimDecision)
+def analyze_claim(
+    claim_id: str,
+    config: AppConfig = Depends(get_config),
     preprocessing: PreprocessingPipeline = Depends(get_preprocessing),
     claims: ClaimPipeline = Depends(get_claims),
 ) -> ClaimDecision:
-    """Run process_then_analyze for one claim and return the decision JSON.
+    """Run preprocess-then-analyse under a per-claim lock and return the decision.
+
+    Idempotency is keyed on ``claim_id`` alone: a concurrent second request for
+    the same claim is refused with 409. A repeat call after completion re-runs
+    the analysis.
 
     :param claim_id: Raw claim folder name under config data_dir.
     :param config: Injected application configuration.
     :param preprocessing: Shared PreprocessingPipeline from lifespan.
     :param claims: Shared ClaimPipeline from lifespan.
-    :return: Claim decision including analysis_result payload.
+    :return: Claim decision from the generation just published.
     """
     try:
         _validate_claim_dir_name(claim_id)
@@ -202,24 +299,26 @@ def get_claim(
 
     claim_dir = Path(config.preprocessing.data_dir) / claim_id
     if not claim_dir.is_dir():
-        raise HTTPException(status_code=404, detail="claim not found")
+        raise HTTPException(status_code=404, detail="claim_not_found")
 
     try:
-        analysis_path = process_then_analyze(claim_dir, preprocessing, claims)
+        analyze_claim_exclusively(claim_dir, preprocessing, claims)
+    except ClaimAnalysisBusyError as exc:
+        raise HTTPException(status_code=409, detail="analysis_in_progress") from exc
     except Exception as exc:
         logger.exception(
-            "process_then_analyze failed claim_id=%s error=%s",
+            "analyze_claim_exclusively failed claim_id=%s error=%s",
             claim_id,
             type(exc).__name__,
         )
         raise
 
-    analysis_result = json.loads(analysis_path.read_text(encoding="utf-8"))
     artifacts = config.preprocessing.artifacts
-    predicted_path = Path(config.preprocessing.results_dir) / claim_id / artifacts.predicted_answer
-    predicted_answer = _load_optional_json(predicted_path)
-    return ClaimDecision(
-        claim_id=claim_id,
-        analysis_result=analysis_result,
-        predicted_answer=predicted_answer,
+    claim_results = Path(config.preprocessing.results_dir) / claim_id
+    return _claim_decision_from_results(
+        claim_id,
+        claim_results,
+        analysis_name=artifacts.analysis_result,
+        predicted_name=artifacts.predicted_answer,
+        manifest_name=artifacts.run_manifest,
     )

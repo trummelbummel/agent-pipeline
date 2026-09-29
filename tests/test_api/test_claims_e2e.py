@@ -1,4 +1,4 @@
-"""End-to-end Claims API flow: POST → GET decision → GET list."""
+"""End-to-end Claims API flow: POST intake → POST analysis → GET decision → GET list."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def test_claims_endpoints_post_get_list_flow(
     mock_description_reader_factory: MockDescriptionReaderFactory,
     mock_document_reader_factory: MockDocumentReaderFactory,
 ) -> None:
-    """POST a claim, GET its decision, then see it on GET /claims."""
+    """POST intake, POST analysis, GET decision, then see it on GET /claims."""
     data_dir = tmp_path / "raw"
     data_dir.mkdir()
     config = api_config_factory(
@@ -82,9 +82,9 @@ def test_claims_endpoints_post_get_list_flow(
         assert (claim_dir / artifacts.supporting_documents).is_file()
         assert (claim_dir / "scan.png").is_file()
 
-        decision = client.get(f"/claims/{quote(claim_id)}")
-        assert decision.status_code == 200, decision.text
-        body = decision.json()
+        analysed = client.post(f"/claims/{quote(claim_id)}/analysis")
+        assert analysed.status_code == 200, analysed.text
+        body = analysed.json()
         assert body["claim_id"] == claim_id
         analysis = body["analysis_result"]
         assert isinstance(analysis, dict)
@@ -92,6 +92,10 @@ def test_claims_endpoints_post_get_list_flow(
         assert analysis["coverage_label_codes"] == [TRIP_CANCELLATION]
         assert "reason_labels" in analysis
         assert "document_labels" in analysis
+
+        decision = client.get(f"/claims/{quote(claim_id)}")
+        assert decision.status_code == 200, decision.text
+        assert decision.json() == body
 
         listed = client.get("/claims")
         assert listed.status_code == 200, listed.text

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -65,6 +68,55 @@ class MixedGenerationError(RuntimeError):
         self.artifact = artifact
         self.reason = reason
         super().__init__(f"mixed generation for {claim_id}: {artifact} ({reason})")
+
+
+class ClaimAnalysisBusyError(RuntimeError):
+    """Raised when another analysis already holds the per-claim exclusive lock.
+
+    :param claim_id: Claim folder segment whose lock was contended.
+    """
+
+    def __init__(self, claim_id: str) -> None:
+        self.claim_id = claim_id
+        super().__init__(f"analysis already in progress for {claim_id}")
+
+
+@contextmanager
+def claim_analysis_lock(results_root: Path, claim_id: str) -> Iterator[Path]:
+    """Acquire a non-blocking exclusive advisory lock for one claim under results_root.
+
+    Lock files live at ``results_root/.locks/{claim_id}.lock``. Acquisition opens
+    the file freshly each time because ``fcntl.flock`` binds to the open file
+    description — that is what makes two threads of one process conflict like
+    separate processes. The lock file is deliberately never unlinked on release:
+    unlinking races a waiter that already holds a descriptor on the removed inode.
+
+    :param results_root: Config-rooted results directory.
+    :param claim_id: Safe claim folder segment (validated at this filesystem boundary).
+    :return: Yields the lock file path while the exclusive lock is held.
+    :raises ValueError: When ``claim_id`` is not a safe single path segment.
+    :raises ClaimAnalysisBusyError: When another holder already owns the lock.
+    """
+    from compliance.preprocessing.claim_batch import _validate_claim_dir_name
+
+    _validate_claim_dir_name(claim_id)
+    locks_dir = results_root / ".locks"
+    locks_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = locks_dir / f"{claim_id}.lock"
+    handle = lock_path.open("a", encoding="utf-8")
+    acquired = False
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise ClaimAnalysisBusyError(claim_id) from exc
+        acquired = True
+        yield lock_path
+    finally:
+        if acquired:
+            with contextlib.suppress(OSError):
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def new_run_id() -> str:

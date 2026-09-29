@@ -141,23 +141,32 @@ make analyze OLLAMA_HOST=127.0.0.1:11434
 
 ## Evaluation
 
-`make analyze` already ends with evaluation. To re-score without re-running the pipeline (predictions in `data/results/claim N/predicted_answer.json`, ground truth in each raw `answer.json`):
+`make analyze` already ends with evaluation. To re-score without re-running the pipeline:
 
 ```bash
 make evaluation
 ```
+
+The evaluated population is discovered from the **ground-truth tree** (`preprocessing.data_dir`): every claim folder whose `answer.json` is readable and whose decision is in `evaluation.labels` enters the denominator. A claim with ground truth and **no prediction** (no results folder, or a results folder without `predicted_answer.json`) is counted as **incorrect**, not skipped. `coverage_rate` is `n_scored / n_ground_truth` — the scored share of that population.
+
+Two named metric sets are reported over that same population:
+
+- **`raw`** — exact decision equality (`prediction == ground_truth`).
+- **`policy`** — also credits a prediction equal to a non-nan `acceptable_decision`, remapped onto the true label for the matrix.
+
+Accuracy and macro F1 for each named set are derived from one confusion matrix whose columns are the configured labels **plus** the unscored column (`evaluation.unscored_label`, default `NO_PREDICTION`). Predictions with no ground-truth folder are reported as unmatched and appear in no metric.
 
 Writes under `data/results/` (names from `config.yaml` → `evaluation:`):
 
 
 | Artifact                                 | Default filename               |
 | ---------------------------------------- | ------------------------------ |
-| Metrics (accuracy, F1, confusion matrix) | `evaluation_metrics.json`      |
-| Confusion matrix JSON                    | `confusion_matrix.json`        |
-| Confusion matrix plot                    | `evaluation_visualization.png` |
+| Metrics (population, raw/policy, outcomes) | `evaluation_metrics.json`    |
+| Confusion matrix JSON (both named matrices) | `confusion_matrix.json`     |
+| Confusion matrix plot (raw matrix)       | `evaluation_visualization.png` |
 
 
-Evaluation pairs **predictions** in `results_dir` with **answers** in `data_dir` by claim folder name.
+The metrics JSON carries a `population` block (including `coverage_rate`), per-claim `outcomes`, and both named metric blocks. Pairing is ground-truth-driven; predictions without a ground-truth folder are unmatched.
 
 ## API server
 
@@ -387,15 +396,15 @@ benford:
 
 ### Claim decision quality (latest eval)
 
-On the take-home set (`make analyze` → `make evaluation`; see `[LOGIC.md](LOGIC.md#error-analysis--remaining-errors-post-signature-verify)`):
+Measured under the **previous results-first population** and the acceptable-credited (unnamed) accuracy rule — not under the current ground-truth-first `raw` / `policy` metrics. Re-run `make analyze` + `make evaluation` to refresh numbers under the new population (see `[LOGIC.md](LOGIC.md#error-analysis--remaining-errors-post-signature-verify)`):
 
 
-| Metric                                                              | Latest           |
-| ------------------------------------------------------------------- | ---------------- |
-| Evaluator accuracy (includes GT `acceptable_decision` soft matches) | **~76%** (19 / 25) |
-| Macro F1                                                            | **~0.70**        |
-| Exact label match                                                   | **15 / 25**      |
-| `human_in_the_loop` true / false                                    | **7 / 18**       |
+| Metric                                                              | Latest (legacy population) |
+| ------------------------------------------------------------------- | -------------------------- |
+| Evaluator accuracy (includes GT `acceptable_decision` soft matches) | **~76%** (19 / 25)         |
+| Macro F1                                                            | **~0.70**                  |
+| Exact label match                                                   | **15 / 25**                |
+| `human_in_the_loop` true / false                                    | **7 / 18**                 |
 
 
 **How to read this (desirable behaviour, not raw accuracy alone):**
@@ -454,4 +463,4 @@ Edit `[config.yaml](config.yaml)` for:
 - `benford.enabled` for optional DCT fraud check
 - `preprocessing.confidence_threshold` / `extraction_failure` / `ocr_retry` (HITL and OCR quality)
 
-`make evaluation` writes `human_in_the_loop_true` / `human_in_the_loop_false` into `data/results/evaluation_metrics.json` (and the evaluation PNG footer).
+`make evaluation` writes `human_in_the_loop_true` / `human_in_the_loop_false` into `data/results/evaluation_metrics.json` (and the evaluation PNG footer). HITL counts are over **scored** predictions only.

@@ -585,11 +585,15 @@ Full checker inputs and how flags combine with classification: [Denial-rule chec
 
 ## Evaluation: Ground Truth vs Predicted
 
+The evaluated population is discovered from **`data_dir`** (ground-truth claim folders whose `answer.json` is readable and whose decision is in `evaluation.labels`). A missing or invalid prediction with ground truth present is counted **incorrect** (matrix column = `evaluation.unscored_label`); invalid ground truth is excluded from the denominator and counted separately; predictions with no ground-truth folder are unmatched. `coverage_rate` = scored / ground-truth population.
+
+Two named metric sets share that population: **`raw`** (exact decision equality) and **`policy`** (also credits non-nan `acceptable_decision`, remapped onto the true label). Accuracy and macro F1 are derived from one confusion matrix per named set (rows = labels, columns = labels + unscored column; accuracy = trace / total).
+
 Per-claim comparison from `answer.json` (ground truth) vs `predicted_answer.json` / `analysis_result.json` (pipeline). Labels are `APPROVE` / `DENY` / `UNCERTAIN`. Pred reasons are `decision_explanation`. A claim whose prediction disagrees with its `run_manifest.json` is counted as incorrect rather than scored.
 
 **Code note:** the deterministic ``multiple_document_dates`` UNCERTAIN early-exit was **removed** (it fired on normal medical forms that mention birth + issue / date ranges). Date UNCERTAIN gates that remain: ``departure_within_days`` and ``checker_suspicious_dating``. Re-run ``make analyze`` + ``make evaluation`` to refresh metrics below after this change.
 
-**Last measured batch** (before removing multi-date; YOLO + Phase 07 authenticity/incomplete/suspicious dating): evaluator **17 / 25 (68%)**, macro F1 **≈0.59**. Charts: [evaluation_visualization.png](data/results/evaluation_visualization.png), [analysis_stats_visualization.png](data/results/analysis_stats_visualization.png).
+**Last measured batch** (under the previous **results-first** population and acceptable-credited accuracy — before ground-truth-first SR-006 and before removing multi-date; YOLO + Phase 07 authenticity/incomplete/suspicious dating): evaluator **17 / 25 (68%)**, macro F1 **≈0.59**. Charts: [evaluation_visualization.png](data/results/evaluation_visualization.png), [analysis_stats_visualization.png](data/results/analysis_stats_visualization.png). Re-run `make analyze` + `make evaluation` to measure under the current ground-truth-first `raw` / `policy` metrics.
 
 Confusion (last measured):
 

@@ -70,6 +70,11 @@ def aggregate_analysis_stats(config: AppConfig) -> AnalysisStats:
     Soft-skips missing or unreadable payloads with a WARNING branch log.
     Empty discovery yields ``n_claims=0`` with empty count maps.
 
+    This population is the set of readable ``analysis_result.json`` payloads
+    under ``results_dir`` and is deliberately **not** the evaluator's
+    ground-truth population — ``n_claims`` and the evaluation population
+    are not comparable.
+
     :param config: Application config with results_dir and analysis_result filename.
     :return: Frozen ``AnalysisStats`` for the discovered claim folders.
     """
@@ -123,7 +128,11 @@ def _loaded_analysis_payloads(config: AppConfig) -> list[tuple[str, dict[str, An
 
 
 def _discover_claim_ids(results_dir: Path) -> list[str]:
-    """List claim folder names under results_dir (same pattern as Evaluator).
+    """List claim folder names under results_dir for analysis_result discovery.
+
+    This is deliberately a different population from the evaluator's
+    ground-truth discovery under ``data_dir`` — analysis stats only see
+    claims that produced an analysis artifact tree.
 
     :param results_dir: Root containing claim folders.
     :return: Claim folder names sorted by numeric id, then name.

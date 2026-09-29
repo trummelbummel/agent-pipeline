@@ -112,7 +112,9 @@ class EvaluationResult:
     """Ground-truth-first evaluation with named matrix-derived metrics.
 
     Flat unnamed accuracy fields are intentionally absent — a reader must
-    pick a named metric set (``raw``) so the matching rule is never ambiguous.
+    pick a named metric set so the matching rule is never ambiguous. The
+    ``raw`` and ``policy`` names exist so a reader always knows which
+    matching rule produced a number.
 
     :param claim_ids: Ground-truth population claim ids in discovery order.
     :param labels: Decision vocabulary for matrix rows and scored columns.
@@ -120,6 +122,9 @@ class EvaluationResult:
     :param outcomes: Per-claim outcomes (population members plus unmatched).
     :param population: Denominator and non-scored counts with coverage_rate.
     :param raw: Exact-match metric set over the ground-truth population.
+    :param policy: Same claims and matrix shape as ``raw``; credits a prediction
+        equal to a non-nan ``acceptable_decision`` and remaps it onto the true
+        label (A5).
     :param human_in_the_loop_true: Scored predictions with HITL True.
     :param human_in_the_loop_false: Scored predictions with HITL False.
     """
@@ -130,6 +135,7 @@ class EvaluationResult:
     outcomes: list[ClaimOutcome]
     population: EvaluationPopulation
     raw: MetricSet
+    policy: MetricSet
     human_in_the_loop_true: int = 0
     human_in_the_loop_false: int = 0
 
@@ -214,11 +220,12 @@ class Evaluator:
         )
         logger.info(
             "batch evaluated n_ground_truth=%d n_scored=%d coverage_rate=%.4f "
-            "raw_accuracy=%.4f hitl_true=%d hitl_false=%d",
+            "raw_accuracy=%.4f policy_accuracy=%.4f hitl_true=%d hitl_false=%d",
             result.population.n_ground_truth,
             result.population.n_scored,
             result.population.coverage_rate,
             result.raw.accuracy,
+            result.policy.accuracy,
             result.human_in_the_loop_true,
             result.human_in_the_loop_false,
         )
@@ -499,6 +506,7 @@ class Evaluator:
         invalid_gt = invalid_ground_truth or []
         unscored = self._config.evaluation.unscored_label
         raw = self._metric_set(population_outcomes, labels, name="raw", matched=_raw_match)
+        policy = self._metric_set(population_outcomes, labels, name="policy", matched=_policy_match)
         n_scored = sum(1 for o in population_outcomes if o.status == ClaimStatus.SCORED)
         n_missing = sum(1 for o in population_outcomes if o.status == ClaimStatus.MISSING_PREDICTION)
         n_invalid_pred = sum(1 for o in population_outcomes if o.status == ClaimStatus.INVALID_PREDICTION)
@@ -523,6 +531,7 @@ class Evaluator:
             outcomes=all_outcomes,
             population=population,
             raw=raw,
+            policy=policy,
             human_in_the_loop_true=hitl_true,
             human_in_the_loop_false=hitl_false,
         )

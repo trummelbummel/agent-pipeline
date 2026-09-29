@@ -216,7 +216,7 @@ def _render_heatmap(result: EvaluationResult) -> Image.Image:
     font_cell = _load_font(18)
     line1 = f"raw acc={result.raw.accuracy:.0%}  F1={result.raw.f1_macro:.2f}  n_gt={result.population.n_ground_truth}"
     line2 = (
-        f"coverage={result.population.coverage_rate:.0%}  "
+        f"policy acc={result.policy.accuracy:.0%}  coverage={result.population.coverage_rate:.0%}  "
         f"HITL T/F={result.human_in_the_loop_true}/{result.human_in_the_loop_false}"
     )
     draw.text((_MARGIN_LEFT, 8), line1, fill=(30, 30, 30), font=font_title)

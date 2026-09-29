@@ -46,13 +46,14 @@ def main(argv: list[str] | None = None) -> int:
     metrics_path, matrix_path, viz_path, stats_path, analysis_viz_path = _write_artifacts(config, result, stats)
     logger.info(
         "evaluation complete n_ground_truth=%d n_scored=%d coverage_rate=%.4f "
-        "raw_accuracy=%.4f hitl_true=%d hitl_false=%d n_analysis_stats=%d "
-        "metrics=%s confusion_matrix=%s visualization=%s analysis_stats=%s "
-        "analysis_visualization=%s",
+        "raw_accuracy=%.4f policy_accuracy=%.4f hitl_true=%d hitl_false=%d "
+        "n_analysis_stats=%d metrics=%s confusion_matrix=%s visualization=%s "
+        "analysis_stats=%s analysis_visualization=%s",
         result.population.n_ground_truth,
         result.population.n_scored,
         result.population.coverage_rate,
         result.raw.accuracy,
+        result.policy.accuracy,
         result.human_in_the_loop_true,
         result.human_in_the_loop_false,
         stats.n_claims,
@@ -166,6 +167,7 @@ def _write_artifacts(
     results_dir.mkdir(parents=True, exist_ok=True)
     column_labels = [*result.labels, result.unscored_label]
     raw_block = _metric_block(result.raw, result.labels, column_labels)
+    policy_block = _metric_block(result.policy, result.labels, column_labels)
     metrics_path = results_dir / config.evaluation.metrics_artifact
     metrics_payload = {
         "claim_ids": result.claim_ids,
@@ -173,6 +175,7 @@ def _write_artifacts(
         "column_labels": column_labels,
         "population": _population_dict(result),
         "raw": raw_block,
+        "policy": policy_block,
         "human_in_the_loop_true": result.human_in_the_loop_true,
         "human_in_the_loop_false": result.human_in_the_loop_false,
         "outcomes": _outcomes_payload(result),
@@ -187,6 +190,10 @@ def _write_artifacts(
         "raw": {
             "matrix": result.raw.confusion_matrix,
             "labeled": raw_block["confusion_matrix_labeled"],
+        },
+        "policy": {
+            "matrix": result.policy.confusion_matrix,
+            "labeled": policy_block["confusion_matrix_labeled"],
         },
     }
     matrix_path.write_text(json.dumps(matrix_payload, indent=2) + "\n", encoding="utf-8")

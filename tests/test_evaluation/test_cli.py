@@ -118,7 +118,9 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     assert population["coverage_rate"] == 0.5
     assert payload["raw"]["accuracy"] == 0.5
     assert payload["raw"]["n"] == 2
+    assert payload["policy"]["n"] == payload["raw"]["n"]
     assert sum(sum(row) for row in payload["raw"]["confusion_matrix"]) == 2
+    assert sum(sum(row) for row in payload["policy"]["confusion_matrix"]) == 2
     assert payload["column_labels"] == ["APPROVE", "DENY", "UNCERTAIN", "NO_PREDICTION"]
     assert payload["human_in_the_loop_true"] == 0
     assert payload["human_in_the_loop_false"] == 1
@@ -136,6 +138,10 @@ def test_cli_writes_metrics_json(tmp_path: Path) -> None:
     assert matrix_payload["column_labels"] == payload["column_labels"]
     assert matrix_payload["raw"]["labeled"]["DENY"]["DENY"] == 1
     assert matrix_payload["raw"]["matrix"] == payload["raw"]["confusion_matrix"]
+    assert matrix_payload["policy"]["matrix"] == payload["policy"]["confusion_matrix"]
+    assert sum(sum(row) for row in matrix_payload["policy"]["matrix"]) == sum(
+        sum(row) for row in matrix_payload["raw"]["matrix"]
+    )
     viz_path = results_dir / "evaluation_visualization.png"
     assert viz_path.is_file()
     assert viz_path.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"

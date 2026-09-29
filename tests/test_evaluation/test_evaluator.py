@@ -169,6 +169,7 @@ def test_batch_counts_mixed_generation_as_incorrect(
     assert "claim 2" in result.claim_ids
     claim2 = next(o for o in result.outcomes if o.claim_id == "claim 2")
     assert claim2.status.value == "invalid_prediction"
+    assert claim2.reason == "run_id_mismatch"
     assert result.raw.accuracy == 0.5
 
 
@@ -604,3 +605,211 @@ def test_evaluate_batch_refuses_unsafe_names_in_discovery(
     assert result.claim_ids == ["claim 1"]
     # Unsafe names must not escape roots to read sibling files
     assert secret.read_text(encoding="utf-8") == '{"decision":"APPROVE"}'
+
+
+def test_policy_metric_credits_acceptable_decision(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "UNCERTAIN", "acceptable_decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    uncertain_idx = result.labels.index("UNCERTAIN")
+    deny_idx = result.labels.index("DENY")
+    assert result.raw.accuracy == 0.0
+    assert result.policy.accuracy == 1.0
+    assert result.raw.n == result.policy.n == 1
+    assert result.raw.confusion_matrix[uncertain_idx][deny_idx] == 1
+    assert result.policy.confusion_matrix[uncertain_idx][uncertain_idx] == 1
+    assert result.raw.confusion_matrix[uncertain_idx][uncertain_idx] == 0
+    assert result.policy.confusion_matrix[uncertain_idx][deny_idx] == 0
+
+
+def test_raw_and_policy_share_one_population(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 2",
+        gt={"decision": "UNCERTAIN", "acceptable_decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_ground_truth_only(data_dir, "claim 3", gt={"decision": "APPROVE"})
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.raw.n == result.policy.n == result.population.n_ground_truth == 3
+    assert sum(sum(row) for row in result.raw.confusion_matrix) == 3
+    assert sum(sum(row) for row in result.policy.confusion_matrix) == 3
+
+
+def test_invalid_ground_truth_excluded_from_population(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    bad = data_dir / "claim 2"
+    bad.mkdir(parents=True)
+    (bad / "answer.json").write_text("{not-json", encoding="utf-8")
+    (results_dir / "claim 2").mkdir(parents=True)
+    (results_dir / "claim 2" / "predicted_answer.json").write_text(
+        json.dumps({"decision": "APPROVE"}),
+        encoding="utf-8",
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.population.n_ground_truth == 1
+    assert result.population.n_invalid_ground_truth == 1
+    assert "claim 2" not in result.claim_ids
+    assert result.raw.accuracy == 1.0
+
+
+def test_invalid_ground_truth_out_of_vocabulary_excluded(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 2",
+        gt={"decision": "OTHER"},
+        pred={"decision": "DENY"},
+    )
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.population.n_ground_truth == 1
+    assert result.population.n_invalid_ground_truth == 1
+    assert "claim 2" not in result.claim_ids
+    assert result.raw.accuracy == 1.0
+
+
+def test_invalid_prediction_counts_as_incorrect(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 2",
+        gt={"decision": "APPROVE"},
+        pred={"decision": "OTHER"},
+    )
+    bad_dir = data_dir / "claim 3"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "answer.json").write_text(json.dumps({"decision": "UNCERTAIN"}), encoding="utf-8")
+    (results_dir / "claim 3").mkdir(parents=True)
+    (results_dir / "claim 3" / "predicted_answer.json").write_text("{broken", encoding="utf-8")
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.population.n_ground_truth == 3
+    assert result.population.n_invalid_prediction == 2
+    assert result.population.n_scored == 1
+    assert result.raw.accuracy == pytest.approx(1.0 / 3.0)
+    statuses = {o.claim_id: o.status.value for o in result.outcomes if o.claim_id in {"claim 2", "claim 3"}}
+    assert statuses["claim 2"] == "invalid_prediction"
+    assert statuses["claim 3"] == "invalid_prediction"
+    unscored_idx = len(result.labels)
+    approve_idx = result.labels.index("APPROVE")
+    uncertain_idx = result.labels.index("UNCERTAIN")
+    assert result.raw.confusion_matrix[approve_idx][unscored_idx] == 1
+    assert result.raw.confusion_matrix[uncertain_idx][unscored_idx] == 1
+
+
+def test_prediction_without_ground_truth_is_unmatched(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+) -> None:
+    data_dir = tmp_path / "raw"
+    results_dir = tmp_path / "results"
+    _write_pair(
+        data_dir,
+        results_dir,
+        "claim 1",
+        gt={"decision": "DENY"},
+        pred={"decision": "DENY"},
+    )
+    orphan = results_dir / "claim 9"
+    orphan.mkdir(parents=True)
+    (orphan / "predicted_answer.json").write_text(json.dumps({"decision": "APPROVE"}), encoding="utf-8")
+    config = minimal_app_config_factory(
+        data_dir,
+        preprocessed_dir=data_dir / "preprocessed",
+        results_dir=results_dir,
+        extraction_prompt="extract",
+    )
+    result = Evaluator(config).evaluate()
+    assert result.population.n_ground_truth == 1
+    assert result.population.n_unmatched_prediction == 1
+    assert "claim 9" not in result.claim_ids
+    unmatched = next(o for o in result.outcomes if o.claim_id == "claim 9")
+    assert unmatched.status.value == "unmatched_prediction"
+    assert result.raw.accuracy == 1.0

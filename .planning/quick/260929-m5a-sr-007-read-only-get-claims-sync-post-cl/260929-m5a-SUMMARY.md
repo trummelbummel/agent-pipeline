@@ -17,7 +17,7 @@ affects: [SR-009, SR-013]
 actuals:
   tokens: 14959
   tasks: 3
-  commits: 7
+  commits: 8
 
 plan_head_before: 87e66604372b3631889a0522d1a3c2df6567aa27
 
@@ -252,4 +252,4 @@ None beyond the plan's mitigated register (T-SR007-01..08); T-SR007-09 remains t
 - `src/main.py` — FOUND (`analyze_claim_exclusively`, `ClaimAnalysisBusyError`)
 - `README.md` — FOUND (`claims/{claim_id}/analysis`, `analysis_in_progress`, `run_manifest`)
 - `.gsd/review_backlog.md` — FOUND (`### [x] SR-007`, steered done row); never staged
-- Commits `ef3f055`, `4d733f1`, `753fe73`, `ec03fa8`, `63c263d`, `0428029`, `18addae` — FOUND
+- Commits `ef3f055`, `4d733f1`, `753fe73`, `ec03fa8`, `63c263d`, `0428029`, `18addae`, `84d1a86` — FOUND

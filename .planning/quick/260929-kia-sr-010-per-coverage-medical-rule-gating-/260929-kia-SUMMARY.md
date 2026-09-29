@@ -139,6 +139,8 @@ Applicability: cancellation branch + classified codes ∩ `identity_required_cod
 2. **Task 2: rule-set matrix + invariant** - `8d7e692` (test)
 3. **Task 3: docs + backlog close** - `551d476` (docs)
 
+**Plan metadata:** `e98ccc0` (docs: complete plan)
+
 ## TDD Gate Compliance
 
 | Task | RED evidence | GREEN | Notes |

@@ -32,7 +32,7 @@ Phase: 07 (Denial-rule checkers in analysis pipeline) — EXECUTING
 Current Plan: 4
 Total Plans in Phase: 5
 Status: Ready to execute
-Last activity: 2026-09-26 — Phase 07 execution started
+Last activity: 2026-09-29 - Completed quick task 260929-i89: SR-012 deterministic CI fast lane + coverage
 
 Progress: [████████░░] 80% (4/5 phases complete; Phase 05 plans 3/4)
 
@@ -114,6 +114,9 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260929-i89 | SR-012: deterministic CI fast lane + coverage (pytest-cov floor 90, addopts deselect integration, fast-lane gates matrix) | 2026-09-29 | 54da2be | [260929-i89-sr-012-deterministic-ci-fast-lane-and-co](./quick/260929-i89-sr-012-deterministic-ci-fast-lane-and-co/) |
+| 260929-ftg | SR-004: single authoritative coverage route via highest-probability label | 2026-09-29 | uncommitted | [260929-ftg-sr-004-single-authoritative-coverage-rou](./quick/260929-ftg-sr-004-single-authoritative-coverage-rou/) |
+| 260928-o5k | Fix ruff lint errors blocking pre-commit on staged files (S101, TRY003, TRY300, TRY400, TRY401, S105, SIM103, SIM110, RUF002, C901) | 2026-09-28 | uncommitted | [260928-o5k-fix-ruff-lint-errors-s101-try003-try401-](./quick/260928-o5k-fix-ruff-lint-errors-s101-try003-try401-/) |
 | 260926-gij | Create common fixtures across API tests and update dedup-review fixture detection | 2026-09-26 | 3c1582d | [260926-gij-create-common-fixtures-across-api-tests-](./quick/260926-gij-create-common-fixtures-across-api-tests-/) |
 | 260926-fph | Add two analysis checkers that yield UNCERTAIN (departure proximity; multiple OCR dates) | 2026-09-26 | cbfa126 | [260926-fph-add-two-analysis-checkers-that-yield-unc](./quick/260926-fph-add-two-analysis-checkers-that-yield-unc/) |
 | 260926-f9c | In evaluation, also run statistics over analysis_result.json and visualize as bar charts | 2026-09-26 | c0b13ea | [260926-f9c-in-evaluation-also-run-statistics-over-a](./quick/260926-f9c-in-evaluation-also-run-statistics-over-a/) |

@@ -224,12 +224,12 @@ make check             # lock + pre-commit + mypy
 | ------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Claim **containment**           | NFKC + casefold substring: claim text ⊆ document text                                                 | Containment miss                                                   |
 | **Identity** (medical/hospital) | Booking `**name`** → full-name or **all tokens** in OCR (order-independent; strips `(partner)` notes) | Containment miss → LLM **name extraction** + lowercased Levenshtein ≤ `identity_max_edit_distance` |
-| **Signature**                   | Read `has_signature` from `document_metadata.json` (Docling and/or vision verify above)               | No analysis-time vision call                                                                       |
+| **Signature** (medical/hospital)| Read `has_signature` from `document_metadata.json` (Docling and/or vision verify above)               | No analysis-time vision call                                                                       |
 | **Missing documentation**       | Classified doc code ∈ `required_documents` for that coverage/reason                                   | Config set-membership — not an LLM                                                                 |
 | Graph routing / deny fold       | Hard-coded edges + ordered `_decision_from_state`                                                     | Never — topology is free                                                                           |
 
 
-`contradicts` and `healthy_check` stay LLM-only (no reliable cheap proxy yet). Identity / signature gates are skipped entirely on non-medical branches.
+`contradicts` stays LLM-only (no reliable cheap proxy yet). Medical semantics (healthy, suspicious dating, identity, signature, authenticity, incomplete) are skipped on non-medical branches.
 
 **Error-driven cheap checks** (accuracy first, then avoid unnecessary model spend):
 

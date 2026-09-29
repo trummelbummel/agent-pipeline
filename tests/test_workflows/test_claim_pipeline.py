@@ -1053,6 +1053,100 @@ _GATED_CHECK_NAMES = (
     "departure",
 )
 
+# How each gated check records its result (SR-010 invariant source of truth).
+# LLM modes → checker_outcomes key; deterministic gates → boolean artifact key.
+_GATED_CHECK_RECORD: dict[str, tuple[str, str]] = {
+    "identity": ("outcomes", "identity"),
+    "signature": ("boolean", "signature_check"),
+    "healthy": ("outcomes", "healthy"),
+    "not_authentic": ("outcomes", "not_authentic"),
+    "incomplete": ("outcomes", "incomplete"),
+    "suspicious_dating": ("boolean", "checker_suspicious_dating"),
+    "departure": ("boolean", "departure_within_days"),
+}
+
+POLICE_REPORT = "2"
+JURY_SUMMONS = "3"
+JURY_DUTY = "1"
+THEFT_OR_CRIMINAL = "3"
+
+
+def _seed_routed_claim(
+    config: AppConfig,
+    *,
+    claim_name: str,
+    description: str,
+    supporting_document: str,
+    supporting_documents: str | None = None,
+) -> Path:
+    """Seed a claim with explicit narrative/OCR texts for an arbitrary routed path.
+
+    :param config: AppConfig providing paths and artifact filenames.
+    :param claim_name: Safe claim folder segment.
+    :param description: Claim narrative written to the description artifact.
+    :param supporting_document: Primary supporting OCR markdown.
+    :param supporting_documents: Optional booking/internal markdown; defaults to
+        a matching patient name so identity stays deterministic when it runs.
+    :return: Path to the seeded claim directory.
+    """
+    claim_dir = _seed_preprocessed_claim(config, claim_name=claim_name)
+    artifacts = config.preprocessing.artifacts
+    (claim_dir / artifacts.description).write_text(description, encoding="utf-8")
+    (claim_dir / artifacts.supporting_document).write_text(supporting_document, encoding="utf-8")
+    if supporting_documents is not None:
+        (claim_dir / artifacts.supporting_documents).write_text(supporting_documents, encoding="utf-8")
+    return claim_dir
+
+
+def _routed_path_chat_fn(
+    *,
+    coverage_code: str,
+    document_code: str,
+    reason_code: str | None = None,
+    checker_results: Sequence[dict[str, Any]] | None = None,
+) -> tuple[MagicMock, int]:
+    """Build chat_fn for an arbitrary routed path: coverage → reason? → doc → checkers.
+
+    Response order matches the pipeline's fixed classifier then checker order.
+    Default checker payloads are benign ``result: False`` for every expected call.
+
+    :return: ``(chat_fn, expected_call_count)`` so callers can assert exact length
+        even after MagicMock consumes ``side_effect`` into an iterator.
+    """
+    coverage = _chat_response({
+        "labels": [coverage_code],
+        "probabilities": {coverage_code: 0.9, "False": 0.1},
+    })
+    responses: list[SimpleNamespace] = [coverage]
+    if reason_code is not None:
+        responses.append(
+            _chat_response({
+                "labels": [reason_code],
+                "probabilities": {reason_code: 0.85, "False": 0.15},
+            })
+        )
+    responses.append(
+        _chat_response({
+            "labels": [document_code],
+            "probabilities": {document_code: 0.8, "False": 0.2},
+        })
+    )
+    for payload in checker_results or []:
+        responses.append(_chat_response(payload))
+    return MagicMock(side_effect=responses), len(responses)
+
+
+def _assert_gated_check_invariant(payload: dict[str, Any]) -> None:
+    """Every gated check is either recorded or listed in checker_skipped — never both/neither."""
+    skipped = set(payload.get("checker_skipped") or [])
+    outcomes = payload.get("checker_outcomes") or {}
+    for check, (kind, key) in _GATED_CHECK_RECORD.items():
+        has_result = key in outcomes if kind == "outcomes" else key in payload
+        if check in skipped:
+            assert not has_result, f"{check} is skipped but has a recorded result"
+        else:
+            assert has_result, f"{check} is applicable but has no recorded result"
+
 
 def _seed_pe_hostile_medical_claim(config: AppConfig, claim_name: str = "claim pe hostile medical") -> Path:
     """PE claim whose OCR would trip healthy + suspicious dating if those rules ran.
@@ -1121,6 +1215,211 @@ def test_non_medical_branch_cannot_deny_for_medical_semantics(tmp_path: Path) ->
     assert system_prompts >= {"containment", "contradicts"}
     assert system_prompts.isdisjoint({"identity", "healthy", "authenticity", "incomplete"})
     assert chat_fn.call_count == 4
+
+
+_RULE_SET_MATRIX_ROWS: list[tuple[str, str, str | None, str, str, list[str], set[str], list[dict[str, Any]]]] = [
+    # id, coverage, reason, document, rule_set, skipped, outcome_modes, checker_payloads
+    (
+        "cancel_medical_cert",
+        TRIP_CANCELLATION,
+        MEDICAL_EMERGENCY,
+        MEDICAL_CERTIFICATE,
+        "cancellation_medical",
+        [],
+        {"containment", "contradicts", "identity", "healthy", "not_authentic", "incomplete"},
+        [{"result": False}, {"result": False}, {"result": False}, {"result": False}],
+    ),
+    (
+        "cancel_hospital",
+        TRIP_CANCELLATION,
+        MEDICAL_EMERGENCY,
+        HOSPITAL_ADMISSION,
+        "cancellation_medical",
+        [],
+        {"containment", "contradicts", "identity", "healthy", "not_authentic", "incomplete"},
+        [{"result": False}, {"result": False}, {"result": False}, {"result": False}],
+    ),
+    (
+        "cancel_police",
+        TRIP_CANCELLATION,
+        THEFT_OR_CRIMINAL,
+        POLICE_REPORT,
+        "cancellation_non_medical",
+        list(_GATED_CHECK_NAMES),
+        {"containment", "contradicts"},
+        [{"result": False}],
+    ),
+    (
+        "cancel_jury",
+        TRIP_CANCELLATION,
+        JURY_DUTY,
+        JURY_SUMMONS,
+        "cancellation_non_medical",
+        list(_GATED_CHECK_NAMES),
+        {"containment", "contradicts"},
+        [{"result": False}],
+    ),
+    (
+        "personal_effects",
+        PERSONAL_EFFECTS,
+        None,
+        PROOF_OF_THEFT,
+        "personal_effects_non_medical",
+        list(_GATED_CHECK_NAMES),
+        {"containment", "contradicts"},
+        [{"result": False}],
+    ),
+    (
+        "missed_departure",
+        MISSED_DEPARTURE,
+        None,
+        INCIDENT_REPORT,
+        "missed_departure_non_medical",
+        list(_GATED_CHECK_NAMES),
+        {"containment", "contradicts"},
+        [{"result": False}],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("row_id", "coverage", "reason", "document", "rule_set", "skipped", "outcome_modes", "checker_payloads"),
+    _RULE_SET_MATRIX_ROWS,
+    ids=[row[0] for row in _RULE_SET_MATRIX_ROWS],
+)
+def test_checker_rule_set_matrix(
+    tmp_path: Path,
+    row_id: str,
+    coverage: str,
+    reason: str | None,
+    document: str,
+    rule_set: str,
+    skipped: list[str],
+    outcome_modes: set[str],
+    checker_payloads: list[dict[str, Any]],
+) -> None:
+    """SR-010: each routed path records its rule set, skipped list, and modes."""
+    del row_id  # used only as pytest id
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    description = {
+        TRIP_CANCELLATION: "I had to cancel my flight to Paris because of a medical emergency.",
+        PERSONAL_EFFECTS: "My suitcase was stolen from the hotel lobby.",
+        MISSED_DEPARTURE: "I missed my connection due to a delay.",
+    }[coverage]
+    # Embed description so containment is deterministic (no extra LLM call).
+    # Include patient name on medical rows so identity stays deterministic too.
+    patient_line = "\nPatient: Ada Lovelace\n" if skipped == [] else "\n"
+    supporting = f"# Supporting document\n\n{description}{patient_line}Evidence attached.\n"
+    claim_dir = _seed_routed_claim(
+        config,
+        claim_name=f"claim rule-set {coverage}-{document}",
+        description=description,
+        supporting_document=supporting,
+    )
+    chat_fn, expected_calls = _routed_path_chat_fn(
+        coverage_code=coverage,
+        reason_code=reason,
+        document_code=document,
+        checker_results=checker_payloads,
+    )
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["checker_rule_set"] == rule_set
+    assert payload["checker_skipped"] == skipped
+    assert set(payload["checker_outcomes"]) == outcome_modes
+    assert payload["decision"] == "APPROVE"
+    assert payload["decision_explanation"] == "checker_consistent"
+    assert chat_fn.call_count == expected_calls
+    if skipped:
+        system_prompts = {call.kwargs["messages"][0]["content"] for call in chat_fn.call_args_list}
+        assert system_prompts.isdisjoint({"identity", "healthy", "authenticity", "incomplete"})
+
+
+def test_suspicious_dating_skipped_on_non_medical_branch(tmp_path: Path) -> None:
+    """Implausible dating that UNCERTAINs a medical cert is skipped on a police report."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+    description = "I had to cancel after a theft / criminal incident."
+    claim_dir = _seed_routed_claim(
+        config,
+        claim_name="claim police dating skip",
+        description=description,
+        supporting_document=(
+            f"# Supporting document\n\n{description}\nPolice report filed.\nCertificate issue date 2021-01-01.\n"
+        ),
+        supporting_documents=(
+            "# Supporting documents\n\n"
+            "**current date**: 2022-06-01\n"
+            "**name**: Ada Lovelace\n"
+            "**departure**: 2022-09-01 10:00 (local)\n"
+        ),
+    )
+    chat_fn, expected_calls = _routed_path_chat_fn(
+        coverage_code=TRIP_CANCELLATION,
+        reason_code=THEFT_OR_CRIMINAL,
+        document_code=POLICE_REPORT,
+        checker_results=[{"result": False}],
+    )
+    pipeline = ClaimPipeline(config, chat_fn=chat_fn)
+
+    result_path = pipeline.analyze_claim(claim_dir)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    assert payload["decision"] == "APPROVE"
+    assert "suspicious_dating" in payload["checker_skipped"]
+    assert "checker_suspicious_dating" not in payload
+    assert chat_fn.call_count == expected_calls
+
+
+def test_skipped_checks_have_no_recorded_result(tmp_path: Path) -> None:
+    """Invariant: every gated check is recorded XOR listed in checker_skipped."""
+    ClaimPipeline = _claim_pipeline_cls()
+    config = _config(tmp_path)
+
+    medical_dir = _seed_routed_claim(
+        config,
+        claim_name="claim invariant medical",
+        description="I had to cancel my flight to Paris because of a medical emergency.",
+        supporting_document=(
+            "# Supporting document\n\n"
+            "I had to cancel my flight to Paris because of a medical emergency.\n"
+            "Patient: Ada Lovelace\nMedical certificate attached.\n"
+        ),
+    )
+    medical_chat, medical_expected = _routed_path_chat_fn(
+        coverage_code=TRIP_CANCELLATION,
+        reason_code=MEDICAL_EMERGENCY,
+        document_code=MEDICAL_CERTIFICATE,
+        checker_results=[{"result": False}, {"result": False}, {"result": False}, {"result": False}],
+    )
+    medical_payload = json.loads(
+        ClaimPipeline(config, chat_fn=medical_chat).analyze_claim(medical_dir).read_text(encoding="utf-8")
+    )
+    _assert_gated_check_invariant(medical_payload)
+    assert medical_payload["checker_skipped"] == []
+    assert medical_chat.call_count == medical_expected
+
+    pe_dir = _seed_routed_claim(
+        config,
+        claim_name="claim invariant pe",
+        description="My suitcase was stolen from the hotel lobby.",
+        supporting_document=(
+            "# Supporting document\n\nMy suitcase was stolen from the hotel lobby.\nPolice report filed.\n"
+        ),
+    )
+    pe_chat, pe_expected = _routed_path_chat_fn(
+        coverage_code=PERSONAL_EFFECTS,
+        document_code=PROOF_OF_THEFT,
+        checker_results=[{"result": False}],
+    )
+    pe_payload = json.loads(ClaimPipeline(config, chat_fn=pe_chat).analyze_claim(pe_dir).read_text(encoding="utf-8"))
+    _assert_gated_check_invariant(pe_payload)
+    assert pe_payload["checker_skipped"] == list(_GATED_CHECK_NAMES)
+    assert pe_chat.call_count == pe_expected
 
 
 def test_routes_coverage_other_skips_reason_and_docs(tmp_path: Path) -> None:

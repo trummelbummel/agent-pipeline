@@ -187,6 +187,9 @@ Pulls all config models, then starts FastAPI on `http://127.0.0.1:8000` (OpenAPI
 
 Analysis is synchronous and triggered only by `POST /claims/{claim_id}/analysis`. The decision GET is a pure read of the published generation: it never writes artifacts and never calls OCR or the LLM. It returns `404` (`analysis_not_found`) when nothing has been analysed yet, and `409` with a reason code (`invalid_json`, `run_id_missing`, `run_id_mismatch`, or `artifact_missing`) when the stored generation is unparseable or disagrees with its `run_manifest.json`. The analysis POST holds an exclusive per-claim lock keyed on `claim_id` alone, so a second concurrent request for the same claim is refused with `409` (`analysis_in_progress`) rather than queued or duplicated; a repeat POST after completion re-runs the analysis. `GET /claims` stays `200` when an artifact is unreadable and reports the reason per item under `errors` (same reason codes). **Breaking change:** clients that previously called the decision GET to produce a decision must now call the analysis POST first.
 
+`POST /claims` intake is bounded by `api.upload.max_file_bytes` (25 MiB per part) and `api.upload.max_request_bytes` (50 MiB total) in `config.yaml`. A request whose declared `Content-Length` already exceeds the total cap is refused before the multipart body is parsed. A part or request that streams past either cap returns `413` with `file_too_large` or `request_too_large`, and leaves no claim folder under `data_dir`.
+
+Claim ids must be single path segments. A claim directory that is a symlink is rejected rather than followed (analysis POST returns `422`; CLI `--claim-id` exits `1`). Batch discovery skips such entries with a warning instead of processing them. Configured artifact filenames under `preprocessing.artifacts` and `evaluation` must be plain basenames — otherwise config load fails.
 
 ```bash
 HOST=0.0.0.0 PORT=8080 RELOAD=0 make serve
@@ -457,6 +460,7 @@ More eval detail (per-claim GT vs predicted): `[LOGIC.md](LOGIC.md#evaluation-gr
 
 Edit `[config.yaml](config.yaml)` for:
 
+- `api.upload.max_file_bytes` / `max_request_bytes` (multipart intake caps; defaults 25 MiB / 50 MiB)
 - `preprocessing.data_dir` / `preprocessed_dir` / `results_dir`
 - `document_formats` (allowed image/PDF extensions)
 - Ollama `model` names under `extraction`, `classification`, `checking`, `analysis`, `ocr_retry`

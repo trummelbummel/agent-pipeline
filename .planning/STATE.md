@@ -5,11 +5,11 @@ current_phase: 07
 current_phase_name: Denial-rule checkers in analysis pipeline
 current_plan: 4
 status: executing
-stopped_at: Completed 260929-kia-PLAN.md (SR-010)
-last_updated: "2026-09-29T13:07:25.000Z"
+stopped_at: Completed 260929-l16-PLAN.md (SR-005)
+last_updated: "2026-09-29T13:34:58.329Z"
 last_activity: 2026-09-29
 last_activity_desc: Completed quick task 260929-kia (SR-010)
-state_head: 551d476
+state_head: 6b8353e21e0386c84da1a9fd12985cdac5e0842b
 progress:
   total_phases: 8
   completed_phases: 4
@@ -106,9 +106,12 @@ See .planning/DECISIONS.md (D001–D008)
 - [Phase 07]: incomplete_prompt stored in 07-01; incomplete mode dispatch deferred to 07-02
 - [Phase 07]: Secondary CheckingConfig helpers use authenticity/incomplete placeholders matching 07-01
 - [Phase 07]: SR-008: CheckOutcome PASS|VIOLATION|ABSTAIN|ERROR; VIOLATION→DENY beats ERROR→UNCERTAIN; containment ERROR record-only; transport retry via checking.transport_retry
+- [Quick 260929-l16]: SR-005: transactional run-scoped publication; manifest-last commit; HITL provenance; evaluator refuses mixed generations
 - [Quick 260929-kia]: SR-010: CheckerRuleSet medical-only gating; checker_rule_set + checker_skipped; skipped checks record no result
 - [Quick 260929-k1p]: SR-011: coverage.branches keyed routing; StrictConfigModel extra=forbid; required-document cross-refs + classification↔coverage vocabulary at load
 - [Phase 07]: SR-011: coverage.branches keyed routing; StrictConfigModel extra=forbid; load-time taxonomy cross-refs
+- [Phase 07]: SR-005: stage under results_dir/.staging/{run_id}/{claim}/; os.replace; run_manifest.json last as commit point
+- [Phase 07]: SR-005: HITL clears per run via provenance on analysis artifacts; analysis never mutates document_metadata.json
 
 ### Blockers/Concerns
 
@@ -118,6 +121,7 @@ None.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
+| 260929-l16 | SR-005: transactional run-scoped artifact publication (stage→fsync→os.replace; manifest-last; HITL provenance; evaluator mixed-generation guard) | 2026-09-29 | 6b8353e | [260929-l16-sr-005-transactional-run-scoped-artifact](./quick/260929-l16-sr-005-transactional-run-scoped-artifact/) |
 | 260929-kia | SR-010: per-coverage medical rule gating (CheckerRuleSet; medical-only healthy/dating/identity/signature; checker_skipped) | 2026-09-29 | 551d476 | [260929-kia-sr-010-per-coverage-medical-rule-gating-](./quick/260929-kia-sr-010-per-coverage-medical-rule-gating-/) |
 | 260929-k1p | SR-011: strong config policy validation (named coverage.branches; extra=forbid; cross-refs) | 2026-09-29 | 1a190a5 | [260929-k1p-sr-011-strong-config-policy-validation-n](./quick/260929-k1p-sr-011-strong-config-policy-validation-n/) |
 | 260929-hxe | SR-008: typed CheckOutcome policy matrix + transport retry (ERROR→UNCERTAIN; VIOLATION beats ERROR) | 2026-09-29 | ff6da56 | [260929-hxe-sr-008-typed-checker-outcome-policy-matr](./quick/260929-hxe-sr-008-typed-checker-outcome-policy-matr/) |
@@ -133,8 +137,8 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-09-29T13:07:25.000Z
-Stopped at: Completed 260929-kia-PLAN.md (SR-010)
+Last session: 2026-09-29T13:34:57.875Z
+Stopped at: Completed 260929-l16-PLAN.md (SR-005)
 Resume file: None
 
 ## Performance Metrics
@@ -163,3 +167,4 @@ Resume file: None
 | Phase 07 P01b | 3min | 1 tasks | 8 files |
 | Phase 260929-k1p P01 | 7min | 3 tasks | 11 files |
 | Phase 260929-kia P01 | 8min | 3 tasks | 5 files |
+| Phase 260929-l16 P01 | 11min | 3 tasks | 15 files |

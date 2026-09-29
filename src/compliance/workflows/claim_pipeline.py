@@ -10,19 +10,16 @@ from langgraph.graph import END, START, StateGraph
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig, ClassificationConfig
 from compliance.llm.chat import ChatFn
-from compliance.llm.checker import CheckerMode, CheckOutcome
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
-from compliance.models.claim import GroundTruth
-from compliance.models.decisions import (
-    DECISION_APPROVE,
-    DECISION_DENY,
-    DECISION_UNCERTAIN,
-)
 from compliance.policy import (
     ClaimAnalysisState,
     CoverageBranch,
-    RoutedCoverage,
+    analysis_result_payload,
     checker_state_updates,
+    classified_document_codes,
+    human_in_the_loop_provenance,
+    predicted_answer_decision,
+    resolved_human_in_the_loop,
     route_coverage,
     rule_set_for_claim,
     run_checks,
@@ -52,42 +49,6 @@ _COVERAGE_BRANCH_NEXT_NODE: dict[CoverageBranch, CoverageNextNode] = {
     "missed_departure": "classify_missed_document",
     "abstention": "persist",
 }
-
-# Checker and gate booleans copied into analysis_result.json, in payload key order.
-_STATE_BOOLEAN_KEYS: tuple[str, ...] = (
-    "checker_containment",
-    "checker_contradicts",
-    "identity_check",
-    "identity_unclear",
-    "document_has_signature",
-    "signature_check",
-    "healthy_check",
-    "checker_document_not_authentic",
-    "checker_incomplete_document",
-    "departure_within_days",
-    "checker_suspicious_dating",
-)
-
-# Checker VIOLATION → legacy DENY explanation key (order matches _violated_checkers).
-_VIOLATION_LEGACY_KEYS: tuple[tuple[CheckerMode, str], ...] = (
-    ("identity", "identity_check"),
-    ("healthy", "healthy_check"),
-    ("not_authentic", "checker_document_not_authentic"),
-    ("incomplete", "checker_incomplete_document"),
-    ("contradicts", "checker_contradicts"),
-)
-
-# Modes whose ABSTAIN drives UNCERTAIN (identity only; containment ABSTAIN is record-only).
-_ABSTAIN_UNCERTAIN_MODES: frozenset[CheckerMode] = frozenset({"identity"})
-
-# Modes whose ERROR drives UNCERTAIN. Containment ERROR is record-only (checker docstring).
-_ERROR_DECISION_MODES: frozenset[CheckerMode] = frozenset({
-    "contradicts",
-    "healthy",
-    "not_authentic",
-    "incomplete",
-    "identity",
-})
 
 
 class BatchAnalysisResult(NamedTuple):
@@ -386,7 +347,7 @@ class ClaimPipeline:
     def _run_checker_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         rule_set = rule_set_for_claim(
             branch=state["routed_coverage"].branch,
-            classified_codes=self._classified_document_codes(state),
+            classified_codes=classified_document_codes(state, analysis=self._config.analysis),
             required_documents=self._config.analysis.required_documents,
         )
         results = run_checks(
@@ -423,9 +384,14 @@ class ClaimPipeline:
         )
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
-        hitl = self._resolved_human_in_the_loop(state)
-        hitl_source = self._human_in_the_loop_provenance(state)
-        published = self._published_generation(state)
+        claim_id = state["claim_id"]
+        # Until ClaimArtifactReader (Commit C), OCR reason still uses the
+        # preprocessed-root reader (no input_root); metadata run id uses claim input root.
+        ocr_failure_reason = self._document_ocr_failure(claim_id)
+        analysis = self._config.analysis
+        hitl = resolved_human_in_the_loop(state, analysis=analysis, ocr_failure_reason=ocr_failure_reason)
+        hitl_source = human_in_the_loop_provenance(state, analysis=analysis, ocr_failure_reason=ocr_failure_reason)
+        published = self._published_generation(state, ocr_failure_reason=ocr_failure_reason)
         log_branch_decision(
             logger,
             branch="persist",
@@ -500,61 +466,6 @@ class ClaimPipeline:
                     found.add(code)
         return next((code for code in ("ocr_read_failure", "ocr_failure") if code in found), None)
 
-    @staticmethod
-    def _classifier_returned_false(state: ClaimAnalysisState) -> bool:
-        """True when the routed coverage label is ``False``, or a raw reason/document label is.
-
-        Coverage follows the routed winner (P-01): a losing ``False`` in the
-        coverage selection has no HITL side effect. Reason and document stages
-        keep raw membership (SR-010/SR-004 out-of-scope precedence unchanged).
-
-        :param state: Graph state with routed_coverage and reason/document label codes.
-        :return: Whether the routed coverage label, or a raw reason/document
-            label, is the confident-negative ``False``.
-        """
-        if state["routed_coverage"].label == "False":
-            return True
-        return any(
-            "False" in labels for labels in (state.get("reason_labels") or [], state.get("document_labels") or [])
-        )
-
-    def _resolved_human_in_the_loop(self, state: ClaimAnalysisState) -> bool:
-        """HITL from preprocess, classifier ``False``, or any UNCERTAIN decision.
-
-        Checker gates that emit UNCERTAIN (suspicious dating, far departure,
-        identity unclear, coverage abstention, OCR failure) always require
-        operator review — same as classifier abstention.
-
-        :param state: Final (or mid-pipeline) graph state.
-        :return: Whether a human should review the claim.
-        """
-        if bool(state.get("human_in_the_loop")):
-            return True
-        if self._classifier_returned_false(state):
-            return True
-        return self._decision_from_state(state).decision == DECISION_UNCERTAIN
-
-    def _human_in_the_loop_provenance(self, state: ClaimAnalysisState) -> str:
-        """Return the stable source code that drove HITL for this run.
-
-        Check order (first match wins): ``classifier_false`` when the routed
-        coverage or a raw reason/document label is the confident-negative;
-        ``preprocess_metadata`` when the flag came in from the metadata read;
-        ``uncertain_decision`` when the decision resolves to UNCERTAIN; else
-        ``none``.
-
-        :param state: Final graph state after checker (or coverage-only).
-        :return: One of ``classifier_false``, ``preprocess_metadata``,
-            ``uncertain_decision``, or ``none``.
-        """
-        if self._classifier_returned_false(state):
-            return "classifier_false"
-        if bool(state.get("human_in_the_loop")):
-            return "preprocess_metadata"
-        if self._decision_from_state(state).decision == DECISION_UNCERTAIN:
-            return "uncertain_decision"
-        return "none"
-
     def _document_metadata_entries(self, claim_id: str, *, input_root: Path | None = None) -> list[dict[str, object]]:
         """Load document metadata entries for a claim folder.
 
@@ -615,308 +526,42 @@ class ClaimPipeline:
             supporting_document_text
         )
 
-    @staticmethod
-    def _state_boolean_flags(state: ClaimAnalysisState) -> dict[str, bool]:
-        """Checker and gate booleans present in state, in analysis_result.json key order.
+    def _published_generation(
+        self,
+        state: ClaimAnalysisState,
+        *,
+        ocr_failure_reason: str | None,
+    ) -> PublishedGeneration:
+        """Publish analysis_result + predicted_answer as one run-scoped generation.
 
-        :param state: Graph state to read boolean flags from.
-        :return: Dict of ``_STATE_BOOLEAN_KEYS`` present in ``state``, cast to bool.
+        :param state: Final ClaimAnalysisState with ``run_id``.
+        :param ocr_failure_reason: OCR-failure code read once in persist.
+        :return: Paths of the promoted artifacts and the committed manifest.
         """
-        return {key: bool(state.get(key)) for key in _STATE_BOOLEAN_KEYS if key in state}
-
-    def _analysis_result_payload(self, state: ClaimAnalysisState) -> dict[str, object]:
-        """Build the structured analysis_result.json body from graph state.
-
-        ``*_labels`` hold semantic names from ``config.analysis.*.label_names``;
-        numeric classifier codes are written alongside as ``*_label_codes``.
-        Also records the evaluator-facing ``decision`` derived from checker flags.
-
-        :param state: Final ClaimAnalysisState after checker (or coverage-only).
-        :return: JSON-serializable analysis payload. Checker keys are omitted when
-            the Checker node did not run (coverage other_label path).
-        """
+        artifacts = self._config.preprocessing.artifacts
         analysis = self._config.analysis
-        coverage_codes = list(state.get("coverage_labels") or [])
-        reason_codes = list(state.get("reason_labels") or [])
-        document_codes = list(state.get("document_labels") or [])
-        routed = state["routed_coverage"]
-        document_stage = self._document_stage_for_coverage(routed)
-        payload: dict[str, object] = {
-            "claim_id": state["claim_id"],
-            "coverage_labels": analysis.coverage.resolve_label_names(coverage_codes),
-            "coverage_label_codes": coverage_codes,
-            "routed_coverage_label": analysis.coverage.resolve_label_names([routed.label])[0],
-            "routed_coverage_label_code": routed.label,
-            "coverage_probabilities": dict(state.get("coverage_probabilities") or {}),
-            "reason_labels": analysis.cancellation_reason.resolve_label_names(reason_codes),
-            "reason_label_codes": reason_codes,
-            "document_labels": document_stage.resolve_label_names(document_codes),
-            "document_label_codes": document_codes,
-        }
-        payload.update(self._state_boolean_flags(state))
-        if state.get("checker_outcomes"):
-            payload["checker_outcomes"] = {mode: outcome.value for mode, outcome in state["checker_outcomes"].items()}
-        if "checker_rule_set" in state:
-            payload["checker_rule_set"] = state["checker_rule_set"]
-        if "checker_skipped" in state:
-            payload["checker_skipped"] = list(state["checker_skipped"])
-        if "document_labels" in state:
-            payload["checker_missing_documentation"] = self._is_missing_documentation(state)
-        hitl = self._resolved_human_in_the_loop(state)
-        payload["human_in_the_loop"] = hitl
-        payload["human_in_the_loop_source"] = self._human_in_the_loop_provenance(state)
+        run_id = state["run_id"]
         metadata_run_id = self._document_metadata_run_id(
             state["claim_id"],
             input_root=self._claim_input_root(state),
         )
-        if metadata_run_id is not None:
-            payload["document_metadata_run_id"] = metadata_run_id
-        decision = self._decision_from_state(state)
-        payload["decision"] = decision.decision
-        payload["decision_explanation"] = decision.explanation if isinstance(decision.explanation, str) else None
-        payload["run_id"] = state["run_id"]
-        return payload
-
-    def _document_stage_for_coverage(self, routed: RoutedCoverage) -> ClassificationConfig:
-        """Pick the document-stage config for the routed coverage branch.
-
-        :param routed: Single authoritative coverage routing decision.
-        :return: Document ClassificationConfig for semantic name resolution
-            (abstention has no document labels; it keeps today's cancellation
-            fallback for label-name resolution only).
-        """
-        analysis = self._config.analysis
-        if routed.branch == "personal_effects":
-            return analysis.personal_effects_document
-        if routed.branch == "missed_departure":
-            return analysis.missed_departure_document
-        return analysis.cancellation_document
-
-    def _acceptable_document_codes(self, state: ClaimAnalysisState) -> set[str]:
-        """Return document codes allowed for this claim's routed coverage path.
-
-        :param state: Graph state with routed coverage and reason label codes.
-        :return: Acceptable document-type codes from ``required_documents`` config
-            (falls back to the document-stage label list when a mapping is empty).
-        """
-        analysis = self._config.analysis
-        required = analysis.required_documents
-        routed = state["routed_coverage"]
-        stage = self._document_stage_for_coverage(routed)
-        stage_positive = set(stage.positive_labels())
-
-        if routed.branch == "personal_effects":
-            return set(required.personal_effects) or stage_positive
-        if routed.branch == "missed_departure":
-            return set(required.missed_departure) or stage_positive
-        return self._cancellation_acceptable_codes(state, stage_positive)
-
-    def _cancellation_acceptable_codes(self, state: ClaimAnalysisState, stage_positive: set[str]) -> set[str]:
-        """Acceptable cancellation-document codes from the reason stage (or fallback).
-
-        :param state: Graph state with reason label codes.
-        :param stage_positive: Fallback codes when no reason-based mapping applies.
-        :return: Union of ``cancellation_by_reason`` codes for classified reasons;
-            else the union of every configured reason mapping; else stage positives.
-        """
-        analysis = self._config.analysis
-        required = analysis.required_documents
-        reason_abstention = analysis.cancellation_reason.abstention_labels()
-        reason_codes = [code for code in (state.get("reason_labels") or []) if code not in reason_abstention]
-        by_reason = required.cancellation_by_reason
-        if reason_codes and by_reason:
-            acceptable: set[str] = set()
-            for reason in reason_codes:
-                acceptable.update(by_reason.get(reason, []))
-            if acceptable:
-                return acceptable
-        if by_reason:
-            return {code for codes in by_reason.values() for code in codes}
-        return stage_positive
-
-    def _classified_document_codes(self, state: ClaimAnalysisState) -> set[str]:
-        """Return non-abstention document codes from the document classifier stage.
-
-        :param state: Graph state with routed coverage and document_labels.
-        :return: Classified document codes excluding ``False`` / ``other_label``.
-        """
-        stage = self._document_stage_for_coverage(state["routed_coverage"])
-        abstention = stage.abstention_labels()
-        return {code for code in (state.get("document_labels") or []) if code not in abstention}
-
-    def _is_missing_documentation(self, state: ClaimAnalysisState) -> bool:
-        """True when no classified document type is acceptable for this claim.
-
-        :param state: Final graph state after document classification.
-        :return: Whether the supporting document type fails the required-doc check.
-        """
-        classified = self._classified_document_codes(state)
-        if not classified:
-            return True
-        acceptable = self._acceptable_document_codes(state)
-        return classified.isdisjoint(acceptable)
-
-    def _violated_checkers(self, state: ClaimAnalysisState) -> list[str]:
-        """Return checker / rule keys that failed for the claim.
-
-        Missing documentation is document-type acceptability for the claim path —
-        not failed containment (certs rarely contain the claim letter).
-        Checker VIOLATIONs are read from ``checker_outcomes`` when present
-        (SR-008); otherwise legacy boolean keys are used (date early-exit path).
-        ``signature_check`` False means a medical certificate / hospital admission
-        lacks ``has_signature`` in ``document_metadata.json`` → DENY.
-
-        :param state: Final graph state after Checker (or coverage-only).
-        :return: Ordered list of violated keys that drive DENY.
-        """
-        violated: list[str] = []
-        if self._is_missing_documentation(state):
-            violated.append("checker_missing_documentation")
-        violated.extend(self._checker_violation_keys(state))
-        if "signature_check" in state and not bool(state["signature_check"]):
-            violated.append("signature_check")
-        return self._ordered_violated_keys(violated)
-
-    def _checker_violation_keys(self, state: ClaimAnalysisState) -> list[str]:
-        """Legacy DENY keys for checker VIOLATIONs (or legacy bool fallback).
-
-        :param state: Graph state with optional ``checker_outcomes``.
-        :return: Unordered DENY explanation keys from checker modes.
-        """
-        outcomes = state.get("checker_outcomes") or {}
-        if outcomes:
-            return [key for mode, key in _VIOLATION_LEGACY_KEYS if outcomes.get(mode) is CheckOutcome.VIOLATION]
-        keys: list[str] = []
-        if "identity_check" in state and not bool(state["identity_check"]) and not bool(state.get("identity_unclear")):
-            keys.append("identity_check")
-        if "healthy_check" in state and bool(state["healthy_check"]):
-            keys.append("healthy_check")
-        if "checker_document_not_authentic" in state and bool(state["checker_document_not_authentic"]):
-            keys.append("checker_document_not_authentic")
-        if "checker_incomplete_document" in state and bool(state["checker_incomplete_document"]):
-            keys.append("checker_incomplete_document")
-        if "checker_contradicts" in state and bool(state["checker_contradicts"]):
-            keys.append("checker_contradicts")
-        return keys
-
-    @staticmethod
-    def _ordered_violated_keys(violated: list[str]) -> list[str]:
-        """Stable DENY explanation key order (matches historical fold).
-
-        :param violated: Unordered or partially ordered violated keys.
-        :return: Keys filtered to the canonical order, preserving only those present.
-        """
-        order = (
-            "checker_missing_documentation",
-            "identity_check",
-            "signature_check",
-            "healthy_check",
-            "checker_document_not_authentic",
-            "checker_incomplete_document",
-            "checker_contradicts",
-        )
-        present = set(violated)
-        return [key for key in order if key in present]
-
-    def _errored_checkers(self, state: ClaimAnalysisState) -> list[str]:
-        """Modes whose ERROR should drive UNCERTAIN (excludes containment).
-
-        :param state: Graph state with optional ``checker_outcomes``.
-        :return: Errored mode names in recorded (insertion) order.
-        """
-        outcomes = state.get("checker_outcomes") or {}
-        return [
-            mode
-            for mode, outcome in outcomes.items()
-            if outcome is CheckOutcome.ERROR and mode in _ERROR_DECISION_MODES
-        ]
-
-    def _identity_abstain_unclear(self, state: ClaimAnalysisState) -> bool:
-        """Whether identity ABSTAIN should yield UNCERTAIN ``identity_unclear``.
-
-        :param state: Graph state with optional ``checker_outcomes`` / legacy flags.
-        :return: True when identity abstained (or legacy identity_unclear is set).
-        """
-        outcomes = state.get("checker_outcomes") or {}
-        if outcomes:
-            return any(
-                mode in _ABSTAIN_UNCERTAIN_MODES and outcome is CheckOutcome.ABSTAIN
-                for mode, outcome in outcomes.items()
-            )
-        return "identity_unclear" in state and bool(state["identity_unclear"])
-
-    def _decision_from_state(self, state: ClaimAnalysisState) -> GroundTruth:
-        """Derive APPROVE/DENY/UNCERTAIN for evaluator-facing predicted_answer.
-
-        Precedence (locked, SR-008):
-        1. Preprocess OCR failure → UNCERTAIN
-        2. Routed coverage abstention → UNCERTAIN ``coverage_false_label``
-        3. ``departure_within_days`` → UNCERTAIN
-        4. ``checker_suspicious_dating`` → UNCERTAIN
-        5. Any VIOLATION (checker or missing-doc / signature) → DENY
-        6. Any ERROR (except containment) → UNCERTAIN ``checker_error:<modes>``
-        7. Identity ABSTAIN → UNCERTAIN ``identity_unclear``
-        8. APPROVE ``checker_consistent``
-
-        :param state: Final graph state.
-        :return: GroundTruth decision written beside analysis_result.
-        """
-        claim_id = state.get("claim_id") or ""
-        ocr_failure_reason = self._document_ocr_failure(claim_id) if claim_id else None
-        if ocr_failure_reason is not None:
-            return GroundTruth(
-                decision=DECISION_UNCERTAIN,
-                explanation=ocr_failure_reason,
-            )
-        if state["routed_coverage"].branch == "abstention":
-            return GroundTruth(
-                decision=DECISION_UNCERTAIN,
-                explanation="coverage_false_label",
-            )
-        if bool(state.get("departure_within_days")):
-            return GroundTruth(
-                decision=DECISION_UNCERTAIN,
-                explanation="departure_within_days",
-            )
-        if bool(state.get("checker_suspicious_dating")):
-            return GroundTruth(
-                decision=DECISION_UNCERTAIN,
-                explanation="checker_suspicious_dating",
-            )
-        violated = self._violated_checkers(state)
-        if violated:
-            return GroundTruth(
-                decision=DECISION_DENY,
-                explanation=",".join(violated),
-            )
-        errored = self._errored_checkers(state)
-        if errored:
-            return GroundTruth(
-                decision=DECISION_UNCERTAIN,
-                explanation="checker_error:" + ",".join(errored),
-            )
-        if self._identity_abstain_unclear(state):
-            return GroundTruth(
-                decision=DECISION_UNCERTAIN,
-                explanation="identity_unclear",
-            )
-        return GroundTruth(
-            decision=DECISION_APPROVE,
-            explanation="checker_consistent",
-        )
-
-    def _published_generation(self, state: ClaimAnalysisState) -> PublishedGeneration:
-        """Publish analysis_result + predicted_answer as one run-scoped generation.
-
-        :param state: Final ClaimAnalysisState with ``run_id``.
-        :return: Paths of the promoted artifacts and the committed manifest.
-        """
-        artifacts = self._config.preprocessing.artifacts
-        run_id = state["run_id"]
         bodies = {
-            artifacts.analysis_result: json.dumps(self._analysis_result_payload(state), indent=2) + "\n",
+            artifacts.analysis_result: json.dumps(
+                analysis_result_payload(
+                    state,
+                    analysis=analysis,
+                    ocr_failure_reason=ocr_failure_reason,
+                    metadata_run_id=metadata_run_id,
+                ),
+                indent=2,
+            )
+            + "\n",
             artifacts.predicted_answer: analysis_predicted_answer_text(
-                self._predicted_answer_decision(state),
+                predicted_answer_decision(
+                    state,
+                    analysis=analysis,
+                    ocr_failure_reason=ocr_failure_reason,
+                ),
                 run_id=run_id,
             ),
         }
@@ -927,16 +572,6 @@ class ClaimPipeline:
             bodies=bodies,
             manifest_name=artifacts.run_manifest,
             source="analysis",
-        )
-
-    def _predicted_answer_decision(self, state: ClaimAnalysisState) -> GroundTruth:
-        """Build evaluator GroundTruth from analysis decision + resolved HITL.
-
-        :param state: Final ClaimAnalysisState after checker (or coverage-only).
-        :return: Decision with ``human_in_the_loop`` set (``source`` stamped on write).
-        """
-        return self._decision_from_state(state).model_copy(
-            update={"human_in_the_loop": self._resolved_human_in_the_loop(state)}
         )
 
     def _predicted_answer_path(self, claim_id: str) -> Path:

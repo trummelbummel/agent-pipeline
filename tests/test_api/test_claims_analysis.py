@@ -7,6 +7,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -161,7 +162,7 @@ def test_concurrent_post_analysis_one_success_one_conflict(
 
     with TestClient(app) as client:
 
-        def _post() -> object:
+        def _post() -> Any:
             return client.post("/claims/claim%201/analysis")
 
         with ThreadPoolExecutor(max_workers=2) as pool:

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from compliance.config.logging_setup import configure_logging
 from compliance.config.settings import AppConfig, load_config
-from compliance.preprocessing.claim_batch import _validate_claim_dir_name
+from compliance.preprocessing.claim_batch import _validate_claim_dir_name, _validate_claim_root
 from compliance.workflows.artifact_publication import ClaimAnalysisBusyError
 from compliance.workflows.claim_pipeline import ClaimPipeline
 from compliance.workflows.orchestration import analyze_claim_exclusively
@@ -39,7 +39,7 @@ class CliArgs(BaseModel):
     )
     claim_id: str | None = Field(
         default=None,
-        description="Optional claim folder name under data_dir for exclusive single-claim e2e",
+        description="Optional claim folder under data_dir; must be a real directory (not a symlink)",
     )
 
 
@@ -75,7 +75,7 @@ def _cli_args(argv: list[str] | None) -> CliArgs:
     parser.add_argument(
         "--claim-id",
         default=None,
-        help="Single claim folder under data_dir; exclusive analyze_claim_exclusively (SR-007)",
+        help="Single claim folder under data_dir (real directory, not a symlink); exclusive analyze",
     )
     return CliArgs.model_validate(vars(parser.parse_args(argv)))
 
@@ -99,16 +99,21 @@ def _workflow_exit_code(config: AppConfig, *, mode: CliMode, claim_id: str | Non
 def _single_claim_exit_code(config: AppConfig, *, claim_id: str) -> int:
     """Resolve ``claim_id`` under data_dir and run exclusive analyze_claim_exclusively.
 
+    The claim root must be a real directory inside ``data_dir`` (not a symlink).
+
     :param config: Loaded application configuration.
     :param claim_id: Safe claim folder segment (validated before join).
-    :return: ``0`` on success; ``1`` when the claim folder name is unsafe or busy.
+    :return: ``0`` on success; ``1`` when the claim folder is unsafe, a symlink, or busy.
     """
+    data_dir = Path(config.preprocessing.data_dir)
     try:
+        # Validate the raw segment before Path join — Path.name drops separators.
         _validate_claim_dir_name(claim_id)
+        claim_dir = data_dir / claim_id
+        _validate_claim_root(claim_dir, root=data_dir)
     except ValueError:
         logger.exception("Unsafe claim id rejected: %s", claim_id)
         return 1
-    claim_dir = Path(config.preprocessing.data_dir) / claim_id
     try:
         analyze_claim_exclusively(
             claim_dir,

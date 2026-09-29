@@ -165,3 +165,85 @@ def test_read_documents_tags_ocr_read_failure_when_file_exists(
     assert docs[0].metadata.human_in_the_loop is True
     assert "ocr_read_failure" in docs[0].metadata.failure_reasons
     reader.read.assert_called_once()
+
+
+def test_validate_claim_root_rejects_symlink(tmp_path: Path) -> None:
+    """A claim directory that is a symlink raises ClaimRootContainmentError (D-02)."""
+    import pytest
+
+    from compliance.preprocessing.claim_batch import (
+        ClaimRootContainmentError,
+        _validate_claim_root,
+    )
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("do-not-read", encoding="utf-8")
+    root = tmp_path / "raw"
+    root.mkdir()
+    link = root / "claim 1"
+    link.symlink_to(outside)
+
+    with pytest.raises(ClaimRootContainmentError) as exc_info:
+        _validate_claim_root(link, root=root)
+    assert exc_info.value.reason == "symlinked_claim_root"
+    assert (outside / "secret.txt").read_text(encoding="utf-8") == "do-not-read"
+
+
+def test_validate_claim_root_rejects_outside_root(tmp_path: Path) -> None:
+    """A resolved claim path escaping the given root raises outside_root."""
+    import pytest
+
+    from compliance.preprocessing.claim_batch import (
+        ClaimRootContainmentError,
+        _validate_claim_root,
+    )
+
+    root = tmp_path / "raw"
+    root.mkdir()
+    escape = tmp_path / "claim 99"
+    escape.mkdir()
+
+    with pytest.raises(ClaimRootContainmentError) as exc_info:
+        _validate_claim_root(escape, root=root)
+    assert exc_info.value.reason == "outside_root"
+
+
+def test_validate_claim_root_allows_real_dir_inside_and_external_without_root(
+    tmp_path: Path,
+) -> None:
+    """Real dirs pass; external paths pass when no root is given (R020)."""
+    from compliance.preprocessing.claim_batch import _validate_claim_root
+
+    root = tmp_path / "raw"
+    root.mkdir()
+    inside = root / "claim 1"
+    inside.mkdir()
+    external = tmp_path / "external" / "claim 2"
+    external.mkdir(parents=True)
+
+    _validate_claim_root(inside, root=root)
+    _validate_claim_root(external)
+
+
+def test_discover_excludes_symlinked_claim(tmp_path: Path) -> None:
+    """Batch discovery excludes a symlinked claim and still returns real ones."""
+    from compliance.preprocessing.claim_batch import (
+        _discover_claim_folders,
+        discover_claim_folder_names,
+    )
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "raw"
+    root.mkdir()
+    (root / "claim 1").mkdir()
+    (root / "claim 2").symlink_to(outside)
+    (root / "claim 3").mkdir()
+
+    folders = _discover_claim_folders(root)
+    names = discover_claim_folder_names(root)
+
+    assert [p.name for p in folders] == ["claim 1", "claim 3"]
+    assert names == ["claim 1", "claim 3"]
+    assert not any(p for p in outside.iterdir())

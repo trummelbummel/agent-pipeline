@@ -153,13 +153,16 @@ def publish_claim_generation(
     :param manifest_name: Commit-marker filename (config-rooted).
     :param source: Publication origin (``analysis`` or ``preprocess``).
     :return: Paths of the promoted artifacts and the committed manifest.
-    :raises ValueError: When ``claim_id`` is not a safe single path segment.
+    :raises ValueError: When ``claim_id`` is not a safe single path segment or the
+        destination claim directory is a symlink or escapes ``results_root``.
     """
-    from compliance.preprocessing.claim_batch import _validate_claim_dir_name
+    from compliance.preprocessing.claim_batch import _validate_claim_dir_name, _validate_claim_root
 
+    # Validate the raw segment before Path join — Path.name drops separators from "../x".
     _validate_claim_dir_name(claim_id)
-    staging_root = results_root / ".staging" / run_id / claim_id
     claim_dir = results_root / claim_id
+    _validate_claim_root(claim_dir, root=results_root)
+    staging_root = results_root / ".staging" / run_id / claim_id
     claim_dir.mkdir(parents=True, exist_ok=True)
     staging_root.mkdir(parents=True, exist_ok=True)
 

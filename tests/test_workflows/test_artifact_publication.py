@@ -148,6 +148,30 @@ def test_publish_rejects_unsafe_claim_id(tmp_path: Path) -> None:
     assert set(results_root.iterdir()) == before
 
 
+def test_publish_rejects_symlinked_claim_dir(tmp_path: Path) -> None:
+    """Publishing into a symlinked results_root/{claim_id} raises and writes nothing."""
+    results_root = tmp_path / "results"
+    results_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("untouched", encoding="utf-8")
+    (results_root / "claim 1").symlink_to(outside)
+
+    with pytest.raises(ValueError, match="symlinked_claim_root"):
+        publish_claim_generation(
+            results_root=results_root,
+            claim_id="claim 1",
+            run_id="20260929T120000-abcd1234",
+            bodies={"predicted_answer.json": _body("20260929T120000-abcd1234")},
+            manifest_name="run_manifest.json",
+            source="analysis",
+        )
+
+    assert marker.read_text(encoding="utf-8") == "untouched"
+    assert not list(outside.glob("*.json"))
+
+
 def test_failed_run_manifest_only_written_on_failure(tmp_path: Path) -> None:
     results_root = tmp_path / "results"
     run_id = new_run_id()

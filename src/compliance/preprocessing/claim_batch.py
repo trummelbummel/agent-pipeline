@@ -50,6 +50,20 @@ class UnsafeClaimDirectoryError(ValueError):
         super().__init__(f"Unsafe claim directory name: {name!r}")
 
 
+class ClaimRootContainmentError(ValueError):
+    """A claim directory escapes its configured root or is a symlink (SR-009)."""
+
+    def __init__(self, path: Path, reason: str) -> None:
+        """Build the containment message from the path and stable reason code.
+
+        :param path: Claim directory that failed containment.
+        :param reason: ``symlinked_claim_root`` or ``outside_root``.
+        """
+        self.path = path
+        self.reason = reason
+        super().__init__(f"Unsafe claim root {path!r}: {reason}")
+
+
 def _validate_claim_dir_name(name: str) -> None:
     """Refuse claim folder names that could escape the output root (T-03-03).
 
@@ -70,7 +84,7 @@ def _validate_claim_dir_name(name: str) -> None:
     )
 
 
-def _path_safety_denial(name: str, reason: str) -> None:
+def _path_safety_denial(name: str, reason: str, *, claim_dir: Path | None = None) -> None:
     log_branch_decision(
         logger,
         branch="path_safety",
@@ -79,7 +93,48 @@ def _path_safety_denial(name: str, reason: str) -> None:
         level=logging.WARNING,
         claim=name,
     )
+    if claim_dir is not None:
+        raise ClaimRootContainmentError(claim_dir, reason)
     raise UnsafeClaimDirectoryError(name)
+
+
+def _validate_claim_root(claim_dir: Path, *, root: Path | None = None) -> None:
+    """Refuse an unsafe claim directory name, a symlink root, or an escape.
+
+    A symlinked claim root is refused outright (D-02), because resolving and
+    re-containing would still let an operator's tree decide which bytes a claim
+    run reads.
+
+    :param claim_dir: Claim directory path to validate.
+    :param root: When given, require ``claim_dir`` resolves inside this root.
+    :raises ClaimRootContainmentError: When the root is a symlink or escapes ``root``.
+    :raises UnsafeClaimDirectoryError: When the folder name is not a safe segment.
+    """
+    _validate_claim_dir_name(claim_dir.name)
+    if claim_dir.is_symlink():
+        _path_safety_denial(claim_dir.name, reason="symlinked_claim_root", claim_dir=claim_dir)
+    if root is not None:
+        resolved_claim = claim_dir.resolve()
+        resolved_root = root.resolve()
+        if not resolved_claim.is_relative_to(resolved_root):
+            _path_safety_denial(claim_dir.name, reason="outside_root", claim_dir=claim_dir)
+
+
+def _contained_claim_folders(root: Path, folders: list[Path]) -> list[Path]:
+    """Return claim folders that pass containment under ``root``.
+
+    :param root: Discovery root used for resolve-based containment.
+    :param folders: Candidate claim directories (already name-prefix filtered).
+    :return: Contained folders in the same order as ``folders``.
+    """
+    contained: list[Path] = []
+    for path in folders:
+        try:
+            _validate_claim_root(path, root=root)
+        except ValueError:
+            continue
+        contained.append(path)
+    return contained
 
 
 def _is_claim_folder(path: Path) -> bool:
@@ -108,7 +163,7 @@ def _discover_claim_folders(data_dir: Path) -> list[Path]:
         raise FileNotFoundError(msg)
 
     folders = [path for path in data_dir.iterdir() if path.is_dir() and path.name.lower().startswith("claim")]
-    return sorted(folders, key=_claim_sort_key)
+    return _contained_claim_folders(data_dir, sorted(folders, key=_claim_sort_key))
 
 
 def discover_claim_folder_names(root: Path) -> list[str]:
@@ -122,7 +177,7 @@ def discover_claim_folder_names(root: Path) -> list[str]:
     if not root.is_dir():
         return []
     folders = [path for path in root.iterdir() if path.is_dir() and path.name.lower().startswith("claim")]
-    return [path.name for path in sorted(folders, key=_claim_sort_key)]
+    return [path.name for path in _contained_claim_folders(root, sorted(folders, key=_claim_sort_key))]
 
 
 def _claim_sort_key(path: Path) -> tuple[int, str]:

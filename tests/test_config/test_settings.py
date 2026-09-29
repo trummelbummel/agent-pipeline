@@ -826,3 +826,33 @@ def test_upload_limit_order_rejects_request_below_file_cap() -> None:
 
     with pytest.raises(ValidationError, match=r"max_request_bytes.*50.*max_file_bytes.*100"):
         UploadLimitsConfig(max_file_bytes=100, max_request_bytes=50)
+
+
+def test_artifact_filename_must_be_basename() -> None:
+    """Separators, absolute paths, empty strings, and .. fail naming the field."""
+    from compliance.config.settings import PreprocessedArtifactNames
+
+    cases = [
+        ("description", "../../etc/x.txt"),
+        ("answer", "/abs/answer.json"),
+        ("predicted_answer", ""),
+        ("analysis_result", ".."),
+    ]
+    for field, value in cases:
+        with pytest.raises(ValidationError, match=rf"preprocessing\.artifacts\.{field}"):
+            PreprocessedArtifactNames(**{field: value})
+
+
+def test_evaluation_artifact_filename_must_be_basename() -> None:
+    """Evaluation artifact filenames that are not basenames fail at load."""
+    from compliance.config.settings import EvaluationConfig
+
+    with pytest.raises(ValidationError, match=r"evaluation\.metrics_artifact"):
+        EvaluationConfig(metrics_artifact="../escape.json")
+
+
+def test_load_config_still_accepts_shipped_artifact_names() -> None:
+    """Shipped config.yaml still loads after basename validation."""
+    config = load_config("config.yaml")
+    assert config.preprocessing.artifacts.description == "description.txt"
+    assert config.evaluation.metrics_artifact == "evaluation_metrics.json"

@@ -22,6 +22,7 @@ from compliance.preprocessing.claim_batch import (
     _predicted_answer_from_bundle,
     _process_single_claim,
     _validate_claim_dir_name,
+    _validate_claim_root,
 )
 from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter
@@ -36,6 +37,7 @@ __all__ = [
     "PreprocessingPipeline",
     "_is_claim_folder",
     "_validate_claim_dir_name",
+    "_validate_claim_root",
 ]
 
 logger = logging.getLogger(__name__)
@@ -217,15 +219,17 @@ class PreprocessingPipeline:
         :param run_id: Generation id for this claim; minted when the caller
             passes none so single-claim entry points still stamp provenance.
         :return: Path to the written claim output directory.
-        :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
+        :raises ValueError: When the claim root is unsafe, a symlink, or escapes
+            the configured output root.
         """
-        _validate_claim_dir_name(claim_dir.name)
+        _validate_claim_root(claim_dir)
 
         root = self.output_root if output_root is None else output_root
         resolved_run_id = run_id if run_id is not None else new_run_id()
         bundle = _process_single_claim(claim_dir, self._config, **self._reader_overrides)
 
         claim_out = root / claim_dir.name
+        _validate_claim_root(claim_out, root=root)
         claim_out.mkdir(parents=True, exist_ok=True)
         predicted_path = self._write_claim_artifacts(claim_out, bundle, run_id=resolved_run_id)
         summary = _claim_document_summary(bundle)

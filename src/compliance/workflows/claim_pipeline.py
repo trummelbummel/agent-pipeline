@@ -23,6 +23,7 @@ from compliance.preprocessing.claim_batch import (
     _discover_claim_folders,
     _is_claim_folder,
     _validate_claim_dir_name,
+    _validate_claim_root,
 )
 from compliance.workflows.artifact_publication import (
     ClaimRunOutcome,
@@ -369,9 +370,9 @@ class ClaimPipeline:
             passes none so single-claim and API entry points still publish under
             a run-scoped identity.
         :return: Path to the written analysis_result.json under results_dir.
-        :raises ValueError: When ``claim_dir.name`` is not a safe single path segment.
+        :raises ValueError: When the claim root is unsafe or a symlink.
         """
-        _validate_claim_dir_name(claim_dir.name)
+        _validate_claim_root(claim_dir)
         input_root = self._input_root_for_claim(claim_dir)
         resolved_run_id = run_id if run_id is not None else new_run_id()
         log_branch_decision(

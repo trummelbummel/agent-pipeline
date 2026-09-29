@@ -19,6 +19,7 @@ from compliance.preprocessing.claim_batch import (
     _claim_number,
     _claim_sort_key,
     _validate_claim_dir_name,
+    _validate_claim_root,
 )
 from compliance.workflows.artifact_publication import (
     ClaimAnalysisBusyError,
@@ -268,6 +269,12 @@ def create_claim(
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail="claim folder already exists") from exc
 
+    try:
+        _validate_claim_root(claim_dir, root=data_dir)
+    except ValueError as exc:
+        shutil.rmtree(claim_dir, ignore_errors=True)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     artifacts = config.preprocessing.artifacts
     image_path = claim_dir / image_basename
     claim_root = claim_dir.resolve()
@@ -369,7 +376,12 @@ def analyze_claim(
     :return: Claim decision from the generation just published.
     """
     try:
+        # Validate the raw segment before Path join — Path.name drops separators.
         _validate_claim_dir_name(claim_id)
+        _validate_claim_root(
+            Path(config.preprocessing.data_dir) / claim_id,
+            root=Path(config.preprocessing.data_dir),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

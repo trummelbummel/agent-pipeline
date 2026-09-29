@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -41,6 +42,16 @@ class PreprocessedArtifactNames(StrictConfigModel):
     supporting_document: str = "supporting_document.md"
     supporting_documents: str = "supporting_documents.md"
     document_metadata: str = "document_metadata.json"
+
+    @model_validator(mode="after")
+    def _validated_artifact_basenames(self) -> PreprocessedArtifactNames:
+        """Require every configured artifact filename to be a single basename.
+
+        :return: Self when all filenames are safe basenames.
+        """
+        for field_name in type(self).model_fields:
+            _require_artifact_basename(f"preprocessing.artifacts.{field_name}", getattr(self, field_name))
+        return self
 
 
 class PreprocessingConfig(StrictConfigModel):
@@ -406,6 +417,14 @@ class EvaluationConfig(StrictConfigModel):
                 unscored_label=self.unscored_label,
                 labels=list(self.labels),
             )
+        for field_name in (
+            "metrics_artifact",
+            "confusion_matrix_artifact",
+            "visualization_artifact",
+            "analysis_stats_artifact",
+            "analysis_visualization_artifact",
+        ):
+            _require_artifact_basename(f"evaluation.{field_name}", getattr(self, field_name))
         return self
 
 
@@ -537,6 +556,37 @@ class UploadLimitOrderError(ValueError):
         super().__init__(
             f"api.upload.max_request_bytes ({max_request_bytes}) must be >= max_file_bytes ({max_file_bytes})"
         )
+
+
+class UnsafeArtifactNameError(ValueError):
+    """A configured artifact filename is not a single basename."""
+
+    def __init__(self, field: str, value: str) -> None:
+        """Name the config field and the offending filename value.
+
+        :param field: Dotted config path of the failing field.
+        :param value: Configured filename that is not a safe basename.
+        """
+        super().__init__(f"Unsafe artifact filename in {field}: {value!r}")
+
+
+def _require_artifact_basename(field: str, value: str) -> None:
+    """Require ``value`` to be a single path basename for config path joins.
+
+    :param field: Dotted config path used in the error message.
+    :param value: Configured filename candidate.
+    :raises UnsafeArtifactNameError: When ``value`` is empty, absolute, a dot
+        segment, or contains a path separator.
+    """
+    if not value or not value.strip():
+        raise UnsafeArtifactNameError(field, value)
+    if os.sep in value or (os.altsep is not None and os.altsep in value):
+        raise UnsafeArtifactNameError(field, value)
+    if value in {".", ".."}:
+        raise UnsafeArtifactNameError(field, value)
+    path = Path(value)
+    if path.is_absolute() or path.name != value:
+        raise UnsafeArtifactNameError(field, value)
 
 
 class ConfigFileNotFoundError(FileNotFoundError):

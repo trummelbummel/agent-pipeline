@@ -37,16 +37,18 @@ class NanAwareModel(BaseModel):
 
 
 class GroundTruth(NanAwareModel):
-    """Ground-truth decision from answer.json.
+    """Ground-truth or predicted decision (answer.json / predicted_answer.json).
 
     :param decision: Required approve/deny/uncertain decision string.
     :param explanation: Optional rationale; missing values are np.nan.
     :param acceptable_decision: Alternate acceptable decision when uncertain.
+    :param human_in_the_loop: True when preprocess and/or analysis flagged review.
     """
 
     decision: str
     explanation: NanStr = _MISSING
     acceptable_decision: NanStr = _MISSING
+    human_in_the_loop: bool = False
 
 
 class BookingData(NanAwareModel):
@@ -82,13 +84,18 @@ class DocumentMetaData(NanAwareModel):
     and low ``extraction_probability`` both force ``human_in_the_loop``.
 
     :param source_file: Basename of the source raster/PDF when known.
-    :param has_signature: True when DocumentFigureClassifier top class is signature.
+    :param has_signature: True when DocumentFigureClassifier top class is signature
+        or YOLO verify scored at/above ``signature_confidence``.
     :param extraction_probability: Aggregate Docling confidence in ``[0, 1]``.
     :param faulty_extraction: True when ExtractionFailure flags unusable OCR text.
-    :param human_in_the_loop: True when review is required (faulty or low confidence).
+    :param human_in_the_loop: True when review is required (faulty, low OCR
+        confidence, or YOLO signature score below ``signature_confidence``).
     :param failure_reasons: Machine-readable ExtractionFailure reason codes.
     :param retry_used: True when a vision OCR retry was attempted after faulty Docling.
     :param retry_model: Vision model name from config when a retry was attempted.
+    :param signature_verify_used: True when a vision pass checked a missing signature.
+    :param signature_probability: Max YOLO box confidence in ``[0, 1]`` when verify
+        ran; unset (nan) when YOLO was not run or returned no boxes.
     """
 
     source_file: NanStr = _MISSING
@@ -99,6 +106,8 @@ class DocumentMetaData(NanAwareModel):
     failure_reasons: list[str] = Field(default_factory=list)
     retry_used: bool = False
     retry_model: NanStr = _MISSING
+    signature_verify_used: bool = False
+    signature_probability: NanFloat = _MISSING
 
 
 class DocumentData(NanAwareModel):

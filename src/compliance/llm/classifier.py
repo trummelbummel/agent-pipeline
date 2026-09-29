@@ -65,7 +65,7 @@ class CaseClassifier(Classifier):
         :param labels: Configured coverage class names (from config, never hardcoded here).
         :param model_name: LLM model name from config.
         :param prompt: Classification instruction prompt from config.
-        :param other_label: Fallback label when no class fits.
+        :param other_label: Abstain label when no positive class applies (``False``).
         :param chat_fn: Optional chat callable for tests; defaults to ollama.chat.
         """
         self.labels = list(labels)
@@ -140,8 +140,7 @@ class CaseClassifier(Classifier):
         used_other_fallback: bool,
     ) -> dict[str, float]:
         probabilities: dict[str, float] = {
-            label: self._clamped_probability(raw_probabilities.get(label, 0.0))
-            for label in self._label_vocabulary()
+            label: self._clamped_probability(raw_probabilities.get(label, 0.0)) for label in self._label_vocabulary()
         }
         if used_other_fallback:
             probabilities[self.other_label] = 1.0
@@ -158,9 +157,7 @@ class CaseClassifier(Classifier):
             return None
         return _ClassificationPayload(
             labels=CaseClassifier._coerced_labels(parsed.get("labels", [])),
-            probabilities=CaseClassifier._coerced_probabilities(
-                parsed.get("probabilities", {})
-            ),
+            probabilities=CaseClassifier._coerced_probabilities(parsed.get("probabilities", {})),
         )
 
     @staticmethod
@@ -173,8 +170,4 @@ class CaseClassifier(Classifier):
     def _coerced_probabilities(raw: object) -> dict[str, float]:
         if not isinstance(raw, dict):
             return {}
-        return {
-            str(key): float(value)
-            for key, value in raw.items()
-            if isinstance(value, (int, float))
-        }
+        return {str(key): float(value) for key, value in raw.items() if isinstance(value, (int, float))}

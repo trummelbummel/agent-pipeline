@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
@@ -12,13 +13,21 @@ from compliance.models.claim import (
     BookingData,
     ClaimBundle,
     DocumentData,
+    DocumentMetaData,
     GroundTruth,
     SourceFiles,
     is_nan_scalar,
 )
+from compliance.models.decisions import (
+    DECISION_DENY,
+    DECISION_UNCERTAIN,
+    PREDICTABLE_DECISIONS,
+    REASON_FRAUD,
+    REASON_OCR_READ_FAILURE,
+)
 from compliance.preprocessing.answer import AnswerReader
 from compliance.preprocessing.description import DescriptionReader
-from compliance.preprocessing.document import DocumentReader
+from compliance.preprocessing.document import DocumentReader, SignatureDetectionError
 from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.preprocessing.markdown import MarkdownReader
@@ -28,8 +37,64 @@ from compliance.tools.benford import BenfordLawChecker
 logger = logging.getLogger(__name__)
 
 _CLAIM_NUM = re.compile(r"(\d+)")
-_FRAUD_DENY = "DENY"
-_PREDICTABLE_DECISIONS = frozenset({"DENY", "APPROVE", "UNCERTAIN"})
+
+
+class UnsafeClaimDirectoryError(ValueError):
+    """A claim folder name is not a single safe path segment (T-03-03)."""
+
+    def __init__(self, name: str) -> None:
+        """Build the unsafe-name message from the offending folder name.
+
+        :param name: ``claim_dir.name`` path segment that failed validation.
+        """
+        super().__init__(f"Unsafe claim directory name: {name!r}")
+
+
+def _validate_claim_dir_name(name: str) -> None:
+    """Refuse claim folder names that could escape the output root (T-03-03).
+
+    :param name: ``claim_dir.name`` path segment.
+    :raises ValueError: When the name is not a single safe path segment.
+    """
+    if os.sep in name or (os.altsep is not None and os.altsep in name):
+        _path_safety_denial(name, reason="path_separator")
+    if name in {".", ".."}:
+        _path_safety_denial(name, reason="dot_segment")
+    log_branch_decision(
+        logger,
+        branch="path_safety",
+        outcome="PASS",
+        reason="single_segment",
+        level=logging.DEBUG,
+        claim=name,
+    )
+
+
+def _path_safety_denial(name: str, reason: str) -> None:
+    log_branch_decision(
+        logger,
+        branch="path_safety",
+        outcome="DENY",
+        reason=reason,
+        level=logging.WARNING,
+        claim=name,
+    )
+    raise UnsafeClaimDirectoryError(name)
+
+
+def _is_claim_folder(path: Path) -> bool:
+    """Return True when ``path`` is a single safe claim folder (startswith claim).
+
+    :param path: Candidate filesystem path.
+    :return: Whether ``path`` should be treated as one claim folder (not a batch root).
+    """
+    if not path.is_dir():
+        return False
+    try:
+        _validate_claim_dir_name(path.name)
+    except ValueError:
+        return False
+    return path.name.lower().startswith("claim")
 
 
 def _discover_claim_folders(data_dir: Path) -> list[Path]:
@@ -46,15 +111,37 @@ def _discover_claim_folders(data_dir: Path) -> list[Path]:
     return sorted(folders, key=_claim_sort_key)
 
 
+def discover_claim_folder_names(root: Path) -> list[str]:
+    """List claim folder names under ``root`` (missing root → empty list).
+
+    Soft discovery for results/preprocessed trees where the root may not exist yet.
+
+    :param root: Directory that may contain ``claim N`` folders.
+    :return: Claim folder names sorted by numeric id, then name.
+    """
+    if not root.is_dir():
+        return []
+    folders = [path for path in root.iterdir() if path.is_dir() and path.name.lower().startswith("claim")]
+    return [path.name for path in sorted(folders, key=_claim_sort_key)]
+
+
 def _claim_sort_key(path: Path) -> tuple[int, str]:
     """Sort key that prefers numeric claim ids.
 
     :param path: Claim folder path.
     :return: (number, name) for stable ordering.
     """
-    match = _CLAIM_NUM.search(path.name)
-    number = int(match.group(1)) if match else 0
-    return (number, path.name)
+    return (_claim_number(path.name), path.name)
+
+
+def _claim_number(name: str) -> int:
+    """Extract the numeric claim id from a folder name, or 0 if absent.
+
+    :param name: Claim folder name (e.g. ``claim 12``).
+    :return: Parsed integer id, or 0 when no digits are present.
+    """
+    match = _CLAIM_NUM.search(name)
+    return int(match.group(1)) if match else 0
 
 
 def _classify_files(claim_dir: Path, document_formats: list[str]) -> SourceFiles:
@@ -90,13 +177,13 @@ def _classify_files(claim_dir: Path, document_formats: list[str]) -> SourceFiles
     )
 
 
-def _is_present(path_value: str | float) -> bool:
-    """Return True when a SourceFiles path field holds a real path string.
+def _present_path(path_value: str | float) -> Path | None:
+    """Return the usable ``Path`` for a SourceFiles path field, or None.
 
     :param path_value: Path string or np.nan sentinel.
-    :return: Whether the path is usable.
+    :return: ``Path(path_value)`` when it is a non-empty string, else None.
     """
-    return isinstance(path_value, str) and bool(path_value)
+    return Path(path_value) if isinstance(path_value, str) and path_value else None
 
 
 def _document_decision_fields(document: DocumentData) -> tuple[str, str]:
@@ -125,7 +212,8 @@ def _read_ground_truth(answer_path: str | float, answer_reader: AnswerReader) ->
     :param answer_reader: AnswerReader instance.
     :return: GroundTruth model.
     """
-    if not _is_present(answer_path):
+    answer_file = _present_path(answer_path)
+    if answer_file is None:
         log_branch_decision(
             logger,
             branch="ground_truth",
@@ -134,9 +222,7 @@ def _read_ground_truth(answer_path: str | float, answer_reader: AnswerReader) ->
             level=logging.WARNING,
         )
         return GroundTruth(decision="UNKNOWN")
-    assert isinstance(answer_path, str)
-    ground_truth = answer_reader.read(Path(answer_path))
-    assert isinstance(ground_truth, GroundTruth)
+    ground_truth = cast(GroundTruth, answer_reader.read(answer_file))
     log_branch_decision(
         logger,
         branch="ground_truth",
@@ -165,7 +251,7 @@ def _read_markdowns(
     for path_str in markdown_paths:
         path = Path(path_str)
         try:
-            parsed = markdown_reader.read(path)
+            parsed = cast(BookingData, markdown_reader.read(path))
         except Exception as exc:
             log_branch_decision(
                 logger,
@@ -177,7 +263,6 @@ def _read_markdowns(
                 error=type(exc).__name__,
             )
             continue
-        assert isinstance(parsed, BookingData)
         if path.name.lower().startswith("supporting"):
             booking_data = parsed
             log_branch_decision(
@@ -213,7 +298,8 @@ def _read_description(
     :param description_reader: DescriptionReader instance.
     :return: (description_booking, description_text).
     """
-    if not _is_present(description_path):
+    path = _present_path(description_path)
+    if path is None:
         log_branch_decision(
             logger,
             branch="description",
@@ -222,19 +308,8 @@ def _read_description(
         )
         return BookingData(), _MISSING
 
-    assert isinstance(description_path, str)
-    path = Path(description_path)
     try:
-        booking = description_reader.read(path)
-        assert isinstance(booking, BookingData)
-        log_branch_decision(
-            logger,
-            branch="description",
-            outcome="EXTRACTED",
-            reason="llm_ok",
-            file=path.name,
-        )
-        return booking, description_reader.last_raw_text
+        booking = cast(BookingData, description_reader.read(path))
     except Exception as exc:
         log_branch_decision(
             logger,
@@ -249,38 +324,99 @@ def _read_description(
             return BookingData(), path.read_text(encoding="utf-8")
         except OSError:
             return BookingData(), _MISSING
+    else:
+        log_branch_decision(
+            logger,
+            branch="description",
+            outcome="EXTRACTED",
+            reason="llm_ok",
+            file=path.name,
+        )
+        return booking, description_reader.last_raw_text
+
+
+def _ocr_read_failure_document(path: Path, *, error_type: str) -> DocumentData:
+    """Build UNCERTAIN / ocr_read_failure DocumentData for a failed image read.
+
+    :param path: Document path that exists but could not be processed.
+    :param error_type: Exception class name for logging/metadata.
+    :return: DocumentData with HITL and ``ocr_read_failure`` reason.
+    """
+    return DocumentData.model_validate({
+        "decision": DECISION_UNCERTAIN,
+        "reason": REASON_OCR_READ_FAILURE,
+        "raw_text": _MISSING,
+        "fields": {
+            "decision": DECISION_UNCERTAIN,
+            "reason": REASON_OCR_READ_FAILURE,
+            "error_type": error_type,
+        },
+        "metadata": DocumentMetaData(
+            source_file=path.name,
+            faulty_extraction=True,
+            human_in_the_loop=True,
+            failure_reasons=[REASON_OCR_READ_FAILURE],
+        ),
+    })
 
 
 def _read_documents(
     document_paths: list[str],
     document_reader: DocumentReader,
 ) -> list[DocumentData]:
-    """Run DocumentReader on each document path; skip failures.
+    """Run DocumentReader on each document path.
+
+    Missing files are skipped. Present files that fail to read (except YOLO
+    ``SignatureDetectionError``, which always re-raises) become UNCERTAIN
+    ``ocr_read_failure`` with ``human_in_the_loop``.
 
     :param document_paths: Paths to configured document formats.
     :param document_reader: DocumentReader instance.
-    :return: Successfully extracted DocumentData entries.
+    :return: Successfully extracted DocumentData entries plus OCR-read failures.
+    :raises SignatureDetectionError: YOLO signature verify failed (no silent skip).
     """
     documents: list[DocumentData] = []
     for path_str in document_paths:
         path = Path(path_str)
-        try:
-            parsed = document_reader.read(path)
-        except Exception as exc:
+        if not path.is_file():
             log_branch_decision(
                 logger,
                 branch="document",
                 outcome="SKIP",
-                reason="read_failed",
+                reason="missing_file",
+                level=logging.WARNING,
+                file=path.name,
+            )
+            continue
+        try:
+            parsed = cast(DocumentData, document_reader.read(path))
+        except SignatureDetectionError:
+            raise
+        except FileNotFoundError:
+            log_branch_decision(
+                logger,
+                branch="document",
+                outcome="SKIP",
+                reason="missing_file",
+                level=logging.WARNING,
+                file=path.name,
+            )
+            continue
+        except Exception as exc:
+            log_branch_decision(
+                logger,
+                branch="document",
+                outcome="UNCERTAIN",
+                reason=REASON_OCR_READ_FAILURE,
                 level=logging.WARNING,
                 file=path.name,
                 error=type(exc).__name__,
             )
+            documents.append(_ocr_read_failure_document(path, error_type=type(exc).__name__))
             continue
-        assert isinstance(parsed, DocumentData)
         documents.append(parsed)
         decision, reason = _document_decision_fields(parsed)
-        level = logging.WARNING if decision == _FRAUD_DENY else logging.INFO
+        level = logging.WARNING if decision == DECISION_DENY else logging.INFO
         confidence = parsed.metadata.extraction_probability
         confidence_text = (
             f"{float(confidence):.3f}"
@@ -312,7 +448,7 @@ def _claim_document_summary(bundle: ClaimBundle) -> dict[str, int]:
     extracted = 0
     for document in bundle.documents:
         decision, _reason = _document_decision_fields(document)
-        if decision == _FRAUD_DENY:
+        if decision == DECISION_DENY:
             fraud_denies += 1
         elif document.metadata.human_in_the_loop:
             hitl += 1
@@ -329,29 +465,42 @@ def _claim_document_summary(bundle: ClaimBundle) -> dict[str, int]:
 def _predicted_answer_from_bundle(bundle: ClaimBundle) -> GroundTruth | None:
     """Derive a pipeline prediction from document-level decisions.
 
-    Prefers any ``DENY`` (e.g. Benford fraud) over other predicted labels.
+    Prefers any ``DENY`` (e.g. Benford fraud) over ``UNCERTAIN`` (e.g. OCR retry
+    failure), then other predicted labels.
     Returns None when documents carry no predicted decision.
+    Sets ``human_in_the_loop`` when any document metadata flagged review.
 
     :param bundle: Populated claim bundle.
     :return: Predicted GroundTruth, or None when nothing was decided yet.
     """
+    hitl = any(document.metadata.human_in_the_loop for document in bundle.documents)
     predictions: list[GroundTruth] = []
     for document in bundle.documents:
         decision, reason = _document_decision_fields(document)
-        if decision not in _PREDICTABLE_DECISIONS:
+        if decision not in PREDICTABLE_DECISIONS:
             continue
         explanation: str | float = reason
         chi_squared = document.fields.get("benford_chi_squared")
-        if reason == "fraud" and chi_squared is not None:
+        if reason == REASON_FRAUD and chi_squared is not None:
             explanation = f"fraud (benford chi_squared={chi_squared})"
-        predictions.append(GroundTruth(decision=decision, explanation=explanation))
+        predictions.append(
+            GroundTruth(
+                decision=decision,
+                explanation=explanation,
+                human_in_the_loop=hitl or document.metadata.human_in_the_loop,
+            )
+        )
 
     if not predictions:
         return None
     for prediction in predictions:
-        if prediction.decision == _FRAUD_DENY:
+        if prediction.decision == DECISION_DENY:
+            return prediction
+    for prediction in predictions:
+        if prediction.decision == "UNCERTAIN":
             return prediction
     return predictions[0]
+
 
 def _process_single_claim(
     claim_dir: Path,
@@ -388,9 +537,7 @@ def _process_single_claim(
 
     if document_reader is None:
         format_converter = FormatConverter(source_formats=prep.document_formats)
-        benford_checker = (
-            BenfordLawChecker(config.benford) if config.benford.enabled else None
-        )
+        benford_checker = BenfordLawChecker(config.benford) if config.benford.enabled else None
         document_reader = DocumentReader(
             document_formats=prep.document_formats,
             confidence_threshold=prep.confidence_threshold,
@@ -475,6 +622,6 @@ def run_pipeline(config: AppConfig, **reader_overrides: Any) -> list[ClaimBundle
                 claim=claim_dir.name,
                 error=type(exc).__name__,
             )
-            logger.exception("Failed to process %s: %s", claim_dir.name, exc)
+            logger.exception("Failed to process %s", claim_dir.name)
 
     return bundles

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -15,45 +14,39 @@ from compliance.llm.chat import ChatFn
 from compliance.llm.checker import Checker
 from compliance.llm.classifier import CaseClassifier, ClassificationResult
 from compliance.models.claim import GroundTruth
-from compliance.preprocessing.claim_batch import _discover_claim_folders
-from compliance.preprocessing.markdown import MarkdownPreprocessor
-from compliance.workflows.pipeline import _is_claim_folder, _validate_claim_dir_name
+from compliance.models.decisions import (
+    DECISION_APPROVE,
+    DECISION_DENY,
+    DECISION_UNCERTAIN,
+)
+from compliance.preprocessing.claim_batch import (
+    _discover_claim_folders,
+    _is_claim_folder,
+    _validate_claim_dir_name,
+)
+from compliance.workflows.claim_dates import (
+    _departure_beyond_days,
+    _reference_today,
+    _suspicious_dating,
+)
 from compliance.workflows.predicted_answer_io import write_analysis_predicted_answer
 
 logger = logging.getLogger(__name__)
 
-_DECISION_APPROVE = "APPROVE"
-_DECISION_DENY = "DENY"
-_DECISION_UNCERTAIN = "UNCERTAIN"
-
-# Calendar-date token patterns (order: ISO first, then day-first numerics, then English).
-_DATE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
-_DATE_DMY = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
-_DATE_DMONTH_Y = re.compile(
-    r"\b(\d{1,2})\s+"
-    r"(January|February|March|April|May|June|July|August|September|October|"
-    r"November|December)\s+(\d{4})\b",
-    re.IGNORECASE,
+# Checker and gate booleans copied into analysis_result.json, in payload key order.
+_STATE_BOOLEAN_KEYS: tuple[str, ...] = (
+    "checker_containment",
+    "checker_contradicts",
+    "identity_check",
+    "identity_unclear",
+    "document_has_signature",
+    "signature_check",
+    "healthy_check",
+    "checker_document_not_authentic",
+    "checker_incomplete_document",
+    "departure_within_days",
+    "checker_suspicious_dating",
 )
-_DATE_MONTH_D_Y = re.compile(
-    r"\b(January|February|March|April|May|June|July|August|September|October|"
-    r"November|December)\s+(\d{1,2}),?\s+(\d{4})\b",
-    re.IGNORECASE,
-)
-_MONTH_NUM: dict[str, int] = {
-    "january": 1,
-    "february": 2,
-    "march": 3,
-    "april": 4,
-    "may": 5,
-    "june": 6,
-    "july": 7,
-    "august": 8,
-    "september": 9,
-    "october": 10,
-    "november": 11,
-    "december": 12,
-}
 
 
 class ClaimAnalysisState(TypedDict, total=False):
@@ -79,14 +72,14 @@ class ClaimAnalysisState(TypedDict, total=False):
         fails (medical/hospital docs only).
     :param checker_incomplete_document: True when required medical fields
         (discharge/diagnosis/condition) are missing (medical/hospital docs only).
-    :param departure_within_days: True when departure is within the configured
-        day window of reference today (deterministic UNCERTAIN).
-    :param multiple_document_dates: True when OCR supporting_document text has
-        two or more distinct calendar days (deterministic UNCERTAIN).
+    :param departure_within_days: True on the medical path when departure is
+        farther than the configured day window from reference today
+        (deterministic UNCERTAIN — recovery / ability-to-fly still unclear).
     :param checker_suspicious_dating: True when OCR dating is implausible
         (year skew vs reference today, or issue/stamp before care window).
-    :param human_in_the_loop: True when OCR metadata already flagged review, or any
-        classifier returned ``False`` (confident none-of-the-above).
+    :param human_in_the_loop: True when OCR metadata already flagged review, any
+        classifier returned ``False``, or analysis decision is UNCERTAIN
+        (checker dating / departure / identity unclear, coverage abstention).
     """
 
     claim_id: str
@@ -107,206 +100,8 @@ class ClaimAnalysisState(TypedDict, total=False):
     checker_document_not_authentic: bool
     checker_incomplete_document: bool
     departure_within_days: bool
-    multiple_document_dates: bool
     checker_suspicious_dating: bool
     human_in_the_loop: bool
-
-
-def _safe_date(year: int, month: int, day: int) -> date | None:
-    try:
-        return date(year, month, day)
-    except ValueError:
-        return None
-
-
-def _parse_calendar_date(raw: str) -> date | None:
-    """Parse the first calendar date from a booking/OCR string.
-
-    Supports ISO ``YYYY-MM-DD``, day-first ``DD/MM/YYYY`` (also ``-`` / ``.``),
-    and English month names. Trailing time suffixes are ignored (ISO match first).
-
-    :param raw: Free-text value that may contain a date.
-    :return: Parsed ``date``, or None when unparseable.
-    """
-    if not raw or not isinstance(raw, str):
-        return None
-    text = raw.strip()
-    match = _DATE_ISO.search(text)
-    if match:
-        return _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-    match = _DATE_DMONTH_Y.search(text)
-    if match:
-        return _safe_date(
-            int(match.group(3)),
-            _MONTH_NUM[match.group(2).lower()],
-            int(match.group(1)),
-        )
-    match = _DATE_MONTH_D_Y.search(text)
-    if match:
-        return _safe_date(
-            int(match.group(3)),
-            _MONTH_NUM[match.group(1).lower()],
-            int(match.group(2)),
-        )
-    match = _DATE_DMY.search(text)
-    if match:
-        return _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
-    return None
-
-
-def _unique_calendar_dates(text: str) -> set[date]:
-    """Collect distinct calendar days mentioned in free text.
-
-    :param text: OCR or narrative text that may contain multiple date tokens.
-    :return: Set of successfully parsed calendar dates.
-    """
-    if not text:
-        return set()
-    found: set[date] = set()
-    for match in _DATE_ISO.finditer(text):
-        parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-        if parsed is not None:
-            found.add(parsed)
-    for match in _DATE_DMONTH_Y.finditer(text):
-        parsed = _safe_date(
-            int(match.group(3)),
-            _MONTH_NUM[match.group(2).lower()],
-            int(match.group(1)),
-        )
-        if parsed is not None:
-            found.add(parsed)
-    for match in _DATE_MONTH_D_Y.finditer(text):
-        parsed = _safe_date(
-            int(match.group(3)),
-            _MONTH_NUM[match.group(1).lower()],
-            int(match.group(2)),
-        )
-        if parsed is not None:
-            found.add(parsed)
-    for match in _DATE_DMY.finditer(text):
-        parsed = _safe_date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
-        if parsed is not None:
-            found.add(parsed)
-    return found
-
-
-def _booking_fields(supporting_documents_text: str) -> dict[str, str]:
-    """Extract canonical BookingData fields from booking markdown.
-
-    :param supporting_documents_text: ``supporting_documents.md`` contents.
-    :return: Dict of BookingData field name → string value.
-    """
-    if not supporting_documents_text:
-        return {}
-    return MarkdownPreprocessor().preprocess(supporting_documents_text)
-
-
-def _reference_today(supporting_documents_text: str, *, fallback: date) -> date:
-    """Resolve reference today from booking ``current_date``, else ``fallback``.
-
-    :param supporting_documents_text: Booking markdown text.
-    :param fallback: Clock date when booking has no parseable current_date.
-    :return: Calendar date used as the proximity reference.
-    """
-    fields = _booking_fields(supporting_documents_text)
-    current_raw = fields.get("current_date")
-    if current_raw:
-        parsed = _parse_calendar_date(str(current_raw))
-        if parsed is not None:
-            return parsed
-    return fallback
-
-
-def _departure_within_days(
-    *,
-    supporting_documents_text: str,
-    description_text: str,
-    today: date,
-    within_days: int,
-) -> bool:
-    """True when departure is within ``within_days`` of ``today`` (inclusive).
-
-    Departure source priority: booking markdown ``departure`` via
-    ``MarkdownPreprocessor``; else first parseable date in ``description_text``.
-    Unparseable departure → False.
-
-    :param supporting_documents_text: Booking/internal markdown.
-    :param description_text: Claim narrative fallback for departure date.
-    :param today: Reference today (injected; pipeline resolves from booking).
-    :param within_days: Inclusive absolute day threshold from config.
-    :return: Whether proximity UNCERTAIN should fire.
-    """
-    fields = _booking_fields(supporting_documents_text)
-    departure: date | None = None
-    raw_dep = fields.get("departure")
-    if raw_dep:
-        departure = _parse_calendar_date(str(raw_dep))
-    if departure is None:
-        departure = _parse_calendar_date(description_text)
-    if departure is None:
-        return False
-    return abs((departure - today).days) <= within_days
-
-
-def _has_multiple_document_dates(supporting_document_text: str) -> bool:
-    """True when medical OCR text contains two or more distinct calendar days.
-
-    :param supporting_document_text: ``supporting_document.md`` OCR markdown only.
-    :return: Whether multiple-document-dates UNCERTAIN should fire.
-    """
-    return len(_unique_calendar_dates(supporting_document_text)) >= 2
-
-
-_ISSUE_STAMP_HINT = re.compile(
-    r"(?i)\b(issue|issued|stamp|stamped|émission|emision|emisión)\b"
-)
-_CARE_WINDOW_HINT = re.compile(
-    r"(?i)\b(care|admission|visit|discharge|consulta|hospitaliz|"
-    r"tratamiento|treatment|attending)\b"
-)
-
-
-def _suspicious_dating(
-    supporting_document_text: str,
-    *,
-    today: date,
-    max_year_delta: int,
-) -> bool:
-    """True when OCR dating is implausible vs reference today or care window.
-
-    Uses existing ``_unique_calendar_dates`` / ``_parse_calendar_date`` only —
-    no ad-hoc date parser. Fires when:
-    - an OCR calendar date year differs from ``today.year`` by at least
-      ``max_year_delta`` (inclusive) and is either in the future or the OCR
-      text has issue/stamp cues (plain past DOB-style dates without those cues
-      do not fire), or
-    - issue/stamp wording co-occurs with care-window wording and at least two
-      distinct OCR dates (issue/stamp before care signal, claim 13-shaped).
-
-    :param supporting_document_text: Medical/supporting OCR markdown.
-    :param today: Reference today (booking ``current_date`` or clock).
-    :param max_year_delta: Inclusive absolute year threshold from config.
-    :return: Whether suspicious-dating UNCERTAIN should fire.
-    """
-    dates = _unique_calendar_dates(supporting_document_text)
-    if not dates:
-        return False
-    has_issue_stamp = _ISSUE_STAMP_HINT.search(supporting_document_text) is not None
-    for d in dates:
-        year_delta = abs(d.year - today.year)
-        if year_delta < max_year_delta:
-            continue
-        # Future dates, or issue/stamp-labeled past dates with large year skew.
-        # Plain DOB-style past dates without issue/stamp cues do not fire.
-        if d.year > today.year or has_issue_stamp:
-            return True
-    if (
-        len(dates) >= 2
-        and has_issue_stamp
-        and _CARE_WINDOW_HINT.search(supporting_document_text) is not None
-    ):
-        return True
-    return False
 
 
 class ClaimPipeline:
@@ -335,19 +130,15 @@ class ClaimPipeline:
 
         :return: Compiled LangGraph ready for one-shot ``invoke``.
         """
-        builder: StateGraph[ClaimAnalysisState, None, ClaimAnalysisState, ClaimAnalysisState] = (
-            StateGraph(ClaimAnalysisState)
+        builder: StateGraph[ClaimAnalysisState, None, ClaimAnalysisState, ClaimAnalysisState] = StateGraph(
+            ClaimAnalysisState
         )
         builder.add_node("load_artifacts", self._load_artifacts_node)
         builder.add_node("classify_coverage", self._classify_coverage_node)
         builder.add_node("classify_reason", self._classify_reason_node)
-        builder.add_node(
-            "classify_cancel_document", self._classify_cancel_document_node
-        )
+        builder.add_node("classify_cancel_document", self._classify_cancel_document_node)
         builder.add_node("classify_pe_document", self._classify_pe_document_node)
-        builder.add_node(
-            "classify_missed_document", self._classify_missed_document_node
-        )
+        builder.add_node("classify_missed_document", self._classify_missed_document_node)
         builder.add_node("run_checker", self._run_checker_node)
         builder.add_node("persist", self._persist_node)
 
@@ -458,9 +249,7 @@ class ClaimPipeline:
                     claim=claim_dir.name,
                     error=type(exc).__name__,
                 )
-                logger.exception(
-                    "Failed to analyze %s: %s", claim_dir.name, type(exc).__name__
-                )
+                logger.exception("Failed to analyze %s: %s", claim_dir.name, type(exc).__name__)
         return written
 
     def _route_after_coverage(
@@ -531,9 +320,7 @@ class ClaimPipeline:
         input_root = self._claim_input_root(state)
         texts = self._loaded_claim_texts(claim_id, input_root=input_root)
         has_signature = self._document_has_signature(claim_id, input_root=input_root)
-        human_in_the_loop = self._document_human_in_the_loop(
-            claim_id, input_root=input_root
-        )
+        human_in_the_loop = self._document_human_in_the_loop(claim_id, input_root=input_root)
         log_branch_decision(
             logger,
             branch="load_artifacts",
@@ -573,12 +360,8 @@ class ClaimPipeline:
         )
         return {"reason_labels": list(result.labels)}
 
-    def _classify_cancel_document_node(
-        self, state: ClaimAnalysisState
-    ) -> dict[str, object]:
-        result = self._cancellation_document_classification(
-            state["supporting_document_text"]
-        )
+    def _classify_cancel_document_node(self, state: ClaimAnalysisState) -> dict[str, object]:
+        result = self._cancellation_document_classification(state["supporting_document_text"])
         log_branch_decision(
             logger,
             branch="classify_cancel_document",
@@ -588,12 +371,8 @@ class ClaimPipeline:
         )
         return {"document_labels": list(result.labels)}
 
-    def _classify_pe_document_node(
-        self, state: ClaimAnalysisState
-    ) -> dict[str, object]:
-        result = self._personal_effects_document_classification(
-            state["supporting_document_text"]
-        )
+    def _classify_pe_document_node(self, state: ClaimAnalysisState) -> dict[str, object]:
+        result = self._personal_effects_document_classification(state["supporting_document_text"])
         log_branch_decision(
             logger,
             branch="classify_pe_document",
@@ -603,12 +382,8 @@ class ClaimPipeline:
         )
         return {"document_labels": list(result.labels)}
 
-    def _classify_missed_document_node(
-        self, state: ClaimAnalysisState
-    ) -> dict[str, object]:
-        result = self._missed_departure_document_classification(
-            state["supporting_document_text"]
-        )
+    def _classify_missed_document_node(self, state: ClaimAnalysisState) -> dict[str, object]:
+        result = self._missed_departure_document_classification(state["supporting_document_text"])
         log_branch_decision(
             logger,
             branch="classify_missed_document",
@@ -629,16 +404,8 @@ class ClaimPipeline:
             run_medical_document_checks=run_medical_document_checks,
         )
         signature_check = self._signature_check_result(state)
-        early_uncertain = (
-            bool(results.get("departure_within_days"))
-            or bool(results.get("multiple_document_dates"))
-            or bool(results.get("checker_suspicious_dating"))
-        )
-        reason = (
-            "date_uncertain_skip_llm"
-            if early_uncertain
-            else "containment_contradicts_identity_signature_healthy"
-        )
+        early_uncertain = bool(results.get("departure_within_days")) or bool(results.get("checker_suspicious_dating"))
+        reason = "date_uncertain_skip_llm" if early_uncertain else "containment_contradicts_identity_signature_healthy"
         log_branch_decision(
             logger,
             branch="run_checker",
@@ -649,17 +416,13 @@ class ClaimPipeline:
             identity_unclear=results.get("identity_unclear"),
             signature_check=signature_check,
             healthy_check=results.get("healthy_check"),
-            checker_document_not_authentic=results.get(
-                "checker_document_not_authentic"
-            ),
+            checker_document_not_authentic=results.get("checker_document_not_authentic"),
             checker_incomplete_document=results.get("checker_incomplete_document"),
             departure_within_days=results.get("departure_within_days"),
-            multiple_document_dates=results.get("multiple_document_dates"),
             checker_suspicious_dating=results.get("checker_suspicious_dating"),
         )
         payload: dict[str, object] = {
             "departure_within_days": results["departure_within_days"],
-            "multiple_document_dates": results["multiple_document_dates"],
             "signature_check": signature_check,
         }
         if results.get("checker_suspicious_dating"):
@@ -672,18 +435,16 @@ class ClaimPipeline:
             payload["healthy_check"] = results["healthy_check"]
             payload["checker_suspicious_dating"] = results["checker_suspicious_dating"]
             if "checker_document_not_authentic" in results:
-                payload["checker_document_not_authentic"] = results[
-                    "checker_document_not_authentic"
-                ]
+                payload["checker_document_not_authentic"] = results["checker_document_not_authentic"]
             if "checker_incomplete_document" in results:
-                payload["checker_incomplete_document"] = results[
-                    "checker_incomplete_document"
-                ]
+                payload["checker_incomplete_document"] = results["checker_incomplete_document"]
         return payload
 
     def _persist_node(self, state: ClaimAnalysisState) -> dict[str, object]:
         hitl = self._resolved_human_in_the_loop(state)
-        if hitl and self._classifier_returned_false(state):
+        # Analysis-driven HITL (classifier abstain or checker UNCERTAIN) must
+        # also flip document_metadata; preprocess-HITL is already stored there.
+        if hitl and not bool(state.get("human_in_the_loop")):
             self._persist_human_in_the_loop_metadata(state)
         path = self._written_analysis_result(state)
         predicted_path = self._written_predicted_answer(state)
@@ -699,9 +460,7 @@ class ClaimPipeline:
         )
         return {"human_in_the_loop": hitl}
 
-    def _loaded_claim_texts(
-        self, claim_id: str, *, input_root: Path | None = None
-    ) -> dict[str, str]:
+    def _loaded_claim_texts(self, claim_id: str, *, input_root: Path | None = None) -> dict[str, str]:
         """Read description and supporting markdown from a claim artifact folder.
 
         :param claim_id: Validated claim folder segment.
@@ -714,23 +473,15 @@ class ClaimPipeline:
         claim_in = input_root if input_root is not None else self.preprocessed_root / claim_id
         supporting_documents_path = claim_in / artifacts.supporting_documents
         supporting_documents_text = (
-            supporting_documents_path.read_text(encoding="utf-8")
-            if supporting_documents_path.is_file()
-            else ""
+            supporting_documents_path.read_text(encoding="utf-8") if supporting_documents_path.is_file() else ""
         )
         return {
-            "description_text": (claim_in / artifacts.description).read_text(
-                encoding="utf-8"
-            ),
-            "supporting_document_text": (
-                claim_in / artifacts.supporting_document
-            ).read_text(encoding="utf-8"),
+            "description_text": (claim_in / artifacts.description).read_text(encoding="utf-8"),
+            "supporting_document_text": (claim_in / artifacts.supporting_document).read_text(encoding="utf-8"),
             "supporting_documents_text": supporting_documents_text,
         }
 
-    def _document_has_signature(
-        self, claim_id: str, *, input_root: Path | None = None
-    ) -> bool:
+    def _document_has_signature(self, claim_id: str, *, input_root: Path | None = None) -> bool:
         """Read has_signature from document_metadata.json (any document True).
 
         :param claim_id: Validated claim folder segment.
@@ -740,9 +491,7 @@ class ClaimPipeline:
         documents = self._document_metadata_entries(claim_id, input_root=input_root)
         return any(bool(entry.get("has_signature")) for entry in documents)
 
-    def _document_human_in_the_loop(
-        self, claim_id: str, *, input_root: Path | None = None
-    ) -> bool:
+    def _document_human_in_the_loop(self, claim_id: str, *, input_root: Path | None = None) -> bool:
         """Read human_in_the_loop from document_metadata.json (any document True).
 
         :param claim_id: Validated claim folder segment.
@@ -752,6 +501,26 @@ class ClaimPipeline:
         documents = self._document_metadata_entries(claim_id, input_root=input_root)
         return any(bool(entry.get("human_in_the_loop")) for entry in documents)
 
+    def _document_ocr_failure(self, claim_id: str, *, input_root: Path | None = None) -> str | None:
+        """Return preprocess OCR-failure reason if any document was tagged.
+
+        :param claim_id: Validated claim folder segment.
+        :param input_root: Directory holding artifacts; defaults to preprocessed claim.
+        :return: ``ocr_read_failure`` or ``ocr_failure`` when present; else None.
+        """
+        documents = self._document_metadata_entries(claim_id, input_root=input_root)
+        found: set[str] = set()
+        for entry in documents:
+            reasons = entry.get("failure_reasons") or []
+            for code in ("ocr_read_failure", "ocr_failure"):
+                if code in reasons:
+                    found.add(code)
+        if "ocr_read_failure" in found:
+            return "ocr_read_failure"
+        if "ocr_failure" in found:
+            return "ocr_failure"
+        return None
+
     @staticmethod
     def _classifier_returned_false(state: ClaimAnalysisState) -> bool:
         """True when any stage classifier selected the confident-negative ``False`` label.
@@ -759,20 +528,23 @@ class ClaimPipeline:
         :param state: Graph state with coverage / reason / document label codes.
         :return: Whether ``False`` appears in any classifier output.
         """
-        for key in ("coverage_labels", "reason_labels", "document_labels"):
-            if "False" in (state.get(key) or []):
-                return True
-        return False
+        return any("False" in (state.get(key) or []) for key in ("coverage_labels", "reason_labels", "document_labels"))
 
     def _resolved_human_in_the_loop(self, state: ClaimAnalysisState) -> bool:
-        """HITL from preprocess metadata or any classifier ``False`` label.
+        """HITL from preprocess, classifier ``False``, or any UNCERTAIN decision.
+
+        Checker gates that emit UNCERTAIN (suspicious dating, far departure,
+        identity unclear, coverage abstention, OCR failure) always require
+        operator review — same as classifier abstention.
 
         :param state: Final (or mid-pipeline) graph state.
         :return: Whether a human should review the claim.
         """
         if bool(state.get("human_in_the_loop")):
             return True
-        return self._classifier_returned_false(state)
+        if self._classifier_returned_false(state):
+            return True
+        return self._decision_from_state(state).decision == DECISION_UNCERTAIN
 
     def _persist_human_in_the_loop_metadata(self, state: ClaimAnalysisState) -> None:
         """Set ``human_in_the_loop: true`` on every document_metadata entry.
@@ -791,18 +563,19 @@ class ClaimPipeline:
             json.dumps({"documents": updated}, indent=2) + "\n",
             encoding="utf-8",
         )
+        reason = "classifier_false"
+        if not self._classifier_returned_false(state):
+            reason = self._decision_from_state(state).explanation or "uncertain"
         log_branch_decision(
             logger,
             branch="human_in_the_loop",
             outcome="FLAGGED",
-            reason="classifier_false",
+            reason=reason,
             claim=claim_id,
             path=str(path),
         )
 
-    def _document_metadata_entries(
-        self, claim_id: str, *, input_root: Path | None = None
-    ) -> list[dict[str, object]]:
+    def _document_metadata_entries(self, claim_id: str, *, input_root: Path | None = None) -> list[dict[str, object]]:
         """Load document metadata entries for a claim folder.
 
         :param claim_id: Validated claim folder segment.
@@ -831,9 +604,7 @@ class ClaimPipeline:
         """
         if not self._is_cancellation_coverage(state):
             return False
-        required = set(
-            self._config.analysis.required_documents.signature_required_codes
-        )
+        required = set(self._config.analysis.required_documents.signature_required_codes)
         if not required:
             return False
         return bool(self._classified_document_codes(state) & required)
@@ -850,9 +621,7 @@ class ClaimPipeline:
         """
         if not self._is_cancellation_coverage(state):
             return False
-        required = set(
-            self._config.analysis.required_documents.identity_required_codes
-        )
+        required = set(self._config.analysis.required_documents.identity_required_codes)
         if not required:
             return False
         return bool(self._classified_document_codes(state) & required)
@@ -879,9 +648,7 @@ class ClaimPipeline:
         """
         if not self._is_cancellation_coverage(state):
             return False
-        required = set(
-            self._config.analysis.required_documents.signature_required_codes
-        )
+        required = set(self._config.analysis.required_documents.signature_required_codes)
         if not required:
             return False
         return bool(self._classified_document_codes(state) & required)
@@ -908,38 +675,24 @@ class ClaimPipeline:
             return True
         return bool(state.get("document_has_signature"))
 
-    def _coverage_classification(
-        self, description_text: str
-    ) -> ClassificationResult:
-        return self._stage_classifier(self._config.analysis.coverage).classify(
-            description_text
-        )
+    def _coverage_classification(self, description_text: str) -> ClassificationResult:
+        return self._stage_classifier(self._config.analysis.coverage).classify(description_text)
 
     def _reason_classification(self, description_text: str) -> ClassificationResult:
-        return self._stage_classifier(
-            self._config.analysis.cancellation_reason
-        ).classify(description_text)
+        return self._stage_classifier(self._config.analysis.cancellation_reason).classify(description_text)
 
-    def _cancellation_document_classification(
-        self, supporting_document_text: str
-    ) -> ClassificationResult:
-        return self._stage_classifier(
-            self._config.analysis.cancellation_document
-        ).classify(supporting_document_text)
+    def _cancellation_document_classification(self, supporting_document_text: str) -> ClassificationResult:
+        return self._stage_classifier(self._config.analysis.cancellation_document).classify(supporting_document_text)
 
-    def _personal_effects_document_classification(
-        self, supporting_document_text: str
-    ) -> ClassificationResult:
-        return self._stage_classifier(
-            self._config.analysis.personal_effects_document
-        ).classify(supporting_document_text)
+    def _personal_effects_document_classification(self, supporting_document_text: str) -> ClassificationResult:
+        return self._stage_classifier(self._config.analysis.personal_effects_document).classify(
+            supporting_document_text
+        )
 
-    def _missed_departure_document_classification(
-        self, supporting_document_text: str
-    ) -> ClassificationResult:
-        return self._stage_classifier(
-            self._config.analysis.missed_departure_document
-        ).classify(supporting_document_text)
+    def _missed_departure_document_classification(self, supporting_document_text: str) -> ClassificationResult:
+        return self._stage_classifier(self._config.analysis.missed_departure_document).classify(
+            supporting_document_text
+        )
 
     def _checker_results(
         self,
@@ -952,15 +705,16 @@ class ClaimPipeline:
     ) -> dict[str, bool]:
         """Run deterministic date checks, then Checker LLM modes when needed.
 
-        Always computes ``departure_within_days``, ``multiple_document_dates``,
-        and ``checker_suspicious_dating``. When any is True, returns early without
+        Always computes ``departure_within_days`` (medical path only: True when
+        |departure - today| > ``departure_uncertain_within_days``) and
+        ``checker_suspicious_dating``. When either is True, returns early without
         constructing ``Checker`` / calling chat — LLM keys are omitted from the
         result dict.
 
-        Identity compares the passenger ``name`` in ``supporting_documents.md``
-        (booking / internal record) against the patient/subject name in
-        ``supporting_document.md`` (Docling OCR). Skipped when the classified
-        document is not medical certificate / hospital admission.
+        Identity extracts booking and patient names (markdown ``name`` field and/or
+        LLM), then matches when lowercased Levenshtein distance is within
+        ``identity_max_edit_distance`` (containment short-circuit first). Skipped
+        when the classified document is not medical certificate / hospital admission.
 
         Authenticity and incomplete run only when ``run_medical_document_checks``
         is True (medical/hospital codes on cancellation coverage).
@@ -975,24 +729,29 @@ class ClaimPipeline:
         """
         checking = self._config.checking
         today = _reference_today(supporting_documents_text, fallback=date.today())
-        departure_flag = _departure_within_days(
-            supporting_documents_text=supporting_documents_text,
-            description_text=description_text,
-            today=today,
-            within_days=checking.departure_uncertain_within_days,
+        # Medical/hospital only: far departure → UNCERTAIN; near departure continues
+        # through the remaining checkers (claim-6-shaped timing uncertainty).
+        departure_flag = (
+            checking.departure_uncertain_enabled
+            and run_identity
+            and _departure_beyond_days(
+                supporting_documents_text=supporting_documents_text,
+                description_text=description_text,
+                today=today,
+                within_days=checking.departure_uncertain_within_days,
+            )
         )
-        multiple_dates_flag = _has_multiple_document_dates(supporting_document_text)
         suspicious_dating_flag = _suspicious_dating(
             supporting_document_text,
             today=today,
-            max_year_delta=checking.suspicious_dating_max_year_delta,
+            max_month_delta=checking.suspicious_dating_max_month_delta,
+            consider_within_years=checking.suspicious_dating_consider_within_years,
         )
         date_flags = {
             "departure_within_days": departure_flag,
-            "multiple_document_dates": multiple_dates_flag,
             "checker_suspicious_dating": suspicious_dating_flag,
         }
-        if departure_flag or multiple_dates_flag or suspicious_dating_flag:
+        if departure_flag or suspicious_dating_flag:
             return date_flags
 
         checker = Checker(
@@ -1004,17 +763,12 @@ class ClaimPipeline:
             authenticity_prompt=checking.authenticity_prompt,
             incomplete_prompt=checking.incomplete_prompt,
             chat_fn=self._chat_fn,
+            identity_max_edit_distance=checking.identity_max_edit_distance,
         )
-        containment = checker.check(
-            description_text, supporting_document_text, mode="containment"
-        )
-        contradicts = checker.check(
-            description_text, supporting_document_text, mode="contradicts"
-        )
+        containment = checker.check(description_text, supporting_document_text, mode="containment")
+        contradicts = checker.check(description_text, supporting_document_text, mode="contradicts")
         if run_identity:
-            identity_status = checker.check_identity(
-                supporting_documents_text, supporting_document_text
-            )
+            identity_status = checker.check_identity(supporting_documents_text, supporting_document_text)
             identity_check = identity_status == "match"
             identity_unclear = identity_status == "unclear"
         else:
@@ -1046,6 +800,15 @@ class ClaimPipeline:
             )
         return results
 
+    @staticmethod
+    def _state_boolean_flags(state: ClaimAnalysisState) -> dict[str, bool]:
+        """Checker and gate booleans present in state, in analysis_result.json key order.
+
+        :param state: Graph state to read boolean flags from.
+        :return: Dict of ``_STATE_BOOLEAN_KEYS`` present in ``state``, cast to bool.
+        """
+        return {key: bool(state.get(key)) for key in _STATE_BOOLEAN_KEYS if key in state}
+
     def _analysis_result_payload(self, state: ClaimAnalysisState) -> dict[str, object]:
         """Build the structured analysis_result.json body from graph state.
 
@@ -1066,61 +829,22 @@ class ClaimPipeline:
             "claim_id": state["claim_id"],
             "coverage_labels": analysis.coverage.resolve_label_names(coverage_codes),
             "coverage_label_codes": coverage_codes,
-            "reason_labels": analysis.cancellation_reason.resolve_label_names(
-                reason_codes
-            ),
+            "reason_labels": analysis.cancellation_reason.resolve_label_names(reason_codes),
             "reason_label_codes": reason_codes,
             "document_labels": document_stage.resolve_label_names(document_codes),
             "document_label_codes": document_codes,
         }
-        if "checker_containment" in state:
-            payload["checker_containment"] = bool(state["checker_containment"])
-        if "checker_contradicts" in state:
-            payload["checker_contradicts"] = bool(state["checker_contradicts"])
-        if "identity_check" in state:
-            payload["identity_check"] = bool(state["identity_check"])
-        if "identity_unclear" in state:
-            payload["identity_unclear"] = bool(state["identity_unclear"])
-        if "document_has_signature" in state:
-            payload["document_has_signature"] = bool(state["document_has_signature"])
-        if "signature_check" in state:
-            payload["signature_check"] = bool(state["signature_check"])
-        if "healthy_check" in state:
-            payload["healthy_check"] = bool(state["healthy_check"])
-        if "checker_document_not_authentic" in state:
-            payload["checker_document_not_authentic"] = bool(
-                state["checker_document_not_authentic"]
-            )
-        if "checker_incomplete_document" in state:
-            payload["checker_incomplete_document"] = bool(
-                state["checker_incomplete_document"]
-            )
-        if "departure_within_days" in state:
-            payload["departure_within_days"] = bool(state["departure_within_days"])
-        if "multiple_document_dates" in state:
-            payload["multiple_document_dates"] = bool(state["multiple_document_dates"])
-        if "checker_suspicious_dating" in state:
-            payload["checker_suspicious_dating"] = bool(
-                state["checker_suspicious_dating"]
-            )
+        payload.update(self._state_boolean_flags(state))
         if "document_labels" in state:
-            payload["checker_missing_documentation"] = self._is_missing_documentation(
-                state
-            )
+            payload["checker_missing_documentation"] = self._is_missing_documentation(state)
         hitl = self._resolved_human_in_the_loop(state)
         payload["human_in_the_loop"] = hitl
         decision = self._decision_from_state(state)
         payload["decision"] = decision.decision
-        payload["decision_explanation"] = (
-            decision.explanation
-            if isinstance(decision.explanation, str)
-            else None
-        )
+        payload["decision_explanation"] = decision.explanation if isinstance(decision.explanation, str) else None
         return payload
 
-    def _document_stage_for_coverage(
-        self, coverage_codes: list[str]
-    ) -> ClassificationConfig:
+    def _document_stage_for_coverage(self, coverage_codes: list[str]) -> ClassificationConfig:
         """Pick the document-stage config whose label_names match the coverage path.
 
         :param coverage_codes: Coverage codes from the coverage classifier.
@@ -1156,11 +880,7 @@ class ClaimPipeline:
             return set(acceptable)
 
         reason_abstention = analysis.cancellation_reason.abstention_labels()
-        reason_codes = [
-            code
-            for code in (state.get("reason_labels") or [])
-            if code not in reason_abstention
-        ]
+        reason_codes = [code for code in (state.get("reason_labels") or []) if code not in reason_abstention]
         by_reason = required.cancellation_by_reason
         if reason_codes and by_reason:
             acceptable: set[str] = set()
@@ -1181,11 +901,7 @@ class ClaimPipeline:
         coverage_codes = list(state.get("coverage_labels") or [])
         stage = self._document_stage_for_coverage(coverage_codes)
         abstention = stage.abstention_labels()
-        return {
-            code
-            for code in (state.get("document_labels") or [])
-            if code not in abstention
-        }
+        return {code for code in (state.get("document_labels") or []) if code not in abstention}
 
     def _is_missing_documentation(self, state: ClaimAnalysisState) -> bool:
         """True when no classified document type is acceptable for this claim.
@@ -1222,25 +938,15 @@ class ClaimPipeline:
         violated: list[str] = []
         if self._is_missing_documentation(state):
             violated.append("checker_missing_documentation")
-        if (
-            "identity_check" in state
-            and not bool(state["identity_check"])
-            and not bool(state.get("identity_unclear"))
-        ):
+        if "identity_check" in state and not bool(state["identity_check"]) and not bool(state.get("identity_unclear")):
             violated.append("identity_check")
         if "signature_check" in state and not bool(state["signature_check"]):
             violated.append("signature_check")
         if "healthy_check" in state and bool(state["healthy_check"]):
             violated.append("healthy_check")
-        if (
-            "checker_document_not_authentic" in state
-            and bool(state["checker_document_not_authentic"])
-        ):
+        if "checker_document_not_authentic" in state and bool(state["checker_document_not_authentic"]):
             violated.append("checker_document_not_authentic")
-        if (
-            "checker_incomplete_document" in state
-            and bool(state["checker_incomplete_document"])
-        ):
+        if "checker_incomplete_document" in state and bool(state["checker_incomplete_document"]):
             violated.append("checker_incomplete_document")
         if "checker_contradicts" in state and bool(state["checker_contradicts"]):
             violated.append("checker_contradicts")
@@ -1250,9 +956,10 @@ class ClaimPipeline:
         """Derive APPROVE/DENY/UNCERTAIN for evaluator-facing predicted_answer.
 
         Precedence (locked):
-        1. Coverage abstention → UNCERTAIN ``coverage_false_label``
-        2. ``departure_within_days`` → UNCERTAIN (before DENY)
-        3. ``multiple_document_dates`` → UNCERTAIN (before DENY)
+        1. Preprocess OCR failure (``ocr_read_failure`` / ``ocr_failure``) → UNCERTAIN
+        2. Coverage abstention → UNCERTAIN ``coverage_false_label``
+        3. ``departure_within_days`` → UNCERTAIN (medical; departure farther than
+           ``n`` days — before DENY)
         4. ``checker_suspicious_dating`` → UNCERTAIN (before DENY)
         5. ``_violated_checkers`` non-empty → DENY
         6. ``identity_unclear`` → UNCERTAIN
@@ -1266,41 +973,43 @@ class ClaimPipeline:
         :param state: Final graph state.
         :return: GroundTruth decision written beside analysis_result.
         """
+        claim_id = state.get("claim_id") or ""
+        ocr_failure_reason = self._document_ocr_failure(claim_id) if claim_id else None
+        if ocr_failure_reason is not None:
+            return GroundTruth(
+                decision=DECISION_UNCERTAIN,
+                explanation=ocr_failure_reason,
+            )
         coverage = list(state.get("coverage_labels") or [])
         abstention = self._config.analysis.coverage.abstention_labels()
         if coverage and set(coverage) <= abstention:
             return GroundTruth(
-                decision=_DECISION_UNCERTAIN,
+                decision=DECISION_UNCERTAIN,
                 explanation="coverage_false_label",
             )
         if bool(state.get("departure_within_days")):
             return GroundTruth(
-                decision=_DECISION_UNCERTAIN,
+                decision=DECISION_UNCERTAIN,
                 explanation="departure_within_days",
-            )
-        if bool(state.get("multiple_document_dates")):
-            return GroundTruth(
-                decision=_DECISION_UNCERTAIN,
-                explanation="multiple_document_dates",
             )
         if bool(state.get("checker_suspicious_dating")):
             return GroundTruth(
-                decision=_DECISION_UNCERTAIN,
+                decision=DECISION_UNCERTAIN,
                 explanation="checker_suspicious_dating",
             )
         violated = self._violated_checkers(state)
         if violated:
             return GroundTruth(
-                decision=_DECISION_DENY,
+                decision=DECISION_DENY,
                 explanation=",".join(violated),
             )
         if "identity_unclear" in state and bool(state["identity_unclear"]):
             return GroundTruth(
-                decision=_DECISION_UNCERTAIN,
+                decision=DECISION_UNCERTAIN,
                 explanation="identity_unclear",
             )
         return GroundTruth(
-            decision=_DECISION_APPROVE,
+            decision=DECISION_APPROVE,
             explanation="checker_consistent",
         )
 
@@ -1321,8 +1030,9 @@ class ClaimPipeline:
     def _written_predicted_answer(self, state: ClaimAnalysisState) -> Path:
         """Persist predicted_answer.json for the evaluator from analysis decision.
 
-        Includes ``human_in_the_loop`` from preprocess metadata and/or analysis
-        classifier ``False`` abstention so operators see the flag on the prediction.
+        Includes ``human_in_the_loop`` from preprocess metadata, classifier
+        ``False`` abstention, or any analysis UNCERTAIN (checker dating /
+        departure / identity unclear) so operators see the flag on the prediction.
 
         :param state: Final ClaimAnalysisState.
         :return: Path to the written predicted_answer.json file.
@@ -1330,9 +1040,7 @@ class ClaimPipeline:
         claim_id = state["claim_id"]
         _validate_claim_dir_name(claim_id)
         path = self._predicted_answer_path(claim_id)
-        return write_analysis_predicted_answer(
-            path, self._predicted_answer_decision(state)
-        )
+        return write_analysis_predicted_answer(path, self._predicted_answer_decision(state))
 
     def _predicted_answer_decision(self, state: ClaimAnalysisState) -> GroundTruth:
         """Build evaluator GroundTruth from analysis decision + resolved HITL.
@@ -1345,11 +1053,7 @@ class ClaimPipeline:
         )
 
     def _predicted_answer_path(self, claim_id: str) -> Path:
-        return (
-            self.results_root
-            / claim_id
-            / self._config.preprocessing.artifacts.predicted_answer
-        )
+        return self.results_root / claim_id / self._config.preprocessing.artifacts.predicted_answer
 
     def _claim_input_root(self, state: ClaimAnalysisState) -> Path:
         """Resolve the artifact directory for ``state`` (input_root or preprocessed).
@@ -1362,11 +1066,7 @@ class ClaimPipeline:
         return self.preprocessed_root / state["claim_id"]
 
     def _analysis_result_path(self, claim_id: str) -> Path:
-        return (
-            self.results_root
-            / claim_id
-            / self._config.preprocessing.artifacts.analysis_result
-        )
+        return self.results_root / claim_id / self._config.preprocessing.artifacts.analysis_result
 
     def _stage_classifier(self, stage: ClassificationConfig) -> CaseClassifier:
         return CaseClassifier(

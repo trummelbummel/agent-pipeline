@@ -106,18 +106,29 @@ class CheckingConfig(BaseModel):
     :param model: LLM model name used when deterministic containment misses.
     :param containment_prompt: System prompt for containment / entailment checks.
     :param contradicts_prompt: System prompt for contradiction checks.
-    :param identity_prompt: System prompt for claimant-name vs document-name checks.
+    :param identity_prompt: System prompt that extracts a person name as JSON
+        ``{"name": "..."}`` / ``{"name": null}`` for identity edit-distance matching.
     :param healthy_prompt: System prompt for healthy / fit certificate detection.
     :param authenticity_prompt: System prompt for document authenticity / format
         checks (True = not authentic / wrong format → violation).
     :param incomplete_prompt: System prompt for incomplete medical-document field
         checks (True = required fields missing → violation).
-    :param departure_uncertain_within_days: Inclusive absolute day window; when
-        departure is within this many days of reference today, analysis yields
-        UNCERTAIN (``departure_within_days``) without running LLM checkers.
-    :param suspicious_dating_max_year_delta: Inclusive absolute year threshold;
-        when any OCR calendar date year differs from reference today by at least
-        this many years, analysis yields UNCERTAIN (``checker_suspicious_dating``).
+    :param identity_max_edit_distance: Inclusive Levenshtein threshold on
+        lowercased extracted names; distance ≤ this value → identity match.
+    :param departure_uncertain_enabled: When False, skip the medical far-departure
+        UNCERTAIN gate entirely.
+    :param departure_uncertain_within_days: Inclusive near-window in days; on the
+        medical path, when |departure - reference today| is strictly greater than
+        this value, analysis yields UNCERTAIN (``departure_within_days``) without
+        running LLM checkers. Departures within the window continue through
+        the remaining checkers. Ignored when ``departure_uncertain_enabled`` is False.
+    :param suspicious_dating_max_month_delta: Inclusive absolute month threshold;
+        when any OCR calendar date differs from reference today by at least this
+        many months, analysis yields UNCERTAIN (``checker_suspicious_dating``).
+        Default 1 month.
+    :param suspicious_dating_consider_within_years: Only OCR dates within this
+        many years of reference today are eligible for suspicious dating;
+        farther dates are ignored as date-of-birth / history.
     """
 
     model: str
@@ -127,8 +138,11 @@ class CheckingConfig(BaseModel):
     healthy_prompt: str
     authenticity_prompt: str
     incomplete_prompt: str
+    identity_max_edit_distance: int = 3
+    departure_uncertain_enabled: bool = False
     departure_uncertain_within_days: int = 14
-    suspicious_dating_max_year_delta: int = 2
+    suspicious_dating_max_month_delta: int = 1
+    suspicious_dating_consider_within_years: int = 2
 
 
 class RequiredDocumentsConfig(BaseModel):
@@ -173,9 +187,8 @@ class AnalysisConfig(BaseModel):
     cancellation_document: ClassificationConfig
     personal_effects_document: ClassificationConfig
     missed_departure_document: ClassificationConfig
-    required_documents: RequiredDocumentsConfig = Field(
-        default_factory=RequiredDocumentsConfig
-    )
+    required_documents: RequiredDocumentsConfig = Field(default_factory=RequiredDocumentsConfig)
+
 
 class BenfordConfig(BaseModel):
     """Benford's Law analysis settings for image forensic checks.
@@ -224,9 +237,7 @@ class EvaluationConfig(BaseModel):
     :param analysis_visualization_artifact: Filename for analysis stats bar-chart PNG.
     """
 
-    labels: list[str] = Field(
-        default_factory=lambda: ["APPROVE", "DENY", "UNCERTAIN"]
-    )
+    labels: list[str] = Field(default_factory=lambda: ["APPROVE", "DENY", "UNCERTAIN"])
     metrics_artifact: str = "evaluation_metrics.json"
     confusion_matrix_artifact: str = "confusion_matrix.json"
     visualization_artifact: str = "evaluation_visualization.png"
@@ -256,7 +267,8 @@ class OcrRetryConfig(BaseModel):
         YOLO signature detection on the document image.
     :param signature_model: HuggingFace repo id or local ``.pt`` path for YOLO weights.
     :param signature_weights: Filename inside the HF repo (ignored for local ``.pt``).
-    :param signature_confidence: Minimum box confidence to treat as a signature.
+    :param signature_confidence: Accept threshold for YOLO max box confidence;
+        below this (or no boxes) sets ``human_in_the_loop`` after verify.
     """
 
     enabled: bool = False
@@ -294,11 +306,20 @@ class AppConfig(BaseModel):
     analysis: AnalysisConfig
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     benford: BenfordConfig = BenfordConfig()
-    extraction_failure: ExtractionFailureConfig = Field(
-        default_factory=ExtractionFailureConfig
-    )
+    extraction_failure: ExtractionFailureConfig = Field(default_factory=ExtractionFailureConfig)
     ocr_retry: OcrRetryConfig = Field(default_factory=OcrRetryConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+
+
+class ConfigFileNotFoundError(FileNotFoundError):
+    """The configured application config file path does not exist."""
+
+    def __init__(self, path: Path) -> None:
+        """Build the not-found message from the resolved config path.
+
+        :param path: Config file path that was checked and not found.
+        """
+        super().__init__(f"Config file not found: {path}")
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
@@ -307,12 +328,13 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     :param path: Path to the YAML config file.
     :return: Typed AppConfig covering preprocessing, extraction, classification,
         checking, and analysis.
-    :raises FileNotFoundError: If the config file does not exist.
+    :raises ConfigFileNotFoundError: If the config file does not exist (a
+        ``FileNotFoundError`` subclass).
     :raises ValueError: If required sections or fields are missing/invalid.
     """
     config_path = Path(path)
     if not config_path.is_file():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+        raise ConfigFileNotFoundError(config_path)
 
     raw: dict[str, Any] = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     return AppConfig.model_validate(raw)

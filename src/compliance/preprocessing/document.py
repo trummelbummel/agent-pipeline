@@ -9,8 +9,8 @@ from typing import Any
 import ollama
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
-    PictureClassificationLabel,
     PdfPipelineOptions,
+    PictureClassificationLabel,
 )
 from docling.document_converter import DocumentConverter, ImageFormatOption, PdfFormatOption
 from pydantic import BaseModel
@@ -19,19 +19,48 @@ from compliance.branch_log import log_branch_decision
 from compliance.config.settings import OcrRetryConfig
 from compliance.llm.chat import ChatFn, response_content
 from compliance.models.claim import _MISSING, DocumentData, DocumentMetaData
+from compliance.models.decisions import (
+    DECISION_DENY,
+    DECISION_UNCERTAIN,
+    REASON_FRAUD,
+    REASON_OCR_FAILURE,
+)
 from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter, Preprocessor
 from compliance.preprocessing.reader import Reader
+from compliance.preprocessing.signature_detect import (
+    SignatureDetectFn,
+    SignatureDetectionError,
+    SignatureInferenceError,
+    SignatureModelNotConfiguredError,
+    detect_signature_with_yolo,
+)
 from compliance.tools.benford import BenfordLawChecker, BenfordResult
 
 logger = logging.getLogger(__name__)
 
-_FRAUD_DENY = "DENY"
-_FRAUD_REASON = "fraud"
 _WHITESPACE = re.compile(r"\s+")
 _KV_LINE = re.compile(r"^([^:\n]+):\s*(.+)$")
 _SIGNATURE_CLASS = PictureClassificationLabel.SIGNATURE.value
 _IMAGE_RETRY_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+
+_TIMESTAMP_PATTERN = re.compile(
+    r"\b("
+    r"\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}"  # DD/MM/YYYY or similar
+    r"|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}"  # YYYY-MM-DD
+    r"|\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
+    r"septiembre|octubre|noviembre|diciembre|"
+    r"janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)"
+    r"(?:\s+(?:de\s+|del?\s+)?\d{2,4})?"  # optional year after month name
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Normalized label → DocumentData core field or fields-dict key
+_PERSON_KEYS = frozenset({"person", "name", "patient", "patient name", "claimant", "nombre"})
+_DATE_KEYS = frozenset({"date", "fecha", "admission date", "visit date", "document date"})
 
 
 def vision_ocr_text(
@@ -60,25 +89,6 @@ def vision_ocr_text(
         ],
     )
     return response_content(response)
-
-
-_TIMESTAMP_PATTERN = re.compile(
-    r"\b("
-    r"\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}"      # DD/MM/YYYY or similar
-    r"|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}"        # YYYY-MM-DD
-    r"|\d{1,2}\s+(?:de\s+)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
-    r"septiembre|octubre|noviembre|diciembre|"
-    r"janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|"
-    r"january|february|march|april|may|june|july|august|september|october|november|december|"
-    r"Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)"
-    r"(?:\s+(?:de\s+|del?\s+)?\d{2,4})?"       # optional year after month name
-    r")\b",
-    re.IGNORECASE,
-)
-
-# Normalized label → DocumentData core field or fields-dict key
-_PERSON_KEYS = frozenset({"person", "name", "patient", "patient name", "claimant", "nombre"})
-_DATE_KEYS = frozenset({"date", "fecha", "admission date", "visit date", "document date"})
 
 
 def _document_converter_with_picture_classification() -> DocumentConverter:
@@ -221,6 +231,7 @@ class DocumentReader(Reader):
         extraction_failure: ExtractionFailure | None = None,
         ocr_retry: OcrRetryConfig | None = None,
         retry_chat_fn: ChatFn | None = None,
+        signature_detect_fn: SignatureDetectFn | None = None,
     ) -> None:
         """Create a Docling-backed document reader.
 
@@ -235,18 +246,20 @@ class DocumentReader(Reader):
         :param extraction_failure: Detector for unusable OCR; defaults to ExtractionFailure().
         :param ocr_retry: Optional vision-model retry config after faulty Docling OCR.
         :param retry_chat_fn: Optional chat callable for vision retry; defaults to ollama.chat.
+        :param signature_detect_fn: Optional YOLO (or test) detector returning max
+            box confidence or ``None``; defaults to Ultralytics YOLO using
+            ``ocr_retry.signature_*`` settings.
         """
         super().__init__(preprocessor or DocumentPreprocessor())
         self.document_formats = [fmt.lower().lstrip(".") for fmt in document_formats]
         self.confidence_threshold = confidence_threshold
         self.format_converter = format_converter
-        self.document_converter = (
-            document_converter or _document_converter_with_picture_classification()
-        )
+        self.document_converter = document_converter or _document_converter_with_picture_classification()
         self.benford_checker = benford_checker
         self.extraction_failure = extraction_failure or ExtractionFailure()
         self.ocr_retry = ocr_retry
         self._retry_chat: ChatFn = retry_chat_fn or ollama.chat
+        self._signature_detect: SignatureDetectFn | None = signature_detect_fn
 
     def read(self, path: Path) -> BaseModel:
         """Convert to PNG, optionally Benford-check, then Docling — or early DENY.
@@ -256,7 +269,9 @@ class DocumentReader(Reader):
         fraud and never call Docling. PDFs skip Benford (no Pillow conversion).
         When Docling OCR is weak (faulty, low confidence, and/or HITL — per
         ``ocr_retry`` flags) and retry is enabled, retries once via a
-        config-driven vision model on the resolved PNG.
+        config-driven vision model on the resolved PNG. When Docling leaves
+        ``has_signature`` false and ``on_missing_signature`` is enabled, an
+        Ultralytics YOLO pass may set ``has_signature`` true.
 
         :param path: Filesystem path to the source document.
         :return: DocumentData from Docling (or vision retry), or an early fraud DENY.
@@ -275,10 +290,15 @@ class DocumentReader(Reader):
         docling_payload = self._docling_payload(resolved)
         processed = self.preprocessor.preprocess(docling_payload)
         document = self._to_model(processed, source_file=path.name)
-        return self._maybe_retry_ocr(
+        document = self._maybe_retry_ocr(
             document,
             resolved=resolved,
             prior_payload=docling_payload,
+            source_file=path.name,
+        )
+        return self._maybe_verify_signature(
+            document,
+            resolved=resolved,
             source_file=path.name,
         )
 
@@ -378,21 +398,17 @@ class DocumentReader(Reader):
             log_branch_decision(
                 logger,
                 branch="ocr_retry",
-                outcome="ERROR",
-                reason=type(exc).__name__,
+                outcome="UNCERTAIN",
+                reason=REASON_OCR_FAILURE,
                 level=logging.WARNING,
                 file=source_file,
                 model=self.ocr_retry.model,
+                error=type(exc).__name__,
             )
-            return document.model_copy(
-                update={
-                    "metadata": document.metadata.model_copy(
-                        update={
-                            "retry_used": True,
-                            "retry_model": self.ocr_retry.model,
-                        }
-                    )
-                }
+            return self._ocr_failure_uncertain(
+                document,
+                source_file=source_file,
+                retry_model=self.ocr_retry.model,
             )
 
         retry_payload = {
@@ -434,6 +450,117 @@ class DocumentReader(Reader):
             )
         return retry_document
 
+    def _maybe_verify_signature(
+        self,
+        document: BaseModel,
+        *,
+        resolved: Path,
+        source_file: str,
+    ) -> BaseModel:
+        """YOLO signature pass when Docling left ``has_signature`` false.
+
+        Uses ``ocr_retry.signature_model`` / ``signature_weights`` /
+        ``signature_confidence``. Stores max box score as ``signature_probability``.
+        When max score ≥ threshold → ``has_signature=true``. When score is missing
+        or below threshold → ``human_in_the_loop=true`` (operator should confirm).
+
+        :param document: DocumentData after Docling / optional text OCR retry.
+        :param resolved: Path Docling consumed (PNG or PDF).
+        :param source_file: Basename of the original source path.
+        :return: Original or signature-updated DocumentData.
+        """
+        if not isinstance(document, DocumentData):
+            return document
+        if document.metadata.has_signature:
+            return document
+        if self.ocr_retry is None or not self.ocr_retry.enabled or not self.ocr_retry.on_missing_signature:
+            return document
+        if not self.ocr_retry.signature_model.strip():
+            raise SignatureModelNotConfiguredError()
+        if resolved.suffix.lower() == ".pdf":
+            log_branch_decision(
+                logger,
+                branch="signature_verify",
+                outcome="SKIP",
+                reason="pdf",
+                file=source_file,
+            )
+            return document
+        if resolved.suffix.lower() not in _IMAGE_RETRY_SUFFIXES:
+            log_branch_decision(
+                logger,
+                branch="signature_verify",
+                outcome="SKIP",
+                reason="unsupported_suffix",
+                file=source_file,
+            )
+            return document
+
+        log_branch_decision(
+            logger,
+            branch="signature_verify",
+            outcome="START",
+            reason="docling_absent",
+            file=source_file,
+            model=self.ocr_retry.signature_model,
+        )
+        threshold = float(self.ocr_retry.signature_confidence)
+        max_conf = self._run_signature_detect(resolved, self.ocr_retry)
+        detected = max_conf is not None and max_conf >= threshold
+        meta_update: dict[str, object] = {
+            "signature_verify_used": True,
+            "signature_probability": (float(max_conf) if max_conf is not None else _MISSING),
+        }
+        if detected:
+            meta_update["has_signature"] = True
+            log_branch_decision(
+                logger,
+                branch="signature_verify",
+                outcome="DETECTED",
+                reason="yolo_detect",
+                file=source_file,
+                model=self.ocr_retry.signature_model,
+                confidence=f"{max_conf:.3f}",
+                threshold=f"{threshold:.3f}",
+            )
+        else:
+            meta_update["human_in_the_loop"] = True
+            conf_label = "none" if max_conf is None else f"{max_conf:.3f}"
+            log_branch_decision(
+                logger,
+                branch="signature_verify",
+                outcome="HITL",
+                reason="below_threshold" if max_conf is not None else "yolo_absent",
+                level=logging.WARNING,
+                file=source_file,
+                model=self.ocr_retry.signature_model,
+                confidence=conf_label,
+                threshold=f"{threshold:.3f}",
+            )
+        return document.model_copy(update={"metadata": document.metadata.model_copy(update=meta_update)})
+
+    def _run_signature_detect(self, image_path: Path, ocr_retry: OcrRetryConfig) -> float | None:
+        """Run injected or default YOLO signature detection.
+
+        :param image_path: Resolved raster path for detection.
+        :param ocr_retry: Signature settings already validated as enabled by the caller.
+        :return: Max box confidence, or ``None`` when no boxes fire.
+        :raises SignatureDetectionError: Detection unavailable or failed.
+        """
+        try:
+            if self._signature_detect is not None:
+                return self._signature_detect(image_path)
+            return detect_signature_with_yolo(
+                image_path,
+                model=ocr_retry.signature_model,
+                weights=ocr_retry.signature_weights,
+                confidence=ocr_retry.signature_confidence,
+            )
+        except SignatureDetectionError:
+            raise
+        except Exception as exc:
+            raise SignatureInferenceError(image_path, exc) from exc
+
     def _vision_ocr_text(self, image_path: Path, *, model: str, prompt: str) -> str:
         """Call the configured vision model to transcribe a document image.
 
@@ -442,9 +569,7 @@ class DocumentReader(Reader):
         :param prompt: Transcription instruction from ``ocr_retry`` config.
         :return: Model message content (markdown/plain text).
         """
-        return vision_ocr_text(
-            image_path, model=model, prompt=prompt, chat_fn=self._retry_chat
-        )
+        return vision_ocr_text(image_path, model=model, prompt=prompt, chat_fn=self._retry_chat)
 
     def _load(self, path: Path) -> dict[str, Any]:
         """Convert to PNG when needed, then run Docling extraction.
@@ -506,8 +631,8 @@ class DocumentReader(Reader):
         log_branch_decision(
             logger,
             branch="benford",
-            outcome=_FRAUD_DENY,
-            reason=_FRAUD_REASON,
+            outcome=DECISION_DENY,
+            reason=REASON_FRAUD,
             level=logging.WARNING,
             file=image_path.name,
             chi_squared=f"{benford.chi_squared:.4f}",
@@ -522,22 +647,57 @@ class DocumentReader(Reader):
         :param benford: Non-conforming BenfordResult.
         :return: DocumentData with decision DENY and reason fraud.
         """
-        return DocumentData.model_validate(
-            {
-                "decision": _FRAUD_DENY,
-                "reason": _FRAUD_REASON,
-                "raw_text": _MISSING,
-                "fields": {
-                    "decision": _FRAUD_DENY,
-                    "reason": _FRAUD_REASON,
-                    "benford_chi_squared": benford.chi_squared,
-                    "benford_conformity": False,
-                },
-                "metadata": DocumentMetaData(
-                    source_file=Path(benford.image_path).name if benford.image_path else _MISSING,
-                    extraction_probability=_MISSING,
-                    faulty_extraction=False,
-                    human_in_the_loop=False,
+        return DocumentData.model_validate({
+            "decision": DECISION_DENY,
+            "reason": REASON_FRAUD,
+            "raw_text": _MISSING,
+            "fields": {
+                "decision": DECISION_DENY,
+                "reason": REASON_FRAUD,
+                "benford_chi_squared": benford.chi_squared,
+                "benford_conformity": False,
+            },
+            "metadata": DocumentMetaData(
+                source_file=Path(benford.image_path).name if benford.image_path else _MISSING,
+                extraction_probability=_MISSING,
+                faulty_extraction=False,
+                human_in_the_loop=False,
+            ),
+        })
+
+    @staticmethod
+    def _ocr_failure_uncertain(
+        document: DocumentData,
+        *,
+        source_file: str,
+        retry_model: str,
+    ) -> DocumentData:
+        """Keep Docling text but tag UNCERTAIN / ocr_failure for human review.
+
+        :param document: Docling DocumentData before the failed vision retry.
+        :param source_file: Basename of the source document.
+        :param retry_model: Vision model that failed.
+        :return: DocumentData with UNCERTAIN decision, HITL, and ``ocr_failure`` reason.
+        """
+        prior_reasons = list(document.metadata.failure_reasons)
+        if REASON_OCR_FAILURE not in prior_reasons:
+            prior_reasons.append(REASON_OCR_FAILURE)
+        fields = dict(document.fields)
+        fields["decision"] = DECISION_UNCERTAIN
+        fields["reason"] = REASON_OCR_FAILURE
+        return document.model_copy(
+            update={
+                "decision": DECISION_UNCERTAIN,
+                "reason": REASON_OCR_FAILURE,
+                "fields": fields,
+                "metadata": document.metadata.model_copy(
+                    update={
+                        "source_file": source_file or document.metadata.source_file,
+                        "human_in_the_loop": True,
+                        "retry_used": True,
+                        "retry_model": retry_model,
+                        "failure_reasons": prior_reasons,
+                    }
                 ),
             }
         )
@@ -690,13 +850,11 @@ class DocumentReader(Reader):
             human_in_the_loop=hitl,
             failure_reasons=list(failure.reasons),
         )
-        return DocumentData.model_validate(
-            {
-                "person": processed.get("person", _MISSING),
-                "date": processed.get("date", _MISSING),
-                "raw_text": processed.get("raw_text", _MISSING),
-                "timestamps": processed.get("timestamps", []),
-                "fields": processed.get("fields", {}),
-                "metadata": metadata,
-            }
-        )
+        return DocumentData.model_validate({
+            "person": processed.get("person", _MISSING),
+            "date": processed.get("date", _MISSING),
+            "raw_text": processed.get("raw_text", _MISSING),
+            "timestamps": processed.get("timestamps", []),
+            "fields": processed.get("fields", {}),
+            "metadata": metadata,
+        })

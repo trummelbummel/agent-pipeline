@@ -85,11 +85,15 @@ _WHITESPACE = re.compile(r"\s+")
 def _normalize_key(raw: str) -> str:
     """Strip, lower-case, and collapse whitespace in a markdown key.
 
+    Underscores are treated as spaces so ``current_date`` and ``current date``
+    resolve to the same alias.
+
     :param raw: Raw key text possibly including bold markers or trailing colons.
     :return: Normalized key used for alias lookup.
     """
     key = raw.strip().strip("*").strip()
     key = key.rstrip(":").strip()
+    key = key.replace("_", " ")
     key = _WHITESPACE.sub(" ", key).lower()
     return key
 

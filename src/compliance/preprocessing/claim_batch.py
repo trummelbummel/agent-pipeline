@@ -28,7 +28,6 @@ from compliance.models.decisions import (
 from compliance.preprocessing.answer import AnswerReader
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.document import DocumentReader, SignatureDetectionError
-from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.preprocessing.markdown import MarkdownReader
 from compliance.preprocessing.preprocessing import FormatConverter
@@ -591,15 +590,13 @@ def _process_single_claim(
         description_reader = DescriptionReader(extractor=extractor)
 
     if document_reader is None:
-        format_converter = FormatConverter(source_formats=prep.document_formats)
         benford_checker = BenfordLawChecker(config.benford) if config.benford.enabled else None
-        document_reader = DocumentReader(
-            document_formats=prep.document_formats,
-            confidence_threshold=prep.confidence_threshold,
-            format_converter=format_converter,
+        document_reader = DocumentReader.from_config(
+            prep,
+            config.ocr_retry,
+            config.extraction_failure,
+            format_converter=FormatConverter(source_formats=prep.document_formats),
             benford_checker=benford_checker,
-            extraction_failure=ExtractionFailure(config.extraction_failure),
-            ocr_retry=config.ocr_retry,
         )
 
     ground_truth = _read_ground_truth(sources.answer_path, answer_reader)

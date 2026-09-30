@@ -31,7 +31,7 @@ Missing optional files are allowed: absent fields become `np.nan` / empty lists 
   Send `description.txt` to the local LLM (`extraction.model`, default `qwen2.5:7b`) with the `BookingData` JSON schema and `extraction.prompt`.
    Output: structured `description_booking` plus retained raw `description_text` (needed later by classifiers / Checker).
    LLM failures leave booking fields empty (`np.nan`) but keep raw text when possible.
-6. **Process supporting documents** (`DocumentReader`) — for each configured image/PDF:
+6. **Process supporting documents** (`DocumentReader.from_config`) — for each configured image/PDF. The reader orchestrates small collaborators (same shape as Phase 9 `CheckSuite`): `DoclingPrimaryOcr`, optional `BenfordGate`, `VisionOcrRetry`, `SignatureVerifier`. Built from `preprocessing` / `ocr_retry` / `extraction_failure` sections plus deps (not a flat same-kind constructor fan-out).
   - **Format convert** — raster formats → PNG via `FormatConverter` (PNG passthrough; PDF skipped for Pillow conversion and passed to Docling).
   - **Optional Benford forensics** — DCT Benford on PNG when `benford.enabled` (default **off** for this synthetic dataset). Non-conformity → early `DocumentData` with DENY / fraud and **no Docling**.
   - **Docling OCR** — PNG/PDF → markdown `raw_text` plus person/date and extensible `fields`; confidence vs `confidence_threshold` may set `human_in_the_loop`.
@@ -124,7 +124,7 @@ Escalate only when a free or cheaper step fails or is flagged weak. All LLMs/vis
 | Routing / decision fold | Graph edges + ordered deny reasons            | —                                               |
 
 
-`contradicts` is LLM-only. Medical semantics (healthy, suspicious dating, identity, signature, authenticity, incomplete) are skipped on non-medical branches.
+`contradicts` is LLM-only. Medical semantics (healthy, suspicious dating, identity, signature, incomplete) are skipped on non-medical branches.
 
 These cheap gates were tightened after eval failures that were **not** model-routing bugs: OCR spelling/order variants on identity, empty Docling text → wrong doc class, and Docling signature false negatives (vision verify / OCR retry only when those cheap signals fire). Detail: [Evaluation](#evaluation-ground-truth-vs-predicted).
 
@@ -191,17 +191,16 @@ classify_coverage
   │   • missing_documentation (missed required_documents)      │
   │   • containment (informational only)                       │
   │   • contradicts                                            │
-  │   • identity_check — skipped                               │
-  │   • signature_check — skipped                              │
-  │   • healthy_check — skipped                                │
-  │   • suspicious_dating — skipped                            │
+  │   • identity / signature / healthy / dating — only when    │
+  │     document code ∈ missed_departure_medical_codes (`"3"`) │
+  │     else skipped                                           │
   │         │                                                  │
   │         ▼                                                  │
   │                                                              │
   └─ other / unknown (False)                                     │
             │                                                    │
             │   (no reason / document / checker nodes)           │
-            │   decision = UNCERTAIN (coverage_false_label) + HITL│
+            │   decision = UNCERTAIN (coverage_false_label)      │
             ▼                                                    │
          persist ◄───────────────────────────────────────────────┘
             │
@@ -214,8 +213,8 @@ classify_coverage
 | ------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Trip cancellation or rescheduling     | reason → cancel document → **run_checker** → persist | **missing_documentation**; **containment** (info); **contradicts**; **identity** / **signature** / **healthy_check** / **suspicious_dating** only for medical certificate / hospital admission                               |
 | Personal Effects                      | PE document → **run_checker** → persist              | **missing_documentation** (PE proof); **containment** (info); **contradicts**; identity / signature / healthy_check / suspicious_dating **skipped**                                                                          |
-| Missed Departure or Missed Connection | missed document → **run_checker** → persist          | **missing_documentation** (incident / booking); **containment** (info); **contradicts**; identity / signature / healthy_check / suspicious_dating **skipped**                                                                |
-| other / unknown (`False`)             | persist only                                         | **No checkers** → **UNCERTAIN** (`coverage_false_label`) + `human_in_the_loop`                                                                                                                                                |
+| Missed Departure or Missed Connection | missed document → **run_checker** → persist          | **missing_documentation** (incident / booking / medical; **medical mention → medical doc required**); **containment** (info); **contradicts**; identity / signature / healthy / dating **only** when document ∈ `missed_departure_medical_codes` (else skipped) |
+| other / unknown (`False`)             | persist only                                         | **No checkers** → **UNCERTAIN** (`coverage_false_label`); HITL only if OCR/YOLO already flagged                                                                                                                                |
 
 
 **How the graph enforces consistency**
@@ -223,7 +222,7 @@ classify_coverage
 1. **Hard routing, not free-form LLM decisions** — After coverage, edges are fixed. A medical cancellation never invents a PE document stage; a PE claim never runs cancellation-reason classification.
 2. **Shared sinks** — All document branches converge on `run_checker` then `persist`. Containment / contradicts / healthy use the same checker node; only *which* gates fire (identity, signature, required docs) depends on coverage + classified document type from config.
 3. **Config-tied gates on the same path** — `required_documents`, `identity_required_codes`, and `signature_required_codes` are looked up from the labels produced on that path. Two claims with the same coverage + reason + document type hit the same acceptability set and the same identity/signature rules.
-4. **Deterministic decision fold** — `compliance.policy.decision.decision_from_state` applies one ordered policy (missing doc → identity mismatch → signature → healthy → contradicts → identity unclear → approve). Same flag pattern → same APPROVE / DENY / UNCERTAIN.
+4. **Deterministic decision fold** — `compliance.policy.decision.decision_from_state` applies one ordered policy (missing doc → identity mismatch / unextractable name → signature → healthy → contradicts → identity ERROR → approve). Same flag pattern → same APPROVE / DENY / UNCERTAIN.
 
 So consistency comes from **topology + shared decision function**, not from asking the LLM to “be consistent.” Similar cases that classify the same way walk the same edges and face the same rules.
 
@@ -241,14 +240,13 @@ So consistency comes from **topology + shared decision function**, not from aski
   | `"1"`     | Trip cancellation / rescheduling                                                           |
   | `"2"`     | Personal Effects                                                                           |
   | `"3"`     | Missed Departure / Missed Connection                                                       |
-  | `"False"` | Confident that none of the coverage classes apply → persist only; sets `human_in_the_loop` |
-  | `"False"` | None of the classes apply / uncertain — persist only + HITL                                |
+  | `"False"` | None of the coverage classes apply / uncertain → persist only (UNCERTAIN; HITL only if OCR/YOLO flagged) |
 
 4. **Route after coverage**
   - `"1"` → cancellation reason → cancellation document → Checker
   - `"2"` → personal-effects document → Checker
   - `"3"` → missed-departure document → Checker
-  - `"False"` / unknown → persist only (empty reason/document lists; no checker keys; HITL)
+  - `"False"` / unknown → persist only (empty reason/document lists; no checker keys; HITL only if OCR/YOLO flagged)
 5. **Cancellation branch only — reason** (`classify_reason`)
   Classifier on `description_text` with `analysis.cancellation_reason`:
 
@@ -267,14 +265,14 @@ So consistency comes from **topology + shared decision function**, not from aski
   | ---------------- | --------------------------- | ----------------------------------------------------------------------------------------------------- |
   | Cancellation     | `cancellation_document`     | `"1"` medical certificate · `"2"` police report · `"3"` jury summon letter · `"4"` hospital admission |
   | Personal Effects | `personal_effects_document` | `"1"` proof of theft/loss/damage                                                                      |
-  | Missed Departure | `missed_departure_document` | `"1"` incident/delay documentation · `"2"` proof of booking                                           |
+  | Missed Departure | `missed_departure_document` | `"1"` incident/delay documentation · `"2"` proof of booking · `"3"` medical/hospital documentation |
 
    Unmatched → `"False"` (`other_label`, same abstention token).
 7. **Checker** (`run_checker`) — skipped on coverage-other path
-  Boolean checks via `Checker` (`checking.model`, default `qwen2.5:7b`). Claim text = `description.txt`; reference = `supporting_document.md`.
+  Composable checks from `CheckSuite` (`compliance.llm.checks`; built once per pipeline from `checking`, one shared `LlmCheckClient` on `checking.model`, default `qwen2.5:7b`), after date `Gate`s in `compliance.policy.gates`. Claim text = `description.txt`; reference = `supporting_document.md`.
   - **Containment** — is the claim present in / entailed by the document? (informational only; does **not** drive DENY)
   - **Contradicts** — does the claim contradict the document? → can DENY
-  - **Identity** (`identity_check`) — only when classified doc is medical certificate / hospital admission (`identity_required_codes`). Extracts booking `**name`**, lowercases/normalizes, and **matches without LLM** if the full name or all name tokens are contained in `supporting_document.md`. Otherwise LLM: patient/subject only (ignore doctor/facility). **mismatch → DENY**; **unclear patient field → UNCERTAIN**; skipped on non-medical docs
+  - **Identity** (`identity_check`) — only when classified doc is medical certificate / hospital admission (`identity_required_codes`). Extracts booking `**name`**, lowercases/normalizes, and **matches without LLM** if the full name or all name tokens are contained in `supporting_document.md`. Otherwise LLM: patient/subject only (ignore doctor/facility). **mismatch or unextractable/redacted patient name → DENY**; **extraction ERROR → UNCERTAIN**; skipped on non-medical docs
   - **Signature** (`signature_check`) — for classified **medical certificate** or **hospital admission**, require `has_signature: true` in `document_metadata.json`. **False → DENY**
   - **Healthy** (`healthy_check`) — only on medical certificate / hospital admission codes (`signature_required_codes`). Does `supporting_document.md` assert the patient is healthy / fit / clinically well? **True → DENY** (e.g. claim 10 “CLÍNICAMENTE SANA”)
   - Every claim that reaches `run_checker` records `checker_rule_set` (which medical rule set ran) and `checker_skipped` (gated checks that did not run); a skipped check records no result.
@@ -289,19 +287,19 @@ So consistency comes from **topology + shared decision function**, not from aski
   | Cancellation · Theft / criminal (`"3"`)           | `"2"` police report                                  |
   | Cancellation · Other personal emergencies (`"4"`) | `"1"` · `"2"` · `"3"` (any cancellation doc)         |
   | Personal Effects                                  | `"1"` proof of theft, loss, or damage                |
-  | Missed Departure / Connection                     | `"1"` incident/delay doc · `"2"` proof of booking    |
+  | Missed Departure / Connection                     | `"1"` incident/delay doc · `"2"` proof of booking · `"3"` medical/hospital |
 
    Multiple cancellation reasons → union of their acceptable codes. Document only `"False"` / abstention → missing.
 9. **Derive decision** (`decision_from_state`) → written into `analysis_result.json` and `predicted_answer.json`
-  1. Coverage = `"False"` / unknown → **UNCERTAIN** (`coverage_false_label`) + HITL; skip checkers below
+  1. Coverage = `"False"` / unknown → **UNCERTAIN** (`coverage_false_label`); skip checkers below (HITL only if OCR/YOLO flagged)
   2. Missing documentation → **DENY** (`checker_missing_documentation`)
   3. Identity **mismatch** on a medical/hospital doc → **DENY** (`identity_check`)
   4. `signature_check` is **False** (classified type is medical certificate or hospital admission and `document_metadata.json` has `has_signature: false`) → **DENY** (`signature_check`)
   5. `healthy_check` is **True** (`supporting_document.md` asserts healthy / fit / not ill) → **DENY** (`healthy_check`)
   6. `checker_contradicts` → **DENY** (`checker_contradicts`; keys can appear comma-joined)
-  7. Identity **unclear** (no clear patient field on OCR) → **UNCERTAIN** (`identity_unclear`)
+  7. Identity **ERROR** (unparseable extraction / transport) → **UNCERTAIN** (`checker_error:identity`)
   8. Else → **APPROVE** (`checker_consistent`)
-    ntainment failure is **not** a deny reason. Identity runs only for `identity_required_codes` (medical certificate / hospital admission). `signature_check` uses preprocessing metadata (e.g. claim 18 hospital admission with `has_signature: false`). `healthy_check` reads the medical OCR only (claims 10, 14, 22). Further denial-rule checkers (authenticity, dating): see [Denial-rule checkers](#denial-rule-checkers).
+    ntainment failure is **not** a deny reason. Identity runs only for `identity_required_codes` (medical certificate / hospital admission). `signature_check` uses preprocessing metadata (e.g. claim 18 hospital admission with `has_signature: false`). `healthy_check` reads the medical OCR only (claims 10, 14, 22). Further denial-rule checkers (dating, incomplete): see [Denial-rule checkers](#denial-rule-checkers).
 10. **Persist** (`persist`)
   Stage `analysis_result.json` + `predicted_answer.json` under `results_dir/.staging/{run_id}/{claim}/`, fsync, promote with `os.replace`, then rename `run_manifest.json` last as the commit marker. Analysis never writes back into `preprocessed_dir`. HITL provenance is recorded as `human_in_the_loop_source` on the published analysis artifacts. Per-claim failures in a batch are recorded at `results_dir/.runs/{run_id}.json`.
 
@@ -333,7 +331,7 @@ So consistency comes from **topology + shared decision function**, not from aski
 - `*_labels` are semantic names from `config.analysis.*.label_names`; `*_label_codes` keep the numeric classifier codes.
 - `reason_labels` / `document_labels` (and their codes) are empty lists when that stage did not run.
 - Checker keys (including `checker_missing_documentation`) are **omitted** when coverage routed to persist-only (no document/Checker nodes).
-- `human_in_the_loop` is true when preprocess OCR already flagged review **or** any classifier returned `"False"`.
+- `human_in_the_loop` is true only when preprocess OCR/YOLO already flagged uncertainty (low confidence, faulty extraction, OCR failure, or uncertain signature verify). Classifier `"False"` and analysis UNCERTAIN do **not** set HITL.
 - On DENY, `decision_explanation` lists violated keys (e.g. `checker_missing_documentation`, `checker_contradicts`, or both comma-joined). Same string → `predicted_answer.json` `explanation`.
 
 Analysis derives `APPROVE` / `DENY` / `UNCERTAIN` into both artifacts under `results_dir`. Ground truth remains in preprocessed `answer.json` for eval only.
@@ -351,8 +349,7 @@ Classification (coverage / reason / document type) does **not** encode deny reas
 | --------------------------------------------------------------------- | -------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | No medical / supporting document                                      | 1, 2, 21, 25   | `checker_missing_documentation`               | Classified document type is missing (`None`) or **not in the acceptable set** for this claim’s coverage / cancellation reason (`analysis.required_documents` in config). E.g. medical emergency requires medical certificate; jury duty requires jury summon letter. Not “claim letter not contained in OCR”. | `document_labels` + coverage/reason codes                    |
 | Document contradicts claim (healthy cert)                             | 10, 14, 22     | `checker_healthy_contradiction`               | Certificate states patient is healthy / fit / able to travel, contradicting an illness-based claim. Complements generic `checker_contradicts` when that mode is too broad                                                                                                                                     | description + supporting document                            |
-| Identity unverifiable                                                 | 4, 15          | `identity_check` (False) / `identity_unclear` | Passenger **name** in `supporting_documents.md` vs patient/subject on `supporting_document.md`. Runs only for cancellation medical/hospital docs (`identity_required_codes`). **mismatch → DENY**; **unclear patient field → UNCERTAIN**; ignore doctor/facility names.                                       | supporting_documents + supporting_document                   |
-| Document not authentic / wrong format                                 | 7, 8, 18       | `checker_document_not_authentic`              | Wrong format or authenticity concerns from text/signals: text-only “medical” doc, photo instead of certificate, photoshopped stamp/signature cues. Complements optional Benford in preprocessing (off for synthetic data)                                                                                     | supporting document (+ metadata); **not** Benford-by-default |
+| Identity unverifiable                                                 | 4, 15          | `identity_check` (False)                      | Passenger **name** in `supporting_documents.md` vs patient/subject on `supporting_document.md`. Runs only for cancellation medical/hospital docs (`identity_required_codes`). **mismatch or redacted/unextractable patient name → DENY**; **extraction ERROR → UNCERTAIN**; ignore doctor/facility names.                                       | supporting_documents + supporting_document                   |
 | Incomplete document                                                   | 17, 20         | `signature_check` (False)                     | Medical certificate / hospital admission without `has_signature: true` in `document_metadata.json` → **DENY**. (Broader incomplete-field checks still Phase 07.)                                                                                                                                              | `document_labels` + `document_metadata.json`                 |
 | Suspicious dating                                                     | 13, 20, 23     | `checker_suspicious_dating`                   | Timestamps inconsistent or implausible (e.g. stamp year far from claim/booking dates). Evaluated on medical documents only (`signature_required_codes`). May map to **UNCERTAIN** rather than hard DENY downstream                                                                                          | description, supporting document, optional booking dates     |
 
@@ -373,9 +370,8 @@ Typical deny / uncertain triggers (illustrative — decision policy may refine):
 1. `checker_missing_documentation` → DENY when classified doc type ∉ acceptable set for coverage/reason (`required_documents`).
 2. `checker_healthy_contradiction` (or strong `checker_contradicts` on a medical path) → DENY.
 3. `checker_identity_unverifiable` → DENY.
-4. `checker_document_not_authentic` → DENY.
-5. `checker_incomplete_document` → DENY (or UNCERTAIN if policy softens).
-6. `checker_suspicious_dating` → UNCERTAIN preferred; DENY acceptable per dataset notes.
+4. `checker_incomplete_document` → DENY when OCR is clean; **UNCERTAIN** when preprocess OCR/YOLO already set HITL (soft polarity for claims 5/19).
+5. `checker_suspicious_dating` → UNCERTAIN preferred; DENY acceptable per dataset notes.
 7. Failed **containment** is informational only — it does **not** mean missing documentation (a medical cert rarely contains the claim letter).
 
 Config: each mode’s prompt (and shared `checking.model`) lives in `config.yaml` under `checking:`; acceptable document codes under `analysis.required_documents`.
@@ -426,20 +422,6 @@ The claimant's identity cannot be verified from the submitted documents.
 | ----- | ------------------------------------------------------- |
 | 4     | Name is redacted                                        |
 | 15    | Name is obscured and visible initials do not correspond |
-
-
-
-
-### 4. Document Authenticity / Format Issues
-
-The document format or appearance raises concerns about validity.
-
-
-| Claim | Reason                                                                   |
-| ----- | ------------------------------------------------------------------------ |
-| 7     | Suspicious: stamp/signature appears photoshopped, missing discharge date |
-| 8     | Medical document is in text form — must be denied                        |
-| 18    | A picture is attached instead of the medical certificate                 |
 
 
 
@@ -574,12 +556,11 @@ The two files share **customer name** and **travel date** as common keys for cro
 
 A claim is denied when any of these conditions are met:
 
-1. **No medical document** (claims 1, 2, 21, 25) — the claim has no medical certificate or supporting evidence attached → `checker_missing_documentation`
+1. **No medical document** (claims 1, 2, 21, 25) — the claim has no medical certificate or supporting evidence attached → `checker_missing_documentation`. On missed-departure, a medical mention in the description narrows acceptable docs to `missed_departure_medical_codes` (claim **2**: booking alone DENYs).
 2. **Document contradicts claim** (claims 10, 14, 22) — the medical certificate says the patient is healthy → `checker_healthy_contradiction` (see also generic `checker_contradicts`)
 3. **Identity unverifiable** (claims 4, 15) — the name on the medical document is redacted, obscured, or does not match the claimant → `checker_identity_unverifiable`
-4. **Document not authentic** (claims 7, 8, 18) — signs of tampering (photoshopped elements), wrong format (text-only, photo instead of certificate) → `checker_document_not_authentic`
-5. **Incomplete document** (claim 17) — missing required fields such as signature, discharge date, or diagnosis → `checker_incomplete_document`
-6. **Suspicious dating** (claims 13, 20, 23) — timestamps on the document are inconsistent or implausible (may result in UNCERTAIN rather than outright DENY) → `checker_suspicious_dating`
+4. **Incomplete document** (claim 17) — missing required fields such as signature, discharge date, or diagnosis → `checker_incomplete_document`
+5. **Suspicious dating** (claims 13, 20, 23) — timestamps on the document are inconsistent or implausible (may result in UNCERTAIN rather than outright DENY) → `checker_suspicious_dating`
 
 Full checker inputs and how flags combine with classification: [Denial-rule checkers](#denial-rule-checkers).
 
@@ -591,106 +572,122 @@ Two named metric sets share that population: **`raw`** (exact decision equality)
 
 Per-claim comparison from `answer.json` (ground truth) vs `predicted_answer.json` / `analysis_result.json` (pipeline). Labels are `APPROVE` / `DENY` / `UNCERTAIN`. Pred reasons are `decision_explanation`. A claim whose prediction disagrees with its `run_manifest.json` is counted as incorrect rather than scored.
 
-**Code note:** the deterministic ``multiple_document_dates`` UNCERTAIN early-exit was **removed** (it fired on normal medical forms that mention birth + issue / date ranges). Date UNCERTAIN gates that remain: ``departure_within_days`` and ``checker_suspicious_dating``. Re-run ``make analyze`` + ``make evaluation`` to refresh metrics below after this change.
+**Code note:** the deterministic ``multiple_document_dates`` UNCERTAIN early-exit was **removed** (it fired on normal medical forms that mention birth + issue / date ranges). Date UNCERTAIN gates that remain: ``departure_within_days`` and ``checker_suspicious_dating``.
 
-**Last measured batch** (under the previous **results-first** population and acceptable-credited accuracy — before ground-truth-first SR-006 and before removing multi-date; YOLO + Phase 07 authenticity/incomplete/suspicious dating): evaluator **17 / 25 (68%)**, macro F1 **≈0.59**. Charts: [evaluation_visualization.png](data/results/evaluation_visualization.png), [analysis_stats_visualization.png](data/results/analysis_stats_visualization.png). Re-run `make analyze` + `make evaluation` to measure under the current ground-truth-first `raw` / `policy` metrics.
+**Last measured batch** (`make analyze` + `make evaluation`, 2026-09-29 evening, after future-only `departure_within_days` enabled): **25 / 25** scored. **raw accuracy 13 / 25 (52%)**, macro F1 **≈0.45**; **policy accuracy 16 / 25 (64%)**, macro F1 **≈0.60**. HITL **19** true / **6** false. Charts: [evaluation_visualization.png](data/results/evaluation_visualization.png), [analysis_stats_visualization.png](data/results/analysis_stats_visualization.png).
 
-Confusion (last measured):
+Confusion (**raw**):
 
 | GT \\ Pred | APPROVE | DENY | UNCERTAIN |
 | ---------- | ------- | ---- | --------- |
-| APPROVE    | 2       | 1    | 4         |
-| DENY       | 0       | 12   | 1         |
-| UNCERTAIN  | 0       | 2    | 3         |
+| APPROVE    | 3       | 4    | 0         |
+| DENY       | 1       | 9    | 3         |
+| UNCERTAIN  | 1       | 3    | 1         |
 
-**YOLO (preprocess):** ran on **14** Docling-absent docs; **flipped 3** → `has_signature=true` (claims **11**, **18**, **19**).
+Pipeline preds: **16 DENY / 5 APPROVE / 4 UNCERTAIN**. Claim **6** now correctly UNCERTAIN via `departure_within_days`.
 
-### Per-claim results (last measured batch)
+### Per-claim results (2026-09-29 evening)
 
-Rows that were decided only by ``multiple_document_dates`` are marked **stale** — those decisions will change after re-analyze.
-
-| Claim | GT | Pred | Pred reason | Compared values | Match | HITL | YOLO | Notes |
-| ----- | -- | ---- | ----------- | --------------- | ----- | ---- | ---- | ----- |
-| 1 | DENY | DENY | missing_documentation | wrong / absent medical type | ✓ | | ran | |
-| 2 | DENY | DENY | healthy_check | healthy / unfit path | ✓ | ✓ | ran | |
-| 3 | APPROVE | APPROVE | checker_consistent | medical; identity + signature OK | ✓ | | | |
-| 4 | DENY | DENY | identity + authenticity + incomplete | redacted / mismatch | ✓ | | | |
-| 5 | APPROVE | DENY | identity + authenticity + incomplete | Italian OCR `Bongiorno Oliciero` | ✗ | ✓ | | current hard miss |
-| 6 | UNCERTAIN | DENY | authenticity + incomplete | flight ~2 weeks out; `departure_within_days=false` | ✗ | | | current hard miss |
-| 7 | DENY | DENY | identity + incomplete | unverifiable name | ✓ | | | |
-| 8 | DENY | DENY | missing_documentation | wrong type / None | ✓ | ✓ | | |
-| 9 | APPROVE | UNCERTAIN | ~~multiple_document_dates~~ | issue + range end | ✗ | | | **stale** — gate removed |
-| 10 | DENY | DENY | healthy_check | OCR asserts healthy | ✓ | | | |
-| 11 | APPROVE | APPROVE | checker_consistent | **YOLO flipped** | ✓ | | **flip** | |
-| 12 | APPROVE | UNCERTAIN | ~~multiple_document_dates~~ | birth + admission + issue | ✗ | | ran | **stale** — gate removed |
-| 13 | UNCERTAIN | UNCERTAIN | ~~multiple_document_dates~~ | may still UNCERTAIN via `checker_suspicious_dating` | ✓ | | | **re-check** |
-| 14 | DENY | DENY | healthy_check | fit / sports-camp cert | ✓ | | | |
-| 15 | DENY | UNCERTAIN | ~~multiple_document_dates~~ | birth + Eing/Ausg | ✗ | | ran | **stale** — gate removed |
-| 16 | APPROVE | UNCERTAIN | ~~multiple_document_dates~~ | birth + ricovero; suspicious dating also true | ✗ | | ran | **stale** / may become suspicious-dating UNCERTAIN |
-| 17 | DENY | DENY | signature + healthy | unsigned + healthy | ✓ | | ran | |
-| 18 | DENY | UNCERTAIN | identity_unclear | picture-as-doc (`acceptable=UNCERTAIN`); **YOLO flipped** | ~ | ✓ | **flip** | |
-| 19 | APPROVE | UNCERTAIN | ~~multiple_document_dates~~ | exam dates; YOLO flipped | ✗ | ✓ | **flip** | **stale** — gate removed |
-| 20 | UNCERTAIN | DENY | identity + signature | unreadable name + unsigned (`acceptable=DENY`) | ~ | | ran | |
-| 21 | DENY | DENY | missing_documentation | no supporting doc | ✓ | ✓ | | |
-| 22 | DENY | DENY | signature + healthy + authenticity | healthy / unsigned | ✓ | | ran | |
-| 23 | UNCERTAIN | DENY | identity + signature + authenticity | weird dating GT (`acceptable=DENY`) | ~ | | ran | |
-| 24 | UNCERTAIN | DENY | signature + authenticity | soft-APPROVE timing (`acceptable=APPROVE`) | ✗ | | ran | current hard miss |
-| 25 | DENY | DENY | missing_documentation | booking screenshot | ✓ | ✓ | ran | |
+| Claim | GT | Pred | Pred reason | Match | HITL | Notes |
+| ----- | -- | ---- | ----------- | ----- | ---- | ----- |
+| 1 | DENY | DENY | missing_doc + contradicts | ✓ | ✓ | |
+| 2 | DENY | APPROVE | checker_consistent | ✗ | ✓ | `missed_departure_non_medical` + proof-of-booking; healthy skipped |
+| 3 | APPROVE | APPROVE | checker_consistent | ✓ | | |
+| 4 | DENY | UNCERTAIN | identity_unclear | ✗ | | Redacted name → ABSTAIN not DENY |
+| 5 | APPROVE | DENY | checker_incomplete_document | ✗ | ✓ | Incomplete overfire (+ identity unclear) |
+| 6 | UNCERTAIN | UNCERTAIN | departure_within_days | ✓ | ✓ | **Fixed** — future far-departure gate |
+| 7 | DENY | DENY | identity + incomplete | ✓ | | |
+| 8 | DENY | DENY | checker_missing_documentation | ✓ | ✓ | |
+| 9 | APPROVE | APPROVE | checker_consistent | ✓ | | Authenticity removed; now correct |
+| 10 | DENY | DENY | identity + healthy | ✓ | | Medical missed-dep path; healthy fires |
+| 11 | APPROVE | APPROVE | checker_consistent | ✓ | | |
+| 12 | APPROVE | DENY | signature + contradicts | ✗ | ✓ | Unsigned FN + contradicts FP |
+| 13 | UNCERTAIN | APPROVE | checker_consistent | ✗ | | GT suspicious dating; gate silent; `acceptable=DENY` |
+| 14 | DENY | UNCERTAIN | coverage_false_label | ✗ | ✓ | Coverage abstained; never reached healthy |
+| 15 | DENY | DENY | signature_check | ✓ | ✓ | |
+| 16 | APPROVE | DENY | signature_check | ✗ | ✓ | Was suspicious-dating UNCERTAIN; now unsigned DENY |
+| 17 | DENY | DENY | signature + healthy | ✓ | ✓ | |
+| 18 | DENY | UNCERTAIN | identity_unclear | ~ | ✓ | `acceptable=UNCERTAIN` |
+| 19 | APPROVE | DENY | checker_incomplete_document | ✗ | ✓ | Incomplete overfire |
+| 20 | UNCERTAIN | DENY | identity + signature | ~ | ✓ | `acceptable=DENY` |
+| 21 | DENY | DENY | checker_missing_documentation | ✓ | ✓ | |
+| 22 | DENY | DENY | signature + healthy | ✓ | ✓ | |
+| 23 | UNCERTAIN | DENY | signature_check | ~ | ✓ | `acceptable=DENY` |
+| 24 | UNCERTAIN | DENY | signature_check | ✗ | ✓ | Soft-APPROVE timing (`acceptable=APPROVE`) |
+| 25 | DENY | DENY | checker_missing_documentation | ✓ | ✓ | |
 
 Match key: **✓** same label · **~** pred equals GT `acceptable_decision` · **✗** hard mismatch.
 
-### Remaining hard misses (not caused by removed multi-date gate)
+### Hard misses (9)
 
 | Claim | GT → Pred | Root cause |
 | ----- | --------- | ---------- |
-| **5** | APPROVE → DENY | Italian OCR identity fail + authenticity/incomplete stack |
-| **6** | UNCERTAIN → DENY | Authenticity/incomplete overfire; `departure_within_days` silent |
-| **24** | UNCERTAIN → DENY | Unsigned + authenticity on soft-APPROVE timing |
+| **2** | DENY → APPROVE | `missed_departure_non_medical` + proof-of-booking; medical/healthy never runs |
+| **4** | DENY → UNCERTAIN | Redacted name → `identity_unclear` instead of identity DENY |
+| **5** | APPROVE → DENY | `checker_incomplete_document` overfire |
+| **12** | APPROVE → DENY | Missing signature + `checker_contradicts` |
+| **13** | UNCERTAIN → APPROVE | Suspicious-dating gate silent; checkers pass → APPROVE |
+| **14** | DENY → UNCERTAIN | Coverage `"False"` abstention; healthy never reached |
+| **16** | APPROVE → DENY | `signature_check` FN (unsigned) |
+| **19** | APPROVE → DENY | `checker_incomplete_document` overfire |
+| **24** | UNCERTAIN → DENY | `signature_check` on soft-APPROVE timing |
 
-Soft-only: **18**, **20**, **23**.
+Soft-only (~): **18**, **20**, **23**.
 
 ### Failure buckets (active)
 
-#### A. Authenticity / incomplete overfire
+#### A. Routing / abstention skips medical deny
 
-| Claim | Outcome | Notes |
-| ----- | ------- | ----- |
-| **4**, **7**, **22**, **23**~ | ✓ / ~ | Reasonable on suspicious docs |
-| **5** | ✗ | Stacks on OCR identity fail |
-| **6** | ✗ | Should be UNCERTAIN (timing), not DENY |
-| **24** | ✗ | Soft-APPROVE timing case |
+| Claim | Notes |
+| ----- | ----- |
+| **2** | Missed-departure + proof-of-booking → medical semantics skipped → false APPROVE |
+| **14** | Coverage `"False"` → persist-only UNCERTAIN; GT wants healthy DENY |
 
-#### B. YOLO signature verify
+#### B. Incomplete overfire (APPROVE → DENY)
 
-| Claim | Flip? | Impact |
-| ----- | ----- | ------ |
-| **11** | yes | APPROVE held |
-| **18** | yes | Soft UNCERTAIN via `identity_unclear` |
-| **19** | yes | Was multi-date UNCERTAIN — re-analyze |
-| **12**, **16**, **24**, … | ran, absent | Still unsigned |
+| Claim | Notes |
+| ----- | ----- |
+| **5**, **19** | Medical fields judged incomplete on GT-APPROVE certs |
 
-#### C. Timing — claim **6**
+#### C. Signature FNs
 
-`departure_within_days` still **0** fires this batch. Need a real UNCERTAIN path for “flight still weeks out.”
+| Claim | Notes |
+| ----- | ----- |
+| **12**, **16**, **24** | `signature_check=False` drives DENY; **12** also contradicts FP |
+| **15**, **17**, **20**~, **22**, **23**~ | Mix TP / soft |
+
+#### D. Identity polarity / unclear
+
+| Claim | Notes |
+| ----- | ----- |
+| **4** | Redacted → UNCERTAIN (`identity_unclear`); GT DENY |
+| **7**✓, **10**✓, **20**~ | Identity DENY working when names extract |
+
+#### E. Dating gates
+
+| Claim | Notes |
+| ----- | ----- |
+| **6**✓ | `departure_within_days` now fires (19 days out) |
+| **13**✗ | Suspicious dating **silent** on GT UNCERTAIN (17/11/2023 stamp) |
 
 ### Working paths
 
 | Signal | Claims | Notes |
 | ------ | ------ | ----- |
-| `healthy_check` | 2, 10, 14 | Stable when reached |
-| `identity_check` | 4, 7, 20~, 23~ | True mismatches; **5** OCR FP |
-| `signature_check` | 17, 20~, 22, 23~, 24✗ | Mix TP / FN |
-| `checker_missing_documentation` | 1, 8, 21, 25 | Mostly TP |
-| authenticity / incomplete | 4✓, 5✗, 6✗, 7✓, 22✓, 23~, 24✗ | Phase 07 |
-| `departure_within_days` | — | **0** fires |
-| `checker_suspicious_dating` | (re-check **13**, **16**) | Remains after multi-date removal |
+| `departure_within_days` | **6**✓ | Fixed this run |
+| `healthy_check` | 10✓, 17✓, 22✓ | Works on medical rule sets; skipped on **2** |
+| `identity_check` | 7✓, 10✓, 20~ | |
+| `signature_check` | 15✓, 17✓, 22✓ / 12✗, 16✗, 24✗ | |
+| `checker_missing_documentation` | 1, 8, 21, 25 | Stable TP |
+| incomplete | 7✓ / 5✗, 19✗ | Still over-denies APPROVE |
+| `coverage_false_label` | 14✗ | Abstention instead of healthy DENY |
 
 ### Takeaway
 
-1. **`multiple_document_dates` removed** — overfired on birth + issue / date ranges; do not restore without role filtering.
-2. **Authenticity / incomplete** still over-deny **5**, **6**, **24**.
-3. **YOLO** helps (**11**, **18**); unsigned FNs remain on some medical scans.
-4. **Re-run analyze + evaluation** to measure accuracy without the multi-date gate (expect claims **9**, **12**, **15**, **19** to change; **13**/**16** may still UNCERTAIN via suspicious dating).
+1. **Raw +4pp** (48% → **52%**) after departure gate: claim **6** fixed; claim **9**/ **10** also flipped to correct.
+2. Still **9 hard misses**. Biggest remaining themes: **incomplete overfire** (5, 19), **signature FNs** (12, 16, 24), **routing/abstention** (2, 14), **identity_unclear vs DENY** (4), **suspicious dating miss** (13).
+3. Policy accuracy flat at **64%** (soft credits on 18, 20, 23).
+4. Prior batch HITL was inflated (**19/25**) because analysis UNCERTAIN/classifier `"False"` also set HITL; HITL is now OCR/YOLO-only (re-measure after `make analyze`).
 
 ## Results: Benford's Law Image Forensics
 

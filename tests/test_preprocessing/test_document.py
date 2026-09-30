@@ -7,8 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 from docling_fakes import mock_docling_converter
 
+from compliance.config.settings import OcrRetryConfig, PreprocessingConfig
 from compliance.models.claim import DocumentData, is_nan_scalar
 from compliance.preprocessing.document import DocumentReader
+from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter
 from compliance.tools.benford import BenfordResult
 
@@ -31,6 +33,46 @@ def _mock_converter(
     picture_classes: list[str] | None = None,
 ) -> MagicMock:
     return mock_docling_converter(text, confidence, picture_classes=picture_classes)
+
+
+def _prep(*, formats: list[str], threshold: float = 0.7) -> PreprocessingConfig:
+    return PreprocessingConfig(
+        data_dir=".",
+        document_formats=formats,
+        confidence_threshold=threshold,
+        preprocessed_dir=".",
+        results_dir=".",
+    )
+
+
+def _reader(
+    *,
+    document_formats: list[str],
+    confidence_threshold: float = 0.7,
+    format_converter: FormatConverter,
+    document_converter: Any = None,
+    benford_checker: Any = None,
+    extraction_failure: ExtractionFailure | None = None,
+    ocr_retry: OcrRetryConfig | None = None,
+    retry_chat_fn: Any = None,
+    signature_detect_fn: Any = None,
+) -> DocumentReader:
+    """Test helper: build DocumentReader via from_config (no constructor fan-out)."""
+    kwargs: dict[str, Any] = {"format_converter": format_converter}
+    if document_converter is not None:
+        kwargs["document_converter"] = document_converter
+    if benford_checker is not None:
+        kwargs["benford_checker"] = benford_checker
+    if retry_chat_fn is not None:
+        kwargs["retry_chat_fn"] = retry_chat_fn
+    if signature_detect_fn is not None:
+        kwargs["signature_detect_fn"] = signature_detect_fn
+    return DocumentReader.from_config(
+        _prep(formats=document_formats, threshold=confidence_threshold),
+        ocr_retry,
+        extraction_failure or ExtractionFailure(),
+        **kwargs,
+    )
 
 
 def test_to_png_called_before_docling(tmp_path: Path) -> None:
@@ -58,7 +100,7 @@ def test_to_png_called_before_docling(tmp_path: Path) -> None:
     docling = MagicMock()
     docling.convert.side_effect = convert_side_effect
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["webp", "jpg", "jpeg", "png", "pdf"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -75,7 +117,7 @@ def test_to_png_called_before_docling(tmp_path: Path) -> None:
 def test_formats_filter_rejects_unknown(tmp_path: Path) -> None:
     src = tmp_path / "notes.txt"
     src.write_text("x", encoding="utf-8")
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["webp", "png"],
         confidence_threshold=0.7,
         format_converter=FormatConverter(source_formats=["webp", "png"]),
@@ -93,7 +135,7 @@ def test_low_confidence_sets_human_in_the_loop(tmp_path: Path) -> None:
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -119,7 +161,7 @@ def test_webp_goes_through_converter(tmp_path: Path) -> None:
     format_converter.to_png.return_value = png_path
     docling = _mock_converter("ok", 0.95)
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["webp", "png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -138,7 +180,7 @@ def test_pdf_skips_format_converter(tmp_path: Path) -> None:
     format_converter.source_formats = ["webp", "png", "pdf"]
     docling = _mock_converter("ok", 0.8)
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["webp", "png", "pdf"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -161,7 +203,7 @@ def test_document_data_arbitrary_fields(tmp_path: Path) -> None:
         "Name: Sam\nDate: 2024-06-01\nSeat: 12A\nAirline: Acme\n"
         "This booking confirmation lists the passenger and travel details clearly."
     )
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -185,7 +227,7 @@ def test_signature_detected_via_figure_classifier(tmp_path: Path) -> None:
     format_converter.to_png.return_value = src
 
     text = "CONSTANCIA MÉDICA\nEl paciente fue evaluado en consulta externa y se encuentra estable."
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -204,7 +246,7 @@ def test_signature_absent_when_classifier_finds_no_signature(tmp_path: Path) -> 
     format_converter.to_png.return_value = src
 
     text = "Firmado por Dr. Pérez\nJe soussigné, Docteur Mohamed"
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -219,15 +261,13 @@ def test_yolo_signature_verify_sets_has_signature_when_docling_misses(
     tmp_path: Path,
 ) -> None:
     """YOLO fallback can flip has_signature when Docling left it false."""
-    from compliance.config.settings import OcrRetryConfig
-
     src = tmp_path / "cert.png"
     src.write_bytes(b"png")
     format_converter = MagicMock(spec=FormatConverter)
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
     detect = MagicMock(return_value=0.91)
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -257,15 +297,13 @@ def test_yolo_signature_verify_sets_has_signature_when_docling_misses(
 def test_yolo_signature_verify_keeps_false_when_detector_finds_none(
     tmp_path: Path,
 ) -> None:
-    from compliance.config.settings import OcrRetryConfig
-
     src = tmp_path / "cert.png"
     src.write_bytes(b"png")
     format_converter = MagicMock(spec=FormatConverter)
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
     detect = MagicMock(return_value=None)
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -292,15 +330,13 @@ def test_yolo_signature_verify_keeps_false_when_detector_finds_none(
 
 def test_yolo_signature_below_threshold_sets_hitl(tmp_path: Path) -> None:
     """Weak YOLO score below signature_confidence → HITL, has_signature false."""
-    from compliance.config.settings import OcrRetryConfig
-
     src = tmp_path / "cert.png"
     src.write_bytes(b"png")
     format_converter = MagicMock(spec=FormatConverter)
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
     detect = MagicMock(return_value=0.12)
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -330,15 +366,13 @@ def test_yolo_signature_below_threshold_sets_hitl(tmp_path: Path) -> None:
 def test_yolo_signature_verify_skipped_when_docling_already_detected(
     tmp_path: Path,
 ) -> None:
-    from compliance.config.settings import OcrRetryConfig
-
     src = tmp_path / "cert.png"
     src.write_bytes(b"png")
     format_converter = MagicMock(spec=FormatConverter)
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
     detect = MagicMock(return_value=0.9)
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -364,7 +398,6 @@ def test_yolo_signature_verify_skipped_when_docling_already_detected(
 
 def test_yolo_signature_verify_errors_without_fallback(tmp_path: Path) -> None:
     """Missing YOLO / HF auth must raise — no soft has_signature=false fallback."""
-    from compliance.config.settings import OcrRetryConfig
     from compliance.preprocessing.document import SignatureDetectionError
 
     src = tmp_path / "cert.png"
@@ -373,7 +406,7 @@ def test_yolo_signature_verify_errors_without_fallback(tmp_path: Path) -> None:
     format_converter.source_formats = ["png"]
     format_converter.to_png.return_value = src
     detect = MagicMock(side_effect=SignatureDetectionError("Cannot download gated YOLO weights. Set HF_TOKEN."))
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -403,7 +436,7 @@ def test_no_signature_when_no_pictures(tmp_path: Path) -> None:
     format_converter.to_png.return_value = src
 
     text = "CERTIFICACION DE HOSPITALIZACION\nEl paciente fue admitido por dolor abdominal agudo en urgencias."
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -422,7 +455,7 @@ def test_timestamps_extracted(tmp_path: Path) -> None:
     format_converter.to_png.return_value = src
 
     text = "Name: Ada\nAdmitted: 14-04-2017\nDischarged: 18/04/2017\nDate: 2017-04-20\nSigned by Dr. García"
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -444,7 +477,7 @@ def test_timestamps_with_month_names(tmp_path: Path) -> None:
     format_converter.to_png.return_value = src
 
     text = "Ingresando el día 13 de Agosto de 2015\nFecha: 22 de Abril 2020"
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -465,7 +498,7 @@ def test_timestamps_deduplication(tmp_path: Path) -> None:
     format_converter.to_png.return_value = src
 
     text = "Date: 2024-01-15\nAdmission: 2024-01-15\nDischarge: 2024-01-20"
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -491,7 +524,7 @@ def test_benford_violation_returns_deny_fraud_skips_docling(tmp_path: Path) -> N
     benford_checker = MagicMock()
     benford_checker.check.return_value = _benford_result(conformity=False, chi_squared=99.0)
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -523,7 +556,7 @@ def test_benford_conformity_continues_to_docling(tmp_path: Path) -> None:
     benford_checker = MagicMock()
     benford_checker.check.return_value = _benford_result(conformity=True, chi_squared=3.0)
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -546,7 +579,7 @@ def test_pdf_skips_benford_check(tmp_path: Path) -> None:
     docling = _mock_converter("ok", 0.8)
     benford_checker = MagicMock()
 
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png", "pdf"],
         confidence_threshold=0.7,
         format_converter=format_converter,

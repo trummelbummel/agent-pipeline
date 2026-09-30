@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
 from docling_fakes import mock_docling_converter
 
-from compliance.config.settings import OcrRetryConfig
+from compliance.config.settings import OcrRetryConfig, PreprocessingConfig
 from compliance.preprocessing.document import DocumentReader
 from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.preprocessing import FormatConverter
@@ -15,6 +16,46 @@ from compliance.preprocessing.preprocessing import FormatConverter
 
 def _mock_converter(text: str, confidence: float) -> MagicMock:
     return mock_docling_converter(text, confidence)
+
+
+def _prep(*, formats: list[str], threshold: float = 0.7) -> PreprocessingConfig:
+    return PreprocessingConfig(
+        data_dir=".",
+        document_formats=formats,
+        confidence_threshold=threshold,
+        preprocessed_dir=".",
+        results_dir=".",
+    )
+
+
+def _reader(
+    *,
+    document_formats: list[str],
+    confidence_threshold: float = 0.7,
+    format_converter: FormatConverter,
+    document_converter: Any = None,
+    benford_checker: Any = None,
+    extraction_failure: ExtractionFailure | None = None,
+    ocr_retry: OcrRetryConfig | None = None,
+    retry_chat_fn: Any = None,
+    signature_detect_fn: Any = None,
+) -> DocumentReader:
+    """Test helper: build DocumentReader via from_config (no constructor fan-out)."""
+    kwargs: dict[str, Any] = {"format_converter": format_converter}
+    if document_converter is not None:
+        kwargs["document_converter"] = document_converter
+    if benford_checker is not None:
+        kwargs["benford_checker"] = benford_checker
+    if retry_chat_fn is not None:
+        kwargs["retry_chat_fn"] = retry_chat_fn
+    if signature_detect_fn is not None:
+        kwargs["signature_detect_fn"] = signature_detect_fn
+    return DocumentReader.from_config(
+        _prep(formats=document_formats, threshold=confidence_threshold),
+        ocr_retry,
+        extraction_failure or ExtractionFailure(),
+        **kwargs,
+    )
 
 
 def test_empty_text_is_faulty() -> None:
@@ -65,7 +106,7 @@ def test_document_reader_marks_faulty_extraction_as_hitl(tmp_path: Path) -> None
     format_converter.to_png.return_value = src
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -100,7 +141,7 @@ def test_faulty_extraction_invokes_vision_retry_and_clears_faulty(tmp_path: Path
         model="llava",
         prompt="Transcribe the document image into clean markdown.",
     )
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -126,7 +167,7 @@ def test_faulty_extraction_retry_still_faulty_keeps_hitl(tmp_path: Path) -> None
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
     retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content="_none_")))
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -152,7 +193,7 @@ def test_faulty_extraction_retry_invoked_when_enabled(tmp_path: Path) -> None:
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
     retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content="_none_")))
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -177,7 +218,7 @@ def test_clean_extraction_skips_retry(tmp_path: Path) -> None:
         "de Médecine Physique, atteste que Monsieur KOUADRI a été pris en charge."
     )
     retry_chat = MagicMock()
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -201,7 +242,7 @@ def test_ocr_retry_disabled_skips_chat(tmp_path: Path) -> None:
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
     retry_chat = MagicMock()
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -227,7 +268,7 @@ def test_faulty_extraction_retry_error_marks_uncertain_hitl(tmp_path: Path) -> N
 
     garbage = "31. X. 20u\n<!-- image -->\nSignature\n<!-- image -->\nSignature"
     retry_chat = MagicMock(side_effect=RuntimeError("vision unavailable"))
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -265,7 +306,7 @@ def test_low_confidence_triggers_vision_retry(tmp_path: Path) -> None:
         "Certifico haber examinado a:\nMarcos Junes\nQuien autoriza informar el diagnostico.\nFirma del profesional\n"
     )
     retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=clearer)))
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -301,7 +342,7 @@ def test_hitl_triggers_vision_retry_when_faulty_flag_disabled(tmp_path: Path) ->
         "que bien considere sin constituir el mismo una referencia absoluta.\n"
     )
     retry_chat = MagicMock(return_value=SimpleNamespace(message=SimpleNamespace(content=weak_but_long)))
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
@@ -337,7 +378,7 @@ def test_high_confidence_clean_ocr_skips_retry(tmp_path: Path) -> None:
         "de Médecine Physique, atteste que Monsieur KOUADRI a été pris en charge."
     )
     retry_chat = MagicMock()
-    reader = DocumentReader(
+    reader = _reader(
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,

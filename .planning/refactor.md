@@ -54,7 +54,7 @@ Rule: `CLAUDE.md` §Composition · style-review checklist R16
 
 ---
 
-### [ ] GO-003: Decompose DocumentReader into composable OCR / retry / signature / Benford pieces
+### [x] GO-003: Decompose DocumentReader into composable OCR / retry / signature / Benford pieces
 
 **Signals:** R16-2 (wide constructor), R16-4 (mixed layers)
 **Site:** `src/compliance/preprocessing/document.py` (`DocumentReader`)

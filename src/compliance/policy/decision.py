@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from compliance.config.settings import AnalysisConfig
-from compliance.llm.checker import CheckerMode, CheckOutcome
+from compliance.llm.checks import CheckerMode, CheckOutcome
 from compliance.models.claim import GroundTruth
 from compliance.models.decisions import (
     DECISION_APPROVE,
@@ -71,10 +71,11 @@ def decision_from_state(
     2. Routed coverage abstention → UNCERTAIN ``coverage_false_label``
     3. ``departure_within_days`` → UNCERTAIN
     4. ``checker_suspicious_dating`` → UNCERTAIN
-    5. Incomplete VIOLATION alone when OCR/YOLO already flagged HITL → UNCERTAIN
+    5. Any hard VIOLATION (checker or missing-doc / signature; incomplete
+       excluded under OCR HITL) → DENY — unsigned / identity / healthy /
+       contradicts always beat soft incomplete
+    6. Incomplete VIOLATION alone when OCR/YOLO already flagged HITL → UNCERTAIN
        ``checker_incomplete_document`` (soft polarity; clean OCR still DENYs)
-    6. Any hard VIOLATION (checker or missing-doc / signature; incomplete
-       excluded under OCR HITL) → DENY
     7. Any ERROR (except containment) → UNCERTAIN ``checker_error:<modes>``
     8. Legacy ``identity_unclear`` (identity ERROR / pre-VIOLATION unclear flag)
        → UNCERTAIN ``identity_unclear``
@@ -125,17 +126,15 @@ def decision_from_state(
             outcome=lambda: GroundTruth(decision=DECISION_UNCERTAIN, explanation="checker_suspicious_dating"),
         ),
         _DecisionGate(
-            applies=lambda: (
-                _INCOMPLETE_DENY_KEY in all_violated and not hard_violated and _ocr_uncertain(state, ocr_failure_reason)
-            ),
+            applies=lambda: bool(hard_violated),
+            outcome=_deny_violations,
+        ),
+        _DecisionGate(
+            applies=lambda: _INCOMPLETE_DENY_KEY in all_violated and _ocr_uncertain(state, ocr_failure_reason),
             outcome=lambda: GroundTruth(
                 decision=DECISION_UNCERTAIN,
                 explanation=_INCOMPLETE_DENY_KEY,
             ),
-        ),
-        _DecisionGate(
-            applies=lambda: bool(hard_violated),
-            outcome=_deny_violations,
         ),
         _DecisionGate(
             applies=lambda: bool(_errored_checkers(state)),
@@ -261,7 +260,9 @@ def _hard_deny_keys(violated: list[str], *, ocr_uncertain: bool) -> list[str]:
     """DENY keys after OCR-aware incomplete softening.
 
     When OCR/YOLO is uncertain, incomplete VIOLATION is not a hard DENY — it
-    alone becomes UNCERTAIN. Clean OCR keeps incomplete as DENY.
+    alone becomes UNCERTAIN. Clean OCR keeps incomplete as DENY. Other keys
+    (especially ``signature_check``) stay hard DENY and are never masked by
+    soft incomplete.
 
     :param violated: Full violated key list from :func:`violated_checkers`.
     :param ocr_uncertain: Whether preprocess OCR/YOLO flagged review.

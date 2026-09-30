@@ -9,10 +9,12 @@ from __future__ import annotations
 from compliance.config.settings import AnalysisConfig, ClassificationConfig
 from compliance.policy.coverage import RoutedCoverage
 from compliance.policy.state import ClaimAnalysisState
+from compliance.text_cues import DEFAULT_MEDICAL_MENTION_CUES, text_mentions_any
 
 __all__ = [
     "acceptable_document_codes",
     "classified_document_codes",
+    "description_mentions_medical",
     "document_stage_for_coverage",
     "is_missing_documentation",
 ]
@@ -52,6 +54,10 @@ def classified_document_codes(state: ClaimAnalysisState, *, analysis: AnalysisCo
 def acceptable_document_codes(state: ClaimAnalysisState, *, analysis: AnalysisConfig) -> set[str]:
     """Return document codes allowed for this claim's routed coverage path.
 
+    On missed-departure, when the claim description mentions a medical reason,
+    only ``missed_departure_medical_codes`` are acceptable — proof of booking or
+    an incident report alone is treated as missing medical documentation.
+
     :param state: Graph state with routed coverage and reason label codes.
     :param analysis: Analysis stage configuration.
     :return: Acceptable document-type codes from ``required_documents`` config
@@ -65,7 +71,7 @@ def acceptable_document_codes(state: ClaimAnalysisState, *, analysis: AnalysisCo
     if routed.branch == "personal_effects":
         return set(required.personal_effects) or stage_positive
     if routed.branch == "missed_departure":
-        return set(required.missed_departure) or stage_positive
+        return _missed_departure_acceptable_codes(state, analysis, stage_positive)
     return _cancellation_acceptable_codes(state, analysis, stage_positive)
 
 
@@ -81,6 +87,44 @@ def is_missing_documentation(state: ClaimAnalysisState, *, analysis: AnalysisCon
         return True
     acceptable = acceptable_document_codes(state, analysis=analysis)
     return classified.isdisjoint(acceptable)
+
+
+def description_mentions_medical(
+    text: str,
+    cues: list[str] | None = None,
+) -> bool:
+    """True when claim narrative cues a medical reason for the miss/cancel.
+
+    :param text: Claim description artifact text.
+    :param cues: Vocabulary from ``analysis.medical_mention_cues``; defaults to
+        the built-in list when omitted (unit tests).
+    :return: Whether medical / hospital / clinical language is present.
+    """
+    return text_mentions_any(text, cues if cues is not None else DEFAULT_MEDICAL_MENTION_CUES)
+
+
+def _missed_departure_acceptable_codes(
+    state: ClaimAnalysisState,
+    analysis: AnalysisConfig,
+    stage_positive: set[str],
+) -> set[str]:
+    """Acceptable missed-departure codes, narrowed when medical is mentioned.
+
+    :param state: Graph state with ``description_text`` and document labels.
+    :param analysis: Analysis stage configuration.
+    :param stage_positive: Fallback codes when no required mapping is configured.
+    :return: Medical-only codes when the narrative mentions medical; else the
+        full missed-departure acceptable set (or stage positives).
+    """
+    required = analysis.required_documents
+    full = set(required.missed_departure) or stage_positive
+    medical_only = set(required.missed_departure_medical_codes)
+    if medical_only and description_mentions_medical(
+        state.get("description_text") or "",
+        analysis.medical_mention_cues,
+    ):
+        return medical_only & full if full else medical_only
+    return full
 
 
 def _cancellation_acceptable_codes(

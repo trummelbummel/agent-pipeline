@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from compliance.llm.checker import CheckerMode, CheckOutcome
+from compliance.llm.checks import CheckerMode, CheckOutcome
 from compliance.policy.coverage import RoutedCoverage
 
 __all__ = ["ClaimAnalysisState"]

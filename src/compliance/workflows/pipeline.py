@@ -119,19 +119,23 @@ def _supporting_documents_md_text(bundle: ClaimBundle) -> str:
     return _markdown_document("Supporting documents", sections)
 
 
-def _document_metadata_entries(bundle: ClaimBundle) -> list[DocumentMetaData]:
+def _document_metadata_entries(
+    bundle: ClaimBundle,
+    extraction_failure: ExtractionFailure,
+) -> list[DocumentMetaData]:
     """Collect DocumentMetaData for JSON persistence, including empty-doc HITL.
 
     When no documents were extracted (e.g. claim 8 ``supporting_document.md`` is
     ``_none_``), emit one faulty metadata row so human-in-the-loop is recorded.
 
     :param bundle: Populated ClaimBundle.
+    :param extraction_failure: Detector using configured substantive-content thresholds.
     :return: Metadata rows to serialize under ``document_metadata.json``.
     """
     if bundle.documents:
         return [document.metadata for document in bundle.documents]
 
-    failure = ExtractionFailure().evaluate("_none_")
+    failure = extraction_failure.evaluate("_none_")
     return [
         DocumentMetaData(
             faulty_extraction=failure.faulty,
@@ -141,7 +145,12 @@ def _document_metadata_entries(bundle: ClaimBundle) -> list[DocumentMetaData]:
     ]
 
 
-def _document_metadata_json_text(bundle: ClaimBundle, *, run_id: str) -> str:
+def _document_metadata_json_text(
+    bundle: ClaimBundle,
+    *,
+    run_id: str,
+    extraction_failure: ExtractionFailure,
+) -> str:
     """JSON body for document_metadata.json under the preprocessed tree.
 
     Mirrored preprocessed artifacts (including this metadata file) keep direct
@@ -150,9 +159,10 @@ def _document_metadata_json_text(bundle: ClaimBundle, *, run_id: str) -> str:
 
     :param bundle: Populated ClaimBundle.
     :param run_id: Preprocess run id stamped beside ``documents`` for provenance.
+    :param extraction_failure: Detector using configured substantive-content thresholds.
     :return: Pretty-printed JSON with ``run_id`` and a ``documents`` metadata list.
     """
-    entries = _document_metadata_entries(bundle)
+    entries = _document_metadata_entries(bundle, extraction_failure)
     payload = {
         "run_id": run_id,
         "documents": [entry.model_dump(mode="json") for entry in entries],
@@ -189,6 +199,8 @@ class PreprocessingPipeline:
     def __init__(self, config: AppConfig, **reader_overrides: Any) -> None:
         self._config = config
         self._reader_overrides = reader_overrides
+        self._png_converter = FormatConverter(source_formats=config.preprocessing.document_formats)
+        self._extraction_failure = ExtractionFailure(config.extraction_failure)
 
     @property
     def output_root(self) -> Path:
@@ -355,7 +367,12 @@ class PreprocessingPipeline:
             encoding="utf-8",
         )
         (claim_out / names.document_metadata).write_text(
-            _document_metadata_json_text(bundle, run_id=run_id) + "\n",
+            _document_metadata_json_text(
+                bundle,
+                run_id=run_id,
+                extraction_failure=self._extraction_failure,
+            )
+            + "\n",
             encoding="utf-8",
         )
         self._write_document_pngs(claim_out, bundle)
@@ -423,7 +440,6 @@ class PreprocessingPipeline:
         :param bundle: Claim bundle whose ``source_files.document_paths`` are written.
         :return: Paths of PNG files written under ``claim_out``.
         """
-        converter = FormatConverter(source_formats=self._config.preprocessing.document_formats)
         written: list[Path] = []
         for path_str in bundle.source_files.document_paths:
             src = Path(path_str)
@@ -438,7 +454,7 @@ class PreprocessingPipeline:
                     file=src.name,
                 )
                 continue
-            png_path = converter.to_png(src, output_dir=claim_out)
+            png_path = self._png_converter.to_png(src, output_dir=claim_out)
             written.append(png_path)
             log_branch_decision(
                 logger,

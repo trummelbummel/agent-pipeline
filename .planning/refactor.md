@@ -79,7 +79,7 @@ Rule: `CLAUDE.md` §Composition · style-review checklist R16
 
 ---
 
-### [ ] GO-004: Build claim readers once (`ClaimReaders.from_config`) — not per claim
+### [x] GO-004: Build claim readers once (`ClaimReaders.from_config`) — not per claim
 
 **Signals:** R16-1, R16-5 (per-item rebuild; expensive Docling converter)
 **Sites:** `src/compliance/preprocessing/claim_batch.py` (`_process_single_claim`), `src/compliance/workflows/pipeline.py` (`PreprocessingPipeline`)

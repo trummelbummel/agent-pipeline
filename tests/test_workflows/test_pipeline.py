@@ -420,6 +420,45 @@ def test_run_preprocessing_workflow_mirrors_all_claims(
         assert sorted(p.name for p in claim_out.iterdir() if p.is_file()) == sorted(expected)
 
 
+def test_preprocessing_pipeline_builds_document_reader_once(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PreprocessingPipeline constructs DocumentReader.from_config once at init (GO-004)."""
+    data_dir = tmp_path / "data"
+    output_root = tmp_path / "preprocessed_out"
+    _seed_minimal_claim(data_dir / "claim 1")
+    _seed_minimal_claim(data_dir / "claim 2", decision="DENY")
+    config = minimal_app_config_factory(data_dir, preprocessed_dir=output_root)
+
+    mock_reader = MagicMock()
+    mock_reader.read.return_value = DocumentData(
+        raw_text="x",
+        metadata=DocumentMetaData(extraction_probability=0.9),
+    )
+    calls: list[int] = []
+
+    @classmethod
+    def _fake_from_config(cls: type, *args: object, **kwargs: object) -> MagicMock:
+        calls.append(1)
+        return mock_reader
+
+    monkeypatch.setattr(
+        "compliance.preprocessing.claim_batch.DocumentReader.from_config",
+        _fake_from_config,
+    )
+
+    written = PreprocessingPipeline(
+        config,
+        description_reader=mock_description_reader_factory(),
+    ).run()
+
+    assert sorted(p.name for p in written) == ["claim 1", "claim 2"]
+    assert len(calls) == 1
+
+
 class _SimulatedClaimFailure(RuntimeError):
     """Injected answer-read failure for one claim folder."""
 

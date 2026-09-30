@@ -15,6 +15,7 @@ from compliance.models.claim import (
     is_nan_scalar,
 )
 from compliance.preprocessing.claim_batch import (
+    ClaimReaders,
     _claim_document_summary,
     _discover_claim_folders,
     _document_decision_fields,
@@ -25,7 +26,6 @@ from compliance.preprocessing.claim_batch import (
     _validate_claim_root,
 )
 from compliance.preprocessing.extraction_failure import ExtractionFailure
-from compliance.preprocessing.preprocessing import FormatConverter
 from compliance.workflows.artifact_publication import new_run_id, publish_claim_generation
 from compliance.workflows.predicted_answer_io import (
     preprocess_predicted_answer_text,
@@ -197,10 +197,16 @@ class PreprocessingPipeline:
     """
 
     def __init__(self, config: AppConfig, **reader_overrides: Any) -> None:
+        """Build claim readers once at the composition root.
+
+        :param config: Loaded application configuration.
+        :param reader_overrides: Optional injected readers for tests
+            (``document_reader=``, ``description_reader=``, etc.).
+        """
         self._config = config
-        self._reader_overrides = reader_overrides
-        self._png_converter = FormatConverter(source_formats=config.preprocessing.document_formats)
-        self._extraction_failure = ExtractionFailure(config.extraction_failure)
+        self._readers = ClaimReaders.from_config(config, **reader_overrides)
+        self._png_converter = self._readers.format_converter
+        self._extraction_failure = self._readers.extraction_failure
 
     @property
     def output_root(self) -> Path:
@@ -238,7 +244,7 @@ class PreprocessingPipeline:
 
         root = self.output_root if output_root is None else output_root
         resolved_run_id = run_id if run_id is not None else new_run_id()
-        bundle = _process_single_claim(claim_dir, self._config, **self._reader_overrides)
+        bundle = _process_single_claim(claim_dir, self._config, readers=self._readers)
 
         claim_out = root / claim_dir.name
         _validate_claim_root(claim_out, root=root)

@@ -64,10 +64,7 @@ class FormatConverter:
             msg = f"Unsupported format for PNG conversion: .{suffix}"
             raise ValueError(msg)
         if suffix == "pdf":
-            msg = (
-                "PDF conversion is not supported by FormatConverter; "
-                "pass through or convert externally"
-            )
+            msg = "PDF conversion is not supported by FormatConverter; pass through or convert externally"
             raise ValueError(msg)
 
     def _png_passthrough(self, path: Path, output_dir: Path | None) -> Path:

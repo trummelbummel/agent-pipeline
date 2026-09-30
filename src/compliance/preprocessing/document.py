@@ -655,9 +655,9 @@ class SignatureVerifier:
         """YOLO signature pass when Docling left ``has_signature`` false.
 
         Uses ``ocr_retry`` signature settings. Stores max box score as
-        ``signature_probability``. When max score ≥ threshold →
-        ``has_signature=true``. When score is missing or below threshold →
-        ``human_in_the_loop=true`` (operator should confirm).
+        ``signature_probability``. Any YOLO box (score present) →
+        ``has_signature=true``. No boxes → ``human_in_the_loop=true``
+        (operator should confirm).
 
         :param document: DocumentData after Docling / optional text OCR retry.
         :param resolved: Path Docling consumed (PNG or PDF).
@@ -699,9 +699,8 @@ class SignatureVerifier:
             file=source_file,
             model=self._ocr_retry.signature_model,
         )
-        threshold = float(self._ocr_retry.signature_confidence)
         max_conf = self._run_detect(resolved, self._ocr_retry)
-        detected = max_conf is not None and max_conf >= threshold
+        detected = max_conf is not None
         meta_update: dict[str, object] = {
             "signature_verify_used": True,
             "signature_probability": (float(max_conf) if max_conf is not None else _MISSING),
@@ -716,21 +715,18 @@ class SignatureVerifier:
                 file=source_file,
                 model=self._ocr_retry.signature_model,
                 confidence=f"{max_conf:.3f}",
-                threshold=f"{threshold:.3f}",
             )
         else:
             meta_update["human_in_the_loop"] = True
-            conf_label = "none" if max_conf is None else f"{max_conf:.3f}"
             log_branch_decision(
                 logger,
                 branch="signature_verify",
                 outcome="HITL",
-                reason="below_threshold" if max_conf is not None else "yolo_absent",
+                reason="yolo_absent",
                 level=logging.WARNING,
                 file=source_file,
                 model=self._ocr_retry.signature_model,
-                confidence=conf_label,
-                threshold=f"{threshold:.3f}",
+                confidence="none",
             )
         return document.model_copy(update={"metadata": document.metadata.model_copy(update=meta_update)})
 

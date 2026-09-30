@@ -50,11 +50,7 @@ class InformationExtractor:
                 {"role": "system", "content": self.prompt},
                 {
                     "role": "user",
-                    "content": (
-                        "Extract fields matching this JSON schema:\n"
-                        f"{json.dumps(schema)}\n\n"
-                        f"Text:\n{text}"
-                    ),
+                    "content": (f"Extract fields matching this JSON schema:\n{json.dumps(schema)}\n\nText:\n{text}"),
                 },
             ],
             format="json",

@@ -4,6 +4,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
 
+from compliance.config.settings import OcrRetryConfig
+
 SignatureDetectFn = Callable[[Path], float | None]
 
 # Floor for Ultralytics ``conf`` so weak boxes (below accept threshold) still score.
@@ -114,22 +116,16 @@ def resolve_signature_weights(*, model: str, weights: str) -> str:
         raise SignatureWeightsDownloadError(weights_ref, str(exc)) from exc
 
 
-def detect_signature_with_yolo(
-    image_path: Path,
-    *,
-    model: str,
-    weights: str,
-    confidence: float,
-) -> float | None:
+def detect_signature_with_yolo(image_path: Path, ocr_retry: OcrRetryConfig) -> float | None:
     """Run Ultralytics YOLO signature detection on a document image.
 
-    Predicts with a low score floor so boxes below ``confidence`` still return a
-    probability; the caller applies ``confidence`` as the accept / HITL threshold.
+    Predicts with a low score floor so boxes below ``signature_confidence`` still
+    return a probability; the caller applies that confidence as the accept / HITL
+    threshold.
 
     :param image_path: Raster document path (PNG preferred).
-    :param model: HuggingFace repo id or local ``.pt`` path from config.
-    :param weights: Filename inside the HF repo (ignored for local ``.pt``).
-    :param confidence: Accept threshold from config (also caps the score floor).
+    :param ocr_retry: OCR-retry config carrying ``signature_model``,
+        ``signature_weights``, and ``signature_confidence``.
     :return: Max box confidence in ``[0, 1]``, or ``None`` when no boxes fire.
     :raises SignatureDetectionError: When Ultralytics/YOLO is missing or inference fails.
     """
@@ -139,6 +135,9 @@ def detect_signature_with_yolo(
     except ImportError as exc:
         raise SignatureDependencyError("ultralytics") from exc
 
+    model = ocr_retry.signature_model
+    weights = ocr_retry.signature_weights
+    confidence = ocr_retry.signature_confidence
     weights_path = resolve_signature_weights(model=model, weights=weights)
     score_floor = min(_SIGNATURE_SCORE_FLOOR, float(confidence))
     try:

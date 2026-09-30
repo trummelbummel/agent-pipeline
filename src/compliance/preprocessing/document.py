@@ -550,12 +550,7 @@ class DocumentReader(Reader):
         try:
             if self._signature_detect is not None:
                 return self._signature_detect(image_path)
-            return detect_signature_with_yolo(
-                image_path,
-                model=ocr_retry.signature_model,
-                weights=ocr_retry.signature_weights,
-                confidence=ocr_retry.signature_confidence,
-            )
+            return detect_signature_with_yolo(image_path, ocr_retry)
         except SignatureDetectionError:
             raise
         except Exception as exc:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from compliance.models.claim import DocumentData, DocumentMetaData, is_nan_scalar
 from compliance.preprocessing.claim_batch import (
     _classify_files,
@@ -131,6 +133,82 @@ def test_run_pipeline_returns_claim_bundles(
     assert bundles[0].claim_id == "claim 1"
     assert bundles[0].ground_truth.decision == "APPROVE"
     assert not (claim / "processed.json").exists()
+
+
+def test_claim_readers_from_config_honors_overrides(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    mock_description_reader_factory: MockDescriptionReaderFactory,
+    mock_document_reader_factory: MockDocumentReaderFactory,
+) -> None:
+    """ClaimReaders.from_config keeps injectable seams and shared collaborators."""
+    from compliance.preprocessing.answer import AnswerReader
+    from compliance.preprocessing.claim_batch import ClaimReaders
+    from compliance.preprocessing.extraction_failure import ExtractionFailure
+    from compliance.preprocessing.markdown import MarkdownReader
+    from compliance.preprocessing.preprocessing import FormatConverter
+
+    config = minimal_app_config_factory(tmp_path)
+    answer = AnswerReader()
+    markdown = MarkdownReader()
+    description = mock_description_reader_factory()
+    document = mock_document_reader_factory()
+    converter = FormatConverter(source_formats=config.preprocessing.document_formats)
+    failure = ExtractionFailure(config.extraction_failure)
+
+    readers = ClaimReaders.from_config(
+        config,
+        answer_reader=answer,
+        markdown_reader=markdown,
+        description_reader=description,
+        document_reader=document,
+        format_converter=converter,
+        extraction_failure=failure,
+    )
+
+    assert readers.answer is answer
+    assert readers.markdown is markdown
+    assert readers.description is description
+    assert readers.document is document
+    assert readers.format_converter is converter
+    assert readers.extraction_failure is failure
+
+
+def test_run_pipeline_builds_document_reader_once(
+    tmp_path: Path,
+    minimal_app_config_factory: MinimalAppConfigFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multi-claim batch constructs DocumentReader.from_config once (GO-004)."""
+    from unittest.mock import MagicMock
+
+    for name in ("claim 1", "claim 2"):
+        claim = tmp_path / name
+        claim.mkdir()
+        (claim / "answer.json").write_text('{"decision": "APPROVE"}', encoding="utf-8")
+        (claim / "description.txt").write_text("hi", encoding="utf-8")
+
+    mock_reader = MagicMock()
+    mock_reader.read.return_value = DocumentData(
+        raw_text="x",
+        metadata=DocumentMetaData(extraction_probability=0.9),
+    )
+    calls: list[int] = []
+
+    @classmethod
+    def _fake_from_config(cls: type, *args: object, **kwargs: object) -> MagicMock:
+        calls.append(1)
+        return mock_reader
+
+    monkeypatch.setattr(
+        "compliance.preprocessing.claim_batch.DocumentReader.from_config",
+        _fake_from_config,
+    )
+
+    bundles = run_pipeline(minimal_app_config_factory(tmp_path))
+
+    assert len(bundles) == 2
+    assert len(calls) == 1
 
 
 def test_read_documents_skips_missing_file(tmp_path: Path) -> None:

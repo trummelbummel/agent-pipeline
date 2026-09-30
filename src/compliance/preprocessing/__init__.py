@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from compliance.preprocessing.answer import AnswerPreprocessor, AnswerReader
-from compliance.preprocessing.claim_batch import run_pipeline
+from compliance.preprocessing.claim_batch import ClaimReaders, run_pipeline
 from compliance.preprocessing.description import DescriptionPreprocessor, DescriptionReader
 from compliance.preprocessing.document import DocumentPreprocessor, DocumentReader, vision_ocr_text
 from compliance.preprocessing.extraction_failure import ExtractionFailure
@@ -13,6 +13,7 @@ from compliance.preprocessing.reader import Reader
 __all__ = [
     "AnswerPreprocessor",
     "AnswerReader",
+    "ClaimReaders",
     "DescriptionPreprocessor",
     "DescriptionReader",
     "DocumentPreprocessor",

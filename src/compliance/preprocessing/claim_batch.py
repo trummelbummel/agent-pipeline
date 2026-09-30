@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from compliance.branch_log import log_branch_decision
 from compliance.config.settings import AppConfig
@@ -28,6 +28,7 @@ from compliance.models.decisions import (
 from compliance.preprocessing.answer import AnswerReader
 from compliance.preprocessing.description import DescriptionReader
 from compliance.preprocessing.document import DocumentReader, SignatureDetectionError
+from compliance.preprocessing.extraction_failure import ExtractionFailure
 from compliance.preprocessing.extractor import InformationExtractor
 from compliance.preprocessing.markdown import MarkdownReader
 from compliance.preprocessing.preprocessing import FormatConverter
@@ -36,6 +37,85 @@ from compliance.tools.benford import BenfordLawChecker
 logger = logging.getLogger(__name__)
 
 _CLAIM_NUM = re.compile(r"(\d+)")
+
+
+class ClaimReaders(NamedTuple):
+    """Readers and shared preprocessing collaborators built once per batch/pipeline.
+
+    :param answer: Ground-truth answer.json reader.
+    :param markdown: Supporting/internal markdown reader.
+    :param description: Claim description.txt reader (LLM extractor).
+    :param document: Document OCR reader (Docling + optional Benford/retry).
+    :param format_converter: Shared PNG converter for documents and mirrored artifacts.
+    :param extraction_failure: Shared empty/faulty-extraction detector.
+    """
+
+    answer: AnswerReader
+    markdown: MarkdownReader
+    description: DescriptionReader
+    document: DocumentReader
+    format_converter: FormatConverter
+    extraction_failure: ExtractionFailure
+
+    @classmethod
+    def from_config(
+        cls,
+        config: AppConfig,
+        *,
+        answer_reader: AnswerReader | None = None,
+        markdown_reader: MarkdownReader | None = None,
+        description_reader: DescriptionReader | None = None,
+        document_reader: DocumentReader | None = None,
+        format_converter: FormatConverter | None = None,
+        extraction_failure: ExtractionFailure | None = None,
+        benford_checker: BenfordLawChecker | None = None,
+    ) -> ClaimReaders:
+        """Build claim readers once from config, honoring injectable overrides.
+
+        :param config: Loaded application configuration.
+        :param answer_reader: Optional AnswerReader injection (tests).
+        :param markdown_reader: Optional MarkdownReader injection (tests).
+        :param description_reader: Optional DescriptionReader injection (tests).
+        :param document_reader: Optional DocumentReader injection (tests).
+        :param format_converter: Optional shared FormatConverter; defaults from prep formats.
+        :param extraction_failure: Optional ExtractionFailure; defaults from config section.
+        :param benford_checker: Optional Benford checker; when omitted and Benford is
+            enabled, one is built from ``config.benford`` (ignored when ``document_reader``
+            is injected).
+        :return: Bundle ready to process any number of claim folders.
+        """
+        prep = config.preprocessing
+        converter = format_converter or FormatConverter(source_formats=prep.document_formats)
+        failure = extraction_failure or ExtractionFailure(config.extraction_failure)
+
+        if description_reader is None:
+            extractor = InformationExtractor(
+                target_model=BookingData,
+                model_name=config.extraction.model,
+                prompt=config.extraction.prompt,
+            )
+            description_reader = DescriptionReader(extractor=extractor)
+
+        if document_reader is None:
+            checker = benford_checker
+            if checker is None and config.benford.enabled:
+                checker = BenfordLawChecker(config.benford)
+            document_reader = DocumentReader.from_config(
+                prep,
+                config.ocr_retry,
+                failure,
+                format_converter=converter,
+                benford_checker=checker,
+            )
+
+        return cls(
+            answer=answer_reader or AnswerReader(),
+            markdown=markdown_reader or MarkdownReader(),
+            description=description_reader,
+            document=document_reader,
+            format_converter=converter,
+            extraction_failure=failure,
+        )
 
 
 class UnsafeClaimDirectoryError(ValueError):
@@ -560,6 +640,7 @@ def _process_single_claim(
     claim_dir: Path,
     config: AppConfig,
     *,
+    readers: ClaimReaders | None = None,
     answer_reader: AnswerReader | None = None,
     markdown_reader: MarkdownReader | None = None,
     description_reader: DescriptionReader | None = None,
@@ -567,8 +648,13 @@ def _process_single_claim(
 ) -> ClaimBundle:
     """Process one claim folder into a ClaimBundle.
 
+    Prefer a prebuilt ``readers`` bundle from the composition root so Docling and
+    extractors are not reconstructed per claim. Individual reader kwargs remain as
+    test injection seams when ``readers`` is omitted.
+
     :param claim_dir: Path to the claim folder.
     :param config: Application config (preprocessing + extraction).
+    :param readers: Optional prebuilt ``ClaimReaders`` (pipeline / batch init).
     :param answer_reader: Optional injected AnswerReader (tests).
     :param markdown_reader: Optional injected MarkdownReader (tests).
     :param description_reader: Optional injected DescriptionReader (tests).
@@ -577,35 +663,24 @@ def _process_single_claim(
     """
     prep = config.preprocessing
     sources = _classify_files(claim_dir, prep.document_formats)
+    claim_readers = readers or ClaimReaders.from_config(
+        config,
+        answer_reader=answer_reader,
+        markdown_reader=markdown_reader,
+        description_reader=description_reader,
+        document_reader=document_reader,
+    )
 
-    answer_reader = answer_reader or AnswerReader()
-    markdown_reader = markdown_reader or MarkdownReader()
-
-    if description_reader is None:
-        extractor = InformationExtractor(
-            target_model=BookingData,
-            model_name=config.extraction.model,
-            prompt=config.extraction.prompt,
-        )
-        description_reader = DescriptionReader(extractor=extractor)
-
-    if document_reader is None:
-        benford_checker = BenfordLawChecker(config.benford) if config.benford.enabled else None
-        document_reader = DocumentReader.from_config(
-            prep,
-            config.ocr_retry,
-            config.extraction_failure,
-            format_converter=FormatConverter(source_formats=prep.document_formats),
-            benford_checker=benford_checker,
-        )
-
-    ground_truth = _read_ground_truth(sources.answer_path, answer_reader)
-    booking_data, internal_data = _read_markdowns(sources.markdown_paths, markdown_reader)
+    ground_truth = _read_ground_truth(sources.answer_path, claim_readers.answer)
+    booking_data, internal_data = _read_markdowns(
+        sources.markdown_paths,
+        claim_readers.markdown,
+    )
     description_booking, description_text = _read_description(
         sources.description_path,
-        description_reader,
+        claim_readers.description,
     )
-    documents = _read_documents(sources.document_paths, document_reader)
+    documents = _read_documents(sources.document_paths, claim_readers.document)
 
     bundle = ClaimBundle(
         claim_id=claim_dir.name,
@@ -638,20 +713,22 @@ def run_pipeline(config: AppConfig, **reader_overrides: Any) -> list[ClaimBundle
 
     Extraction/Docling failures are logged; the run continues for remaining claims.
     Durable preprocessed artifacts are written by ``PreprocessingPipeline``, not here.
+    Readers are built once via ``ClaimReaders.from_config`` before the claim loop.
 
     :param config: Loaded AppConfig.
-    :param reader_overrides: Optional reader injections forwarded to ``_process_single_claim``.
+    :param reader_overrides: Optional reader injections for ``ClaimReaders.from_config``.
     :return: List of ClaimBundle results (one per claim folder processed).
     """
     data_dir = Path(config.preprocessing.data_dir)
     folders = _discover_claim_folders(data_dir)
     logger.info("Discovered %d claim folders under %s", len(folders), data_dir)
+    readers = ClaimReaders.from_config(config, **reader_overrides)
 
     bundles: list[ClaimBundle] = []
     for claim_dir in folders:
         logger.info("Processing %s", claim_dir.name)
         try:
-            bundle = _process_single_claim(claim_dir, config, **reader_overrides)
+            bundle = _process_single_claim(claim_dir, config, readers=readers)
             summary = _claim_document_summary(bundle)
             log_branch_decision(
                 logger,

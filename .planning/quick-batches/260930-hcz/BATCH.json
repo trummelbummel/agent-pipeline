@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "batch_id": "260930-hcz",
+  "created_at": "2026-09-30T11:29:59.785Z",
+  "options": {},
+  "base_revision": "7a2b1e77b776a324dce4a45b6b3aadf91d52db33",
+  "items": [
+    {
+      "quick_id": "260930-hd0",
+      "client_id": null,
+      "description": "GO-001: Pass OcrRetryConfig (or SignatureDetectSettings) into detect_signature_with_yolo instead of unpacking signature_model/weights/confidence; update call sites in document.py and tests. Independent; no depends_on.",
+      "status": "complete",
+      "depends_on": [],
+      "planned_files": [
+        "src/compliance/preprocessing/signature_detect.py",
+        "src/compliance/preprocessing/document.py",
+        "tests/test_preprocessing/test_document.py",
+        ".gsd/refactor.md"
+      ],
+      "directory": "quick/260930-hd0-go-001-pass-ocrretryconfig-or-signaturedetectsettings-into-d",
+      "worktree": null,
+      "dispatched_worktree": null,
+      "dispatched_branch": null,
+      "dispatched_base": null,
+      "wave": 0,
+      "commit": "222415236d04aaf8191e208a78442161073a1309",
+      "failure_reason": null
+    },
+    {
+      "quick_id": "260930-hd1",
+      "client_id": null,
+      "description": "GO-002: In PreprocessingPipeline._document_metadata_entries, construct ExtractionFailure from config.extraction_failure (not bare ExtractionFailure()); preserve empty-doc HITL behavior. Independent; no depends_on.",
+      "status": "complete",
+      "depends_on": [],
+      "planned_files": [
+        "src/compliance/workflows/pipeline.py",
+        "tests/test_workflows/test_pipeline.py",
+        ".gsd/refactor.md"
+      ],
+      "directory": "quick/260930-hd1-go-002-in-preprocessingpipeline-document-metadata-entries-co",
+      "worktree": null,
+      "dispatched_worktree": null,
+      "dispatched_branch": null,
+      "dispatched_base": null,
+      "wave": 1,
+      "commit": "4676b740aa51adbaee28e555543b52e4f0ca3b93",
+      "failure_reason": null
+    },
+    {
+      "quick_id": "260930-hd2",
+      "client_id": null,
+      "description": "GO-003: Decompose DocumentReader into composable Docling OCR / vision-retry / signature-verify / Benford collaborators with from_config (Phase 9 CheckSuite shape); preserve HITL flags and SignatureDetectionError. Blocks GO-004; files_modified centered on preprocessing/document.py and related tests.",
+      "status": "complete",
+      "depends_on": [],
+      "planned_files": [
+        "src/compliance/preprocessing/document.py",
+        "src/compliance/preprocessing/signature_detect.py",
+        "src/compliance/preprocessing/claim_batch.py",
+        "tests/test_preprocessing/test_document.py",
+        "tests/test_preprocessing/test_extraction_failure.py",
+        ".gsd/refactor.md",
+        "LOGIC.md"
+      ],
+      "directory": "quick/260930-hd2-go-003-decompose-documentreader-into-composable-docling-ocr",
+      "worktree": null,
+      "dispatched_worktree": null,
+      "dispatched_branch": null,
+      "dispatched_base": null,
+      "wave": 2,
+      "commit": "893b006bd2435bf3e6146d9a85bf1f8c5d98d43a",
+      "failure_reason": null
+    },
+    {
+      "quick_id": "260930-hd3",
+      "client_id": null,
+      "description": "GO-004: Add ClaimReaders.from_config built once in PreprocessingPipeline.__init__; pass readers into _process_single_claim so DocumentReader/Docling are not rebuilt per claim. Depends on GO-003; touches claim_batch.py and pipeline.py.",
+      "status": "complete",
+      "depends_on": [
+        "260930-hd2"
+      ],
+      "planned_files": [
+        "src/compliance/preprocessing/claim_batch.py",
+        "src/compliance/workflows/pipeline.py",
+        "tests/test_preprocessing/test_claim_batch.py",
+        "tests/test_workflows/test_pipeline.py",
+        ".gsd/refactor.md"
+      ],
+      "directory": "quick/260930-hd3-go-004-add-claimreaders-from-config-built-once-in-preprocess",
+      "worktree": null,
+      "dispatched_worktree": null,
+      "dispatched_branch": null,
+      "dispatched_base": null,
+      "wave": 3,
+      "commit": "0996ac6da54f18b7787ff71313f06a3cc8ef0f3e",
+      "failure_reason": null
+    }
+  ]
+}

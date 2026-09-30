@@ -6,10 +6,10 @@ current_phase_name: Denial-rule checkers in analysis pipeline
 current_plan: 5
 status: executing
 stopped_at: Completed 260929-n7w-PLAN.md (SR-013)
-last_updated: "2026-09-29T15:22:52.239Z"
+last_updated: "2026-09-30T11:41:34.273Z"
 last_activity: 2026-09-29
 last_activity_desc: Completed quick task 260929-mqy (SR-009)
-state_head: 7450f4dad9159518ed838b95908e603f10ecf31b
+state_head: 0996ac6da54f18b7787ff71313f06a3cc8ef0f3e
 progress:
   total_phases: 8
   completed_phases: 4
@@ -40,6 +40,7 @@ Progress: [████████░░] 80% (4/5 phases complete; Phase 05 pl
 
 ### Roadmap Evolution
 
+- Phase 9 added: Compositional checker refactor — split monolithic `Checker` into composable checks sharing one `LlmCheckClient`; `CheckSuite.from_config` built once per pipeline; behavior-preserving
 - Phase 8 added: Engineering improvements from `.gsd/IMPROVEMENTS.md` — prioritized decision safety, result integrity, evaluation validity, evidence association, API/configuration hardening, and policy-engine maintainability
 - Phase 7 added: Denial-rule checkers in analysis pipeline — extend ClaimPipeline Checker steps for LOGIC.md deny rules not covered by containment/contradicts (missing doc, healthy cert, identity, authenticity, incomplete, suspicious dating)
 - Phase 6 added: Prediction Evaluation — `src/evaluation` Evaluator compares predictions vs answer.json; confusion matrix, accuracy, F1
@@ -142,6 +143,12 @@ None.
 | 260926-bwk | Fix the stale prediction issue: preprocess must not delete analysis-authored predicted_answer | 2026-09-26 | aa87ffb | [260926-bwk-fix-the-stale-prediction-issue-preproces](./quick/260926-bwk-fix-the-stale-prediction-issue-preproces/) |
 | 260925-mqh | after ExtractionFailure a retry with an expensive model should be done | 2026-09-25 | 87de07c | [260925-mqh-after-extractionfailure-a-retry-with-an-](./quick/260925-mqh-after-extractionfailure-a-retry-with-an-/) |
 | 260925-mol | Checker class: modes containment (deterministic normalize+lowercase then LLM) and contradicts (LLM: True if claim contradicts text, False if supported); takes input and checks against a text | 2026-09-25 | 47de8d6 | [260925-mol-checker-class-modes-containment-determin](./quick/260925-mol-checker-class-modes-containment-determin/) |
+| 260930-hd0 | GO-001: Pass OcrRetryConfig into detect_signature_with_yolo | 2026-09-30 | 7a2b1e77b776a324dce4a45b6b3aadf91d52db33 | quick/260930-hd0-go-001-pass-ocrretryconfig-or-signaturedetectsettings-into-d |
+| 260930-hd1 | GO-002: Configured ExtractionFailure for empty-doc HITL | 2026-09-30 | 7a2b1e77b776a324dce4a45b6b3aadf91d52db33 | quick/260930-hd1-go-002-in-preprocessingpipeline-document-metadata-entries-co |
+| 260930-hd0 | GO-001: Pass OcrRetryConfig into YOLO signature detect | 2026-09-30 | 4676b74 | [260930-hd0-go-001-pass-ocrretryconfig](./quick/260930-hd0-go-001-pass-ocrretryconfig/) |
+| 260930-hd1 | GO-002: Configured ExtractionFailure for empty-doc HITL | 2026-09-30 | 4676b74 | [260930-hd1-go-002-extraction-failure-config](./quick/260930-hd1-go-002-extraction-failure-config/) |
+| 260930-hd2 | GO-003: Decompose DocumentReader into composable collaborators | 2026-09-30 | 893b006 | [260930-hd2-go-003-decompose-documentreader](./quick/260930-hd2-go-003-decompose-documentreader/) |
+| 260930-hd3 | GO-004: ClaimReaders.from_config once per pipeline | 2026-09-30 | 0996ac6 | [260930-hd3-go-004-claimreaders-from-config](./quick/260930-hd3-go-004-claimreaders-from-config/) |
 
 ## Session Continuity
 

@@ -5,12 +5,14 @@ import logging
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
+import ollama
 from langgraph.graph import END, START, StateGraph
 
 from compliance.branch_log import log_branch_decision
-from compliance.config.settings import AppConfig, ClassificationConfig
+from compliance.config.settings import AnalysisConfig, AppConfig
 from compliance.llm.chat import ChatFn
-from compliance.llm.classifier import CaseClassifier, ClassificationResult
+from compliance.llm.checks import CheckContext, CheckSuite
+from compliance.llm.classifier import CaseClassifier
 from compliance.policy import (
     ClaimAnalysisState,
     CoverageBranch,
@@ -24,6 +26,7 @@ from compliance.policy import (
     rule_set_for_claim,
     run_checks,
 )
+from compliance.policy.gates import gates_from_config
 from compliance.preprocessing.claim_batch import (
     _discover_claim_folders,
     _is_claim_folder,
@@ -59,12 +62,34 @@ class BatchAnalysisResult(NamedTuple):
     outcomes: tuple[ClaimRunOutcome, ...]
 
 
+class _StageClassifiers(NamedTuple):
+    """Analysis-stage classifiers built once from ``AnalysisConfig``."""
+
+    coverage: CaseClassifier
+    cancellation_reason: CaseClassifier
+    cancellation_document: CaseClassifier
+    personal_effects_document: CaseClassifier
+    missed_departure_document: CaseClassifier
+
+
+def _stage_classifiers(analysis: AnalysisConfig, chat_fn: ChatFn | None) -> _StageClassifiers:
+    return _StageClassifiers(
+        coverage=CaseClassifier.from_config(analysis.coverage, chat_fn),
+        cancellation_reason=CaseClassifier.from_config(analysis.cancellation_reason, chat_fn),
+        cancellation_document=CaseClassifier.from_config(analysis.cancellation_document, chat_fn),
+        personal_effects_document=CaseClassifier.from_config(analysis.personal_effects_document, chat_fn),
+        missed_departure_document=CaseClassifier.from_config(analysis.missed_departure_document, chat_fn),
+    )
+
+
 class ClaimPipeline:
     """Thin LangGraph orchestration over preprocessed claim artifacts."""
 
     def __init__(self, config: AppConfig, chat_fn: ChatFn | None = None) -> None:
         self._config = config
-        self._chat_fn = chat_fn
+        self._classifiers = _stage_classifiers(config.analysis, chat_fn)
+        self._check_suite = CheckSuite.from_config(config.checking, chat_fn or ollama.chat)
+        self._date_gates = gates_from_config(config.checking)
 
     @property
     def preprocessed_root(self) -> Path:
@@ -249,7 +274,7 @@ class ClaimPipeline:
         }
 
     def _classify_coverage_node(self, state: ClaimAnalysisState) -> dict[str, object]:
-        result = self._classify_stage(self._config.analysis.coverage, state["description_text"])
+        result = self._classifiers.coverage.classify(state["description_text"])
         routed = route_coverage(result, self._config.analysis.coverage)
         log_branch_decision(
             logger,
@@ -271,7 +296,7 @@ class ClaimPipeline:
             state,
             branch="classify_reason",
             reason="cancellation_reason_stage",
-            stage=self._config.analysis.cancellation_reason,
+            classifier=self._classifiers.cancellation_reason,
             text=state["description_text"],
             state_key="reason_labels",
         )
@@ -281,7 +306,7 @@ class ClaimPipeline:
             state,
             branch="classify_cancel_document",
             reason="cancellation_document_stage",
-            stage=self._config.analysis.cancellation_document,
+            classifier=self._classifiers.cancellation_document,
             text=state["supporting_document_text"],
             state_key="document_labels",
         )
@@ -291,7 +316,7 @@ class ClaimPipeline:
             state,
             branch="classify_pe_document",
             reason="personal_effects_document_stage",
-            stage=self._config.analysis.personal_effects_document,
+            classifier=self._classifiers.personal_effects_document,
             text=state["supporting_document_text"],
             state_key="document_labels",
         )
@@ -301,7 +326,7 @@ class ClaimPipeline:
             state,
             branch="classify_missed_document",
             reason="missed_departure_document_stage",
-            stage=self._config.analysis.missed_departure_document,
+            classifier=self._classifiers.missed_departure_document,
             text=state["supporting_document_text"],
             state_key="document_labels",
         )
@@ -312,7 +337,7 @@ class ClaimPipeline:
         *,
         branch: str,
         reason: str,
-        stage: ClassificationConfig,
+        classifier: CaseClassifier,
         text: str,
         state_key: str,
     ) -> dict[str, object]:
@@ -321,12 +346,12 @@ class ClaimPipeline:
         :param state: Current graph state (claim_id for branch log).
         :param branch: Branch-log name for this node.
         :param reason: Branch-log reason key.
-        :param stage: ClassificationConfig for the stage.
+        :param classifier: Prebuilt classifier for the stage.
         :param text: Input text for the classifier.
         :param state_key: ``reason_labels`` or ``document_labels``.
         :return: State update with the selected label codes.
         """
-        result = self._classify_stage(stage, text)
+        result = classifier.classify(text)
         log_branch_decision(logger, branch=branch, outcome="CLASSIFIED", reason=reason, claim=state.get("claim_id"))
         return {state_key: list(result.labels)}
 
@@ -337,12 +362,14 @@ class ClaimPipeline:
             required_documents=self._config.analysis.required_documents,
         )
         results = run_checks(
-            description_text=state["description_text"],
-            supporting_document_text=state["supporting_document_text"],
-            supporting_documents_text=state.get("supporting_documents_text") or "",
+            context=CheckContext(
+                description=state["description_text"],
+                document=state["supporting_document_text"],
+                booking=state.get("supporting_documents_text") or "",
+            ),
             rule_set=rule_set,
-            checking=self._config.checking,
-            chat_fn=self._chat_fn,
+            gates=self._date_gates,
+            suite=self._check_suite,
         )
         early_uncertain = results.departure_within_days or results.suspicious_dating
         skipped = ",".join(rule_set.skipped)
@@ -405,10 +432,6 @@ class ClaimPipeline:
         )
         return {"human_in_the_loop": hitl}
 
-    def _classify_stage(self, stage: ClassificationConfig, text: str) -> ClassificationResult:
-        """Classify ``text`` with the given analysis-stage config."""
-        return self._stage_classifier(stage).classify(text)
-
     def _published_generation(
         self,
         state: ClaimAnalysisState,
@@ -457,12 +480,3 @@ class ClaimPipeline:
 
     def _analysis_result_path(self, claim_id: str) -> Path:
         return self.results_root / claim_id / self._config.preprocessing.artifacts.analysis_result
-
-    def _stage_classifier(self, stage: ClassificationConfig) -> CaseClassifier:
-        return CaseClassifier(
-            labels=list(stage.labels),
-            model_name=stage.model,
-            prompt=stage.prompt,
-            other_label=stage.other_label,
-            chat_fn=self._chat_fn,
-        )

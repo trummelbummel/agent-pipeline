@@ -6,6 +6,7 @@ from typing import Annotated, NamedTuple
 import ollama
 from pydantic import BaseModel, ConfigDict, Field
 
+from compliance.config.settings import ClassificationConfig
 from compliance.llm.chat import ChatFn, parse_llm_json_object, response_content
 
 
@@ -73,6 +74,22 @@ class CaseClassifier(Classifier):
         self.prompt = prompt
         self.other_label = other_label
         self._chat: ChatFn = chat_fn or ollama.chat
+
+    @classmethod
+    def from_config(cls, stage: ClassificationConfig, chat_fn: ChatFn | None = None) -> CaseClassifier:
+        """Build a classifier for one configured classification stage.
+
+        :param stage: Stage config (labels, model, prompt, abstention label).
+        :param chat_fn: Optional chat callable for tests; defaults to ollama.chat.
+        :return: Classifier bound to the stage's vocabulary and prompt.
+        """
+        return cls(
+            labels=list(stage.labels),
+            model_name=stage.model,
+            prompt=stage.prompt,
+            other_label=stage.other_label,
+            chat_fn=chat_fn,
+        )
 
     def classify(self, text: str) -> ClassificationResult:
         """Call the LLM and parse labels with probability estimates.

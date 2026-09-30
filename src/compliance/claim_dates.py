@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import date
 
 from compliance.preprocessing.markdown import MarkdownPreprocessor
+from compliance.text_cues import (
+    DEFAULT_CARE_WINDOW_CUES,
+    DEFAULT_DOB_CUES,
+    DEFAULT_ISSUE_DATE_CUES,
+    text_mentions_any,
+    text_mentions_any_near,
+)
 
 # Calendar-date token patterns (order: ISO first, then day-first numerics, then English).
 _DATE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
@@ -177,28 +185,6 @@ def _departure_beyond_days(
     return (departure - today).days > within_days
 
 
-_ISSUE_STAMP_HINT = re.compile(
-    r"(?i)\b("
-    r"issue\s*date|date\s*of\s*issue|issued\s+on|issued\b|stamped\b|"
-    r"émission|emision|emisión|fecha\s+de\s+emisi[oó]n"
-    r")\b"
-)
-# Birth / DOB cues: drop calendar dates that appear in the same local window
-# (avoids UNCERTAIN from birth+admission on hospital certificates).
-_DOB_CUE = re.compile(
-    r"(?i)\b("
-    r"nata|nato|nati|born|birth|dob|d\.o\.b|"
-    r"nacimiento|geboren|geburt|né(?:e)?|née|nascida|nascido"
-    r")\b"
-)
-_CARE_WINDOW_HINT = re.compile(
-    r"(?i)\b("
-    r"care|admission|visit|discharge|consulta|hospitaliz|"
-    r"tratamiento|treatment|attending|ricover|dimess|ingreso|alta\b"
-    r")\b"
-)
-
-
 def _month_delta(left: date, right: date) -> int:
     """Absolute calendar-month distance between two dates.
 
@@ -246,18 +232,24 @@ def _dates_with_match_spans(text: str) -> list[tuple[date, int, int]]:
     return found
 
 
-def _is_dob_context(text: str, start: int, end: int, *, window: int = 40) -> bool:
+def _is_dob_context(
+    text: str,
+    start: int,
+    end: int,
+    dob_cues: Sequence[str],
+    *,
+    window: int = 40,
+) -> bool:
     """True when a birth/DOB cue appears near the date span.
 
     :param text: Full OCR text.
     :param start: Date token start index.
     :param end: Date token end index.
+    :param dob_cues: Config vocabulary for birth/DOB markers.
     :param window: Characters of left/right context to inspect.
     :return: Whether this date should be treated as a date of birth.
     """
-    left = max(0, start - window)
-    right = min(len(text), end + window)
-    return _DOB_CUE.search(text[left:right]) is not None
+    return text_mentions_any_near(text, start, end, dob_cues, window=window)
 
 
 def _suspicious_dating(
@@ -266,19 +258,23 @@ def _suspicious_dating(
     today: date,
     max_month_delta: int,
     consider_within_years: int = 5,
+    issue_date_cues: Sequence[str] = DEFAULT_ISSUE_DATE_CUES,
+    care_window_cues: Sequence[str] = DEFAULT_CARE_WINDOW_CUES,
+    dob_cues: Sequence[str] = DEFAULT_DOB_CUES,
 ) -> bool:
     """True when OCR dating is implausible vs reference today or care window.
 
     Uses existing calendar parsers only — no ad-hoc date parser. Eligible dates:
     within ``consider_within_years`` of ``today``, and not adjacent to a birth/DOB
-    cue (``nata`` / ``born`` / …). Farther or DOB-cued dates are ignored.
+    cue from ``dob_cues``. Farther or DOB-cued dates are ignored.
 
     Fires when:
     - an eligible OCR date differs from ``today`` by at least
       ``max_month_delta`` months (inclusive) and is either in the future or the
-      OCR text has real issue/issued cues (not a bare image ``Stamp`` label), or
-    - issue/issued wording co-occurs with care-window wording and the span
-      between the earliest and latest eligible OCR dates is at least
+      OCR text matches an ``issue_date_cues`` phrase (not a bare image ``Stamp``
+      label), or
+    - issue-date wording co-occurs with a ``care_window_cues`` phrase and the
+      span between the earliest and latest eligible OCR dates is at least
       ``max_month_delta`` months (same-episode admission+discharge does not fire).
 
     :param supporting_document_text: Medical/supporting OCR markdown.
@@ -286,6 +282,9 @@ def _suspicious_dating(
     :param max_month_delta: Inclusive absolute month threshold from config.
     :param consider_within_years: Inclusive year window around ``today``;
         dates outside are ignored as history.
+    :param issue_date_cues: Issue/stamp vocabulary from ``checking.issue_date_cues``.
+    :param care_window_cues: Care/admission vocabulary from ``checking.care_window_cues``.
+    :param dob_cues: Birth/DOB vocabulary from ``checking.dob_cues``.
     :return: Whether suspicious-dating UNCERTAIN should fire.
     """
     dated_spans = _dates_with_match_spans(supporting_document_text)
@@ -293,18 +292,18 @@ def _suspicious_dating(
         d
         for d, start, end in dated_spans
         if abs(d.year - today.year) <= consider_within_years
-        and not _is_dob_context(supporting_document_text, start, end)
+        and not _is_dob_context(supporting_document_text, start, end, dob_cues)
     }
     if not dates:
         return False
-    has_issue_stamp = _ISSUE_STAMP_HINT.search(supporting_document_text) is not None
+    has_issue_stamp = text_mentions_any(supporting_document_text, issue_date_cues)
     for d in dates:
         if _month_delta(d, today) < max_month_delta:
             continue
         # Future dates, or issue/issued-labeled past dates with large month skew.
         if d > today or has_issue_stamp:
             return True
-    if not has_issue_stamp or _CARE_WINDOW_HINT.search(supporting_document_text) is None:
+    if not has_issue_stamp or not text_mentions_any(supporting_document_text, care_window_cues):
         return False
     if len(dates) < 2:
         return False

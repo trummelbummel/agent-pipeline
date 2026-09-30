@@ -31,9 +31,7 @@ class BenfordResult(BaseModel):
     observed_frequencies: dict[int, float] = Field(
         description="Measured first-significant-digit distribution (digits 1-9)"
     )
-    expected_frequencies: dict[int, float] = Field(
-        description="Benford's theoretical distribution (digits 1-9)"
-    )
+    expected_frequencies: dict[int, float] = Field(description="Benford's theoretical distribution (digits 1-9)")
     chi_squared: float = Field(description="Chi-squared statistic vs expected")
     conformity: bool = Field(description="True when within configured threshold")
     total_coefficients: int = Field(description="Non-zero DCT coefficients analysed")
@@ -131,7 +129,7 @@ class BenfordLawChecker:
 
         log_vals = np.log10(nonzero)
         fractional = log_vals - np.floor(log_vals)
-        digits = np.floor(10 ** fractional).astype(np.int64)
+        digits = np.floor(10**fractional).astype(np.int64)
         digits = np.clip(digits, 1, 9)
         return digits
 

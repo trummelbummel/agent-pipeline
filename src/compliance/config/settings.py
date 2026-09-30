@@ -7,6 +7,13 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from compliance.text_cues import (
+    DEFAULT_CARE_WINDOW_CUES,
+    DEFAULT_DOB_CUES,
+    DEFAULT_ISSUE_DATE_CUES,
+    DEFAULT_MEDICAL_MENTION_CUES,
+)
+
 # Shared vocabulary between the config contract and pipeline routing branches so the two cannot drift.
 CoverageRoute = Literal["cancellation", "personal_effects", "missed_departure"]
 
@@ -228,6 +235,12 @@ class CheckingConfig(StrictConfigModel):
         many years of reference today are eligible for suspicious dating;
         farther dates are ignored as history. Birth/DOB cues also drop a date.
         Default 5 years.
+    :param issue_date_cues: Lexical phrases that mark an issue/stamp date on OCR
+        (e.g. ``issued``, ``fait à``). Matched via normalized cue vocabulary.
+    :param care_window_cues: Lexical phrases that mark care/admission/discharge
+        wording for the dating span check.
+    :param dob_cues: Lexical phrases that mark a nearby date as birth/DOB so it
+        is ignored by suspicious dating.
     :param transport_retry: Retry/backoff for checker chat transport failures
         (connection / timeout / server error); exhaustion → CheckOutcome.ERROR.
     """
@@ -243,6 +256,9 @@ class CheckingConfig(StrictConfigModel):
     departure_uncertain_within_days: int = Field(default=14, ge=0)
     suspicious_dating_max_month_delta: int = Field(default=1, ge=0)
     suspicious_dating_consider_within_years: int = Field(default=5, ge=0)
+    issue_date_cues: list[str] = Field(default_factory=lambda: list(DEFAULT_ISSUE_DATE_CUES))
+    care_window_cues: list[str] = Field(default_factory=lambda: list(DEFAULT_CARE_WINDOW_CUES))
+    dob_cues: list[str] = Field(default_factory=lambda: list(DEFAULT_DOB_CUES))
     transport_retry: TransportRetryConfig = Field(default_factory=TransportRetryConfig)
 
 
@@ -290,6 +306,8 @@ class AnalysisConfig(StrictConfigModel):
     :param personal_effects_document: Document type for personal-effects coverage.
     :param missed_departure_document: Document type for missed-departure coverage.
     :param required_documents: Acceptable document codes per coverage/reason path.
+    :param medical_mention_cues: Lexical phrases in the claim description that
+        mark a medical reason (missed-departure medical-doc narrowing).
     """
 
     coverage: CoverageClassificationConfig
@@ -298,6 +316,7 @@ class AnalysisConfig(StrictConfigModel):
     personal_effects_document: ClassificationConfig
     missed_departure_document: ClassificationConfig
     required_documents: RequiredDocumentsConfig = Field(default_factory=RequiredDocumentsConfig)
+    medical_mention_cues: list[str] = Field(default_factory=lambda: list(DEFAULT_MEDICAL_MENTION_CUES))
 
     @model_validator(mode="after")
     def _validated_required_document_cross_references(self) -> AnalysisConfig:
@@ -461,8 +480,6 @@ class OcrRetryConfig(StrictConfigModel):
         YOLO signature detection on the document image.
     :param signature_model: HuggingFace repo id or local ``.pt`` path for YOLO weights.
     :param signature_weights: Filename inside the HF repo (ignored for local ``.pt``).
-    :param signature_confidence: Accept threshold for YOLO max box confidence;
-        below this (or no boxes) sets ``human_in_the_loop`` after verify.
     """
 
     enabled: bool = False
@@ -475,7 +492,6 @@ class OcrRetryConfig(StrictConfigModel):
     on_missing_signature: bool = True
     signature_model: str = "tech4humans/yolov8s-signature-detector"
     signature_weights: str = "yolov8s.pt"
-    signature_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
 
 
 class UploadLimitsConfig(StrictConfigModel):

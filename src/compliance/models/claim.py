@@ -85,11 +85,11 @@ class DocumentMetaData(NanAwareModel):
 
     :param source_file: Basename of the source raster/PDF when known.
     :param has_signature: True when DocumentFigureClassifier top class is signature
-        or YOLO verify scored at/above ``signature_confidence``.
+        or YOLO verify returned any box score.
     :param extraction_probability: Aggregate Docling confidence in ``[0, 1]``.
     :param faulty_extraction: True when ExtractionFailure flags unusable OCR text.
     :param human_in_the_loop: True when review is required (faulty, low OCR
-        confidence, or YOLO signature score below ``signature_confidence``).
+        confidence, or YOLO signature verify found no boxes).
     :param failure_reasons: Machine-readable ExtractionFailure reason codes.
     :param retry_used: True when a vision OCR retry was attempted after faulty Docling.
     :param retry_model: Vision model name from config when a retry was attempted.

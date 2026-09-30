@@ -190,6 +190,16 @@ def test_load_config_reads_suspicious_dating_max_month_delta() -> None:
     assert within == 5
 
 
+def test_load_config_reads_dating_and_medical_cue_vocabularies() -> None:
+    """Issue/care/DOB and medical-mention cues load as non-empty string lists."""
+    config = load_config("config.yaml")
+    assert "fait à" in config.checking.issue_date_cues
+    assert "hospitalisation" in config.checking.care_window_cues
+    assert "nata" in config.checking.dob_cues
+    assert "medical" in config.analysis.medical_mention_cues
+    assert all(isinstance(cue, str) and cue.strip() for cue in config.checking.issue_date_cues)
+
+
 def test_load_config_reads_analysis_section() -> None:
     config = load_config("config.yaml")
     stages = (
@@ -208,6 +218,7 @@ def test_load_config_reads_analysis_section() -> None:
     assert "2" in config.analysis.coverage.labels
     assert "3" in config.analysis.coverage.labels
     assert "Trip cancellation or rescheduling" in config.analysis.coverage.prompt
+    assert "sports camps" in config.analysis.coverage.prompt
     assert "Personal Effects" in config.analysis.coverage.prompt
     assert "Missed Departure or Missed Connection" in config.analysis.coverage.prompt
     assert "1" in config.analysis.cancellation_reason.labels
@@ -277,7 +288,6 @@ def test_load_config_reads_ocr_retry_section() -> None:
     assert config.ocr_retry.on_missing_signature is True
     assert config.ocr_retry.signature_model
     assert config.ocr_retry.signature_weights
-    assert config.ocr_retry.signature_confidence > 0
 
 
 def test_load_config_reads_classification_labels_and_other() -> None:
@@ -287,6 +297,7 @@ def test_load_config_reads_classification_labels_and_other() -> None:
     assert "2" in labels
     assert "3" in labels
     assert "Trip cancellation or rescheduling" in config.classification.prompt
+    assert "sports camps" in config.classification.prompt
     assert "Personal Effects" in config.classification.prompt
     assert "Missed Departure or Missed Connection" in config.classification.prompt
     assert config.classification.other_label.strip()
@@ -632,7 +643,7 @@ def test_invalid_label_vocabulary_rejected(kwargs: dict[str, object], match: str
             },
             id="confidence_negative",
         ),
-        pytest.param("ocr_retry", {"signature_confidence": 2.0}, id="signature_confidence_high"),
+        pytest.param("ocr_retry", {"signature_confidence": 0.25}, id="signature_confidence_removed"),
         pytest.param("benford", {"block_size": 0}, id="block_size_zero"),
         pytest.param("benford", {"chi_squared_threshold": 0}, id="chi_squared_zero"),
         pytest.param("checking", {"identity_max_edit_distance": -1}, id="identity_distance_negative"),

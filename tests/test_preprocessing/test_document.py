@@ -282,7 +282,6 @@ def test_yolo_signature_verify_sets_has_signature_when_docling_misses(
             on_missing_signature=True,
             signature_model="tech4humans/yolov8s-signature-detector",
             signature_weights="yolov8s.pt",
-            signature_confidence=0.25,
         ),
         signature_detect_fn=detect,
     )
@@ -328,8 +327,8 @@ def test_yolo_signature_verify_keeps_false_when_detector_finds_none(
     detect.assert_called_once_with(src)
 
 
-def test_yolo_signature_below_threshold_sets_hitl(tmp_path: Path) -> None:
-    """Weak YOLO score below signature_confidence → HITL, has_signature false."""
+def test_yolo_signature_any_score_sets_has_signature(tmp_path: Path) -> None:
+    """Any YOLO box score (no accept threshold) → has_signature true."""
     src = tmp_path / "cert.png"
     src.write_bytes(b"png")
     format_converter = MagicMock(spec=FormatConverter)
@@ -340,7 +339,10 @@ def test_yolo_signature_below_threshold_sets_hitl(tmp_path: Path) -> None:
         document_formats=["png"],
         confidence_threshold=0.7,
         format_converter=format_converter,
-        document_converter=_mock_converter("faint mark", 0.9),
+        document_converter=_mock_converter(
+            "CERTIFICADO MEDICO\nPaciente: Ada Lovelace\nDiagnostico: fractura.\n",
+            0.9,
+        ),
         ocr_retry=OcrRetryConfig(
             enabled=True,
             model="llava",
@@ -350,16 +352,15 @@ def test_yolo_signature_below_threshold_sets_hitl(tmp_path: Path) -> None:
             on_human_in_the_loop=False,
             on_missing_signature=True,
             signature_model="tech4humans/yolov8s-signature-detector",
-            signature_confidence=0.25,
         ),
         signature_detect_fn=detect,
     )
     result = reader.read(src)
 
-    assert result.metadata.has_signature is False
+    assert result.metadata.has_signature is True
     assert result.metadata.signature_verify_used is True
     assert result.metadata.signature_probability == pytest.approx(0.12)
-    assert result.metadata.human_in_the_loop is True
+    assert result.metadata.human_in_the_loop is False
     assert not is_nan_scalar(result.metadata.signature_probability)
 
 

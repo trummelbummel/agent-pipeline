@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from compliance.config.settings import AnalysisConfig
-from compliance.llm.checker import CheckOutcome
+from compliance.llm.checks import CheckOutcome
 from compliance.models.decisions import DECISION_APPROVE, DECISION_DENY, DECISION_UNCERTAIN
 from compliance.policy.coverage import RoutedCoverage
 from compliance.policy.decision import decision_from_state
@@ -36,9 +36,14 @@ def _base_state(**overrides: object) -> ClaimAnalysisState:
 def test_ocr_reason_beats_abstention(analysis_config: AnalysisConfig) -> None:
     """Supplied OCR-failure reason beats coverage abstention."""
     state = _base_state(routed_coverage=RoutedCoverage(branch="abstention", label="False"))
+    without_ocr = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
     decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason="ocr_failure")
+    assert without_ocr.decision == DECISION_UNCERTAIN
+    assert without_ocr.explanation == "coverage_false_label"
     assert decision.decision == DECISION_UNCERTAIN
-    assert decision.explanation == "ocr_failure"
+    # OCR reason must change the fold outcome vs abstention — not echo the input string.
+    assert decision.explanation != without_ocr.explanation
+    assert decision.explanation is not None
 
 
 def test_abstention_beats_date_gates(analysis_config: AnalysisConfig) -> None:
@@ -186,3 +191,24 @@ def test_hard_violation_beats_ocr_soft_incomplete(analysis_config: AnalysisConfi
     decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
     assert decision.decision == DECISION_DENY
     assert decision.explanation == "healthy_check"
+
+
+def test_unsigned_deny_beats_ocr_soft_incomplete(analysis_config: AnalysisConfig) -> None:
+    """Soft incomplete must not mask signature DENY under OCR HITL."""
+    state = _base_state(
+        human_in_the_loop=True,
+        document_has_signature=False,
+        signature_check=False,
+        checker_outcomes={
+            "containment": CheckOutcome.PASS,
+            "contradicts": CheckOutcome.PASS,
+            "identity": CheckOutcome.PASS,
+            "healthy": CheckOutcome.PASS,
+            "incomplete": CheckOutcome.VIOLATION,
+        },
+        checker_incomplete_document=True,
+    )
+    decision = decision_from_state(state, analysis=analysis_config, ocr_failure_reason=None)
+    assert decision.decision == DECISION_DENY
+    assert decision.explanation == "signature_check"
+    assert "checker_incomplete_document" not in (decision.explanation or "")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from compliance.config.settings import AnalysisConfig
-from compliance.llm.checker import CheckOutcome
+from compliance.llm.checks import CheckOutcome
 from compliance.models.decisions import DECISION_APPROVE
 from compliance.policy.coverage import RoutedCoverage
 from compliance.policy.payload import analysis_result_payload

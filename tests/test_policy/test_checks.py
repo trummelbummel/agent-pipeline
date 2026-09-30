@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from compliance.llm.checker import CheckOutcome
+from compliance.llm.checks import CheckOutcome
 from compliance.policy.checks import checker_state_updates, legacy_booleans_from_outcomes
 from compliance.policy.rules import CheckerRuleSet
 

@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/theresa/Desktop/projects/compliance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, cov-7.1.0, anyio-4.15.1, Faker-40.39.0
+collecting ... collected 1 item
+
+tests/test_workflows/test_claim_pipeline.py::test_coverage_label_order_does_not_remap_branch FAILED [100%]
+
+=================================== FAILURES ===================================
+_______________ test_coverage_label_order_does_not_remap_branch ________________
+tests/test_workflows/test_claim_pipeline.py:399: in test_coverage_label_order_does_not_remap_branch
+    assert payload.get("reason_label_codes", []) == expected["reason_label_codes"]
+E   AssertionError: assert [] == ['2']
+E
+E     Right contains one more item: '2'
+E
+E     Full diff:
+E     + []
+E     - [
+E     -     '2',
+E     - ]
+------------------------------ Captured log call -------------------------------
+WARNING  compliance.llm.checker:checker.py:486 LLM checker JSON missing bool result
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_claim_pipeline.py::test_coverage_label_order_does_not_remap_branch
+============================== 1 failed in 0.24s ===============================

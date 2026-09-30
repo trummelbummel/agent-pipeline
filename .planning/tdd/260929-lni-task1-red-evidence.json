@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -m pytest -q tests/test_evaluation/test_evaluator.py::test_ground_truth_without_results_folder_is_counted_incorrect --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_ground_truth_without_results_folder_is_counted_incorrect\n# AttributeError: EvaluationResult has no attribute 'population'\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_ground_truth_without_results_folder_is_counted_incorrect",
+  "targetFile": "tests/test_evaluation/test_evaluator.py",
+  "expected": "ground-truth-only claim (no results folder) is in population; n_ground_truth=2, n_scored=1, n_missing_prediction=1, coverage_rate=0.5, raw accuracy=0.5",
+  "actual": "EvaluationResult has no population attribute \u2014 ground-truth-first reshape not implemented yet"
+}

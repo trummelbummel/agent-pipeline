@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_predicted_answer_io.py::test_remove_stale_preserves_analysis_source_without_analysis_result tests/test_workflows/test_pipeline.py::test_process_claim_preserves_analysis_predicted_answer_without_decision -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_remove_stale_preserves_analysis_source_without_analysis_result\nnot ok 2 - test_process_claim_preserves_analysis_predicted_answer_without_decision\n# tests 2\n# pass 0\n# fail 2\n",
+  "targetTest": "test_remove_stale_preserves_analysis_source_without_analysis_result",
+  "targetFile": "tests/test_workflows/test_predicted_answer_io.py",
+  "expected": "remove_stale_preprocess_prediction returns False and keeps analysis-source predicted_answer when analysis_result.json is absent",
+  "actual": "AssertionError: assert True is False (stub blind-unlink returns True and deletes the file)"
+}

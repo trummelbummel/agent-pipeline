@@ -5,5 +5,5 @@
   "targetTest": "test_routes_coverage_other_skips_reason_and_docs",
   "targetFile": "tests/test_workflows/test_claim_pipeline.py",
   "expected": "coverage other_label skips reason/doc/checker and still writes analysis_result with coverage fields only",
-  "actual": "FileNotFoundError: other_label still stubs to END — no analysis_result.json written under results_dir"
+  "actual": "FileNotFoundError: other_label still stubs to END \u2014 no analysis_result.json written under results_dir"
 }

@@ -291,3 +291,14 @@ Success criteria:
 Plans:
 
 - [ ] TBD (run /gsd-plan-phase 8 to break down)
+
+### Phase 9: Compositional checker refactor
+
+**Goal:** Replace the monolithic `Checker` (mode-string dispatch, five prompt attributes, transport + parsing + identity matching in one class) with small composable checks behind a shared `Check` protocol. A single `LlmCheckClient` owns model, transport retry, and JSON parsing; each check (containment, contradicts, identity, healthy, incomplete) receives only the client and its own prompt/threshold. A `CheckSuite.from_config(CheckingConfig, chat)` is built once at pipeline construction instead of unpacking config into a new `Checker` per claim. Deterministic date gates (departure, suspicious dating) stay separate from `CheckOutcome` checks. Decisions, outcome polarity, legacy booleans, and check order must be unchanged.
+**Requirements**: TBD
+**Depends on:** Phase 8
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 09-01-PLAN.md — Composable checks (`compliance.llm.checks`), date `Gate`s, `CheckSuite` built once in `ClaimPipeline` (complete 2026-09-30)

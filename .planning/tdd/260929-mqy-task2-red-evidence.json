@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -m pytest -q tests/test_preprocessing/test_claim_batch.py::test_validate_claim_root_rejects_symlink --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_validate_claim_root_rejects_symlink\n# ImportError: cannot import name 'ClaimRootContainmentError'\n# before containment helper existed\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_validate_claim_root_rejects_symlink",
+  "targetFile": "tests/test_preprocessing/test_claim_batch.py",
+  "expected": "ClaimRootContainmentError with reason symlinked_claim_root",
+  "actual": "ImportError \u2014 ClaimRootContainmentError not yet defined (pre-GREEN)"
+}

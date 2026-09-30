@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -m pytest -q tests/test_policy/test_coverage.py::test_route_coverage_selection_order_independent --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_route_coverage_selection_order_independent\n# AssertionError: assert RoutedCoverage(branch='cancellation', label='__stub__') == RoutedCoverage(branch='personal_effects', label='2')\n# stub route_coverage ignores probabilities; selection-order independence not implemented\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_route_coverage_selection_order_independent",
+  "targetFile": "tests/test_policy/test_coverage.py",
+  "expected": "route_coverage returns identical RoutedCoverage(branch='personal_effects', label='2') for labels ['1','2'] and ['2','1'] with the same probability map",
+  "actual": "AssertionError: stub returns RoutedCoverage(branch='cancellation', label='__stub__') for both orders \u2014 real highest-probability routing not implemented"
+}

@@ -1,0 +1,7 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+E   AttributeError: 'EvaluationResult' object has no attribute 'policy'
+/Users/theresa/Desktop/projects/compliance/tests/test_evaluation/test_evaluator.py:632: AttributeError: 'EvaluationResult' object has no attribute 'policy'
+=========================== short test summary info ============================
+FAILED tests/test_evaluation/test_evaluator.py::test_policy_metric_credits_acceptable_decision
+1 failed in 0.23s

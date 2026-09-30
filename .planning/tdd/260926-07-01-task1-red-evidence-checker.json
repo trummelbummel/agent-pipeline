@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_llm/test_checker.py::test_checker_not_authentic_true_when_ocr_format_suspect -v --tb=short",
+  "exitCode": 1,
+  "output": "FAILED test_checker_not_authentic_true_when_ocr_format_suspect\nE   ValueError: Unsupported checker mode: 'not_authentic'",
+  "targetTest": "test_checker_not_authentic_true_when_ocr_format_suspect",
+  "targetFile": "tests/test_llm/test_checker.py",
+  "expected": "check(..., mode='not_authentic') returns True when LLM returns {\"result\": true}",
+  "actual": "ValueError: Unsupported checker mode: 'not_authentic'"
+}

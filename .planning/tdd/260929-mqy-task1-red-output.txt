@@ -1,0 +1,10 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______________ test_write_upload_stream_rejects_file_too_large ________________
+tests/test_api/test_uploads.py:40: in test_write_upload_stream_rejects_file_too_large
+    with pytest.raises(UploadTooLargeError) as exc_info:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE UploadTooLargeError
+=========================== short test summary info ============================
+FAILED tests/test_api/test_uploads.py::test_write_upload_stream_rejects_file_too_large
+1 failed in 0.24s

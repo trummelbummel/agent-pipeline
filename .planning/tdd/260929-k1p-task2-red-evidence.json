@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -c \"ClassificationConfig(..., bogus=1)\"",
+  "exitCode": 1,
+  "output": "not ok 1 - test_unknown_config_key_rejected\n# accepted unknown key bogus\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_unknown_config_key_rejected",
+  "targetFile": "tests/test_config/test_settings.py",
+  "expected": "ValidationError rejecting unknown key bogus",
+  "actual": "accepted unknown key bogus (extra ignored)"
+}

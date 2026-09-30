@@ -467,6 +467,8 @@ From `make analyze` / `evaluation_metrics.json` (GT-first population; latest sco
 | `human_in_the_loop` true / false | **16 / 9** (scored predictions; OCR/YOLO-only) |
 
 
+These figures are **in-sample**: the same 25 claims drove the error analysis and the threshold tweaks, so they are not a held-out result. A false APPROVE is worse than a false DENY, which is why perfect DENY recall with leftover signature false DENYs is the acceptable shape.
+
 `raw` = exact label match. `policy` also credits a non-nan GT `acceptable_decision` (this run: soft credits on **20**, **23** — both `acceptable_decision=DENY`). Re-score without re-analysis:
 
 ```bash

@@ -1,0 +1,26 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.1.1, pluggy-1.6.0 -- /Users/theresa/Desktop/projects/compliance/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/theresa/Desktop/projects/compliance
+configfile: pyproject.toml
+plugins: logfire-5.1.0, langsmith-0.14.0, anyio-4.15.1, Faker-40.39.0
+collecting ... collected 2 items
+
+tests/test_workflows/test_predicted_answer_io.py::test_remove_stale_preserves_analysis_source_without_analysis_result FAILED [ 50%]
+tests/test_workflows/test_pipeline.py::test_process_claim_preserves_analysis_predicted_answer_without_decision FAILED [100%]
+
+=================================== FAILURES ===================================
+_____ test_remove_stale_preserves_analysis_source_without_analysis_result ______
+tests/test_workflows/test_predicted_answer_io.py:62: in test_remove_stale_preserves_analysis_source_without_analysis_result
+    assert removed is False
+E   assert True is False
+___ test_process_claim_preserves_analysis_predicted_answer_without_decision ____
+tests/test_workflows/test_pipeline.py:253: in test_process_claim_preserves_analysis_predicted_answer_without_decision
+    assert predicted_path.is_file()
+E   AssertionError: assert False
+E    +  where False = is_file()
+E    +    where is_file = PosixPath('/private/var/folders/x5/mpf3snzn59v2vmczbgy18bs80000gn/T/pytest-of-theresa/pytest-208/test_process_claim_preserves_a0/results_out/claim 9/predicted_answer.json').is_file
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_predicted_answer_io.py::test_remove_stale_preserves_analysis_source_without_analysis_result
+FAILED tests/test_workflows/test_pipeline.py::test_process_claim_preserves_analysis_predicted_answer_without_decision
+============================== 2 failed in 3.56s ===============================

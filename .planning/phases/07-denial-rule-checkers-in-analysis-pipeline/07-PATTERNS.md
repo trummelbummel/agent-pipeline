@@ -396,20 +396,20 @@ Do **not** rename code keys to match old LOGIC names (IMP-013).
 ## Shared Patterns
 
 ### Injectable `chat_fn` (no live Ollama)
-**Source:** `ClaimPipeline.__init__` (claim_pipeline.py:258–260) + Checker `chat_fn=`  
-**Apply to:** All unit tests for new modes / pipeline DENY-UNCERTAIN paths  
+**Source:** `ClaimPipeline.__init__` (claim_pipeline.py:258–260) + Checker `chat_fn=`
+**Apply to:** All unit tests for new modes / pipeline DENY-UNCERTAIN paths
 ```python
 pipeline = ClaimPipeline(config, chat_fn=chat_fn)
 checker = Checker(..., chat_fn=chat)
 ```
 
 ### Config-driven prompts / thresholds
-**Source:** `CheckingConfig` + `config.yaml` `checking:`  
-**Apply to:** authenticity, incomplete, optional suspicious-dating thresholds  
+**Source:** `CheckingConfig` + `config.yaml` `checking:`
+**Apply to:** authenticity, incomplete, optional suspicious-dating thresholds
 Never hardcode prompts in `Checker` or pipeline helpers.
 
 ### Decision polarity conventions
-**Source:** `_violated_checkers` / `_decision_from_state`  
+**Source:** `_violated_checkers` / `_decision_from_state`
 **Apply to:**
 | Flag | True means | Outcome |
 |------|------------|---------|
@@ -420,15 +420,15 @@ Never hardcode prompts in `Checker` or pipeline helpers.
 | Phase 07 `checker_suspicious_dating` | uncertain | UNCERTAIN (with date flags, before DENY) |
 
 ### Early-exit key omission
-**Source:** `_checker_results` + `_analysis_result_payload` (`"key" in state`)  
+**Source:** `_checker_results` + `_analysis_result_payload` (`"key" in state`)
 **Apply to:** Any new LLM flags — omit from payload when date UNCERTAIN short-circuits; tests assert absence.
 
 ### Medical-document gating
-**Source:** `_identity_required_applies` / `_signature_required_applies`  
+**Source:** `_identity_required_applies` / `_signature_required_applies`
 **Apply to:** authenticity + incomplete LLM modes (cancellation coverage + codes `1`/`4`).
 
 ### Logging without PII
-**Source:** `log_branch_decision` in `_run_checker_node`  
+**Source:** `log_branch_decision` in `_run_checker_node`
 **Apply to:** Log flag outcomes / branch reason, not raw OCR names.
 
 ## No Analog Found
@@ -439,7 +439,7 @@ Never hardcode prompts in `Checker` or pipeline helpers.
 
 ## Metadata
 
-**Analog search scope:** `src/compliance/llm/`, `src/compliance/workflows/`, `src/compliance/config/`, `config.yaml`, `tests/test_llm/`, `tests/test_workflows/`, `tests/test_config/`  
-**Files scanned:** 7 tracked analogs + LOGIC.md (untracked)  
-**Tracked-source gate:** all analogs verified via `git ls-files` except LOGIC.md  
+**Analog search scope:** `src/compliance/llm/`, `src/compliance/workflows/`, `src/compliance/config/`, `config.yaml`, `tests/test_llm/`, `tests/test_workflows/`, `tests/test_config/`
+**Files scanned:** 7 tracked analogs + LOGIC.md (untracked)
+**Tracked-source gate:** all analogs verified via `git ls-files` except LOGIC.md
 **Pattern extraction date:** 2026-09-26

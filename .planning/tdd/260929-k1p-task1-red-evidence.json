@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_workflows/test_claim_pipeline.py::test_coverage_label_order_does_not_remap_branch -v --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_coverage_label_order_does_not_remap_branch\n# AssertionError: assert [] == ['2']\n# positional zip remapped code 1 (index 2 under reversed labels) to missed_departure\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_coverage_label_order_does_not_remap_branch",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "With labels reversed to [3,2,1,False] and code 1 winning at 0.9, claim still routes cancellation path (reason_label_codes=['2'], medical certificate, APPROVE, call_count=7)",
+  "actual": "AssertionError: assert [] == ['2'] \u2014 positional zip remapped code 1 to missed_departure (index 2), skipping reason stage"
+}

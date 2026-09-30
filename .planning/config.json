@@ -6,7 +6,7 @@
   "workflow": {
     "use_worktrees": false,
     "auto_advance": true,
-    "_auto_chain_active": false
+    "_auto_chain_active": true
   },
   "context_window": 200000,
   "git": {

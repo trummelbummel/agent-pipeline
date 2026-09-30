@@ -4,6 +4,6 @@
   "output": "not ok 1 - test_uncertain_when_checker_suspicious_dating\nnot ok 2 - test_suspicious_dating_false_when_coherent_dates\nnot ok 3 - test_suspicious_dating_precedes_deny\nnot ok 4 - test_load_config_reads_suspicious_dating_max_year_delta\n# tests 4\n# pass 0\n# fail 4\n",
   "targetTest": "test_uncertain_when_checker_suspicious_dating",
   "targetFile": "tests/test_workflows/test_claim_pipeline.py",
-  "expected": "implausible OCR year skew → UNCERTAIN with explanation checker_suspicious_dating; LLM keys omitted",
+  "expected": "implausible OCR year skew \u2192 UNCERTAIN with explanation checker_suspicious_dating; LLM keys omitted",
   "actual": "AssertionError: assert None is True (checker_suspicious_dating not yet wired)"
 }

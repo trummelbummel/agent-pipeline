@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -m pytest -q tests/test_workflows/test_claim_pipeline.py::test_non_medical_branch_cannot_deny_for_medical_semantics --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_non_medical_branch_cannot_deny_for_medical_semantics\n# AssertionError: assert 'UNCERTAIN' == 'APPROVE'\n# PE claim still early-exits via suspicious_dating; no checker_rule_set\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_non_medical_branch_cannot_deny_for_medical_semantics",
+  "targetFile": "tests/test_workflows/test_claim_pipeline.py",
+  "expected": "PE claim with hostile medical OCR APPROVE; checker_rule_set=personal_effects_non_medical; checker_skipped lists all seven gated checks; no healthy/signature/dating/departure keys; only containment+contradicts prompts",
+  "actual": "AssertionError: assert 'UNCERTAIN' == 'APPROVE' \u2014 suspicious_dating still runs on non-medical PE path and early-exits before medical gating"
+}

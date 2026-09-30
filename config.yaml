@@ -55,8 +55,11 @@ classification:
     Classify the claim description into one or more of the allowed coverage labels.
     Labels are numeric codes. Use this mapping:
 
-    1 = Trip cancellation or rescheduling — If your trip is cancelled or rescheduled
-    for a covered reason, you may be eligible for compensation.
+    1 = Trip cancellation or rescheduling — If a trip, booking, or prepaid
+    organized activity is cancelled, rescheduled, or unused for a covered reason
+    (including sports camps / stages, courses, training stays, and similar prepaid
+    activities missed because of illness or medical inability to participate),
+    you may be eligible for compensation.
     2 = Personal Effects — If your personal belongings are lost or damaged during
     your trip, you may be eligible for compensation.
     3 = Missed Departure or Missed Connection — If you miss a scheduled departure
@@ -103,14 +106,6 @@ checking:
     (no illness supporting a medical cancellation claim),
     {"result": false} if the document describes illness, injury, hospitalization,
     incapacity, or does not assert that the patient is healthy.
-  authenticity_prompt: |
-    Decide whether the supporting document OCR looks inauthentic, fabricated, or
-    the wrong document format for a medical certificate / hospital admission
-    (e.g. plain photo of a person instead of a certificate, text-only paste with
-    no letterhead/stamp structure, obvious tamper or garbled forgery cues).
-    Return JSON only: {"result": true} if the document is not authentic or wrong
-    format (violation), {"result": false} if it appears to be a genuine medical
-    or hospital document of the expected type.
   incomplete_prompt: |
     Decide whether a medical supporting document is incomplete — missing required
     clinical fields such as diagnosis, condition/illness description, or discharge /
@@ -120,16 +115,72 @@ checking:
     (violation), {"result": false} if diagnosis/condition and dating fields are
     adequately present.
   # Medical path: upcoming departure farther than n days → UNCERTAIN (recovery unclear).
-  # Within n days (or past flights) → continue through remaining checkers.
-  # Off: abs/past-flight overfire hurt DENY cases (healthy / identity); re-enable when
-  # gated to future departures only.
-  departure_uncertain_enabled: false
+  # Past flights and departures within n days → continue through remaining checkers
+  # (healthy / identity DENY still apply). Gate ranks before identity DENY.
+  departure_uncertain_enabled: true
   departure_uncertain_within_days: 14
   # Inclusive month skew: |OCR date − reference today| in months ≥ n → UNCERTAIN.
   suspicious_dating_max_month_delta: 1
   # Only OCR dates within ±n years of reference today are considered for
-  # suspicious dating; farther dates are treated as DOB / irrelevant history.
-  suspicious_dating_consider_within_years: 2
+  # suspicious dating; farther dates are treated as history. Birth/DOB cues
+  # drop a date even inside this window.
+  suspicious_dating_consider_within_years: 5
+  # Lexical cue vocabularies for the dating gate (accent-insensitive match).
+  # Keep lists small; if they sprawl across languages, prefer LLM date-role
+  # extraction as a non-deterministic fallback (see README).
+  issue_date_cues:
+    - "issue date"
+    - "date of issue"
+    - "issued on"
+    - "issued"
+    - "stamped"
+    - "émission"
+    - "emision"
+    - "emisión"
+    - "fecha de emisión"
+    - "fecha de emision"
+    - "fait à"
+    - "fait a"
+  care_window_cues:
+    - "care"
+    - "admission"
+    - "visit"
+    - "discharge"
+    - "consulta"
+    - "hospitalisation"
+    - "hospitalization"
+    - "hospitalized"
+    - "hospitalize"
+    - "pris en charge"
+    - "tratamiento"
+    - "treatment"
+    - "attending"
+    - "ricovero"
+    - "ricoverata"
+    - "ricoverato"
+    - "ricoverati"
+    - "dimesso"
+    - "dimessa"
+    - "dimessi"
+    - "ingreso"
+    - "alta"
+  dob_cues:
+    - "nata"
+    - "nato"
+    - "nati"
+    - "born"
+    - "birth"
+    - "dob"
+    - "d.o.b"
+    - "nacimiento"
+    - "geboren"
+    - "geburt"
+    # Phrase form — bare "né"/"née" normalize to "ne" and hit French negation.
+    - "né le"
+    - "née le"
+    - "ne le"
+    - "nascida"
+    - "nascido"
   # Checker chat transport failures (connection / timeout / server error) are
   # retried with delay backoff_seconds * 2**attempt; after exhaustion the check
   # is recorded as ERROR → UNCERTAIN + human_in_the_loop (SR-008).
@@ -161,8 +212,11 @@ analysis:
       Classify the claim description into one or more of the allowed coverage labels.
       Labels are numeric codes. Use this mapping:
 
-      1 = Trip cancellation or rescheduling — If your trip is cancelled or rescheduled
-      for a covered reason, you may be eligible for compensation.
+      1 = Trip cancellation or rescheduling — If a trip, booking, or prepaid
+      organized activity is cancelled, rescheduled, or unused for a covered reason
+      (including sports camps / stages, courses, training stays, and similar prepaid
+      activities missed because of illness or medical inability to participate),
+      you may be eligible for compensation.
       2 = Personal Effects — If your personal belongings are lost or damaged during
       your trip, you may be eligible for compensation.
       3 = Missed Departure or Missed Connection — If you miss a scheduled departure
@@ -253,18 +307,29 @@ analysis:
     labels:
       - "1"
       - "2"
+      - "3"
       - "False"
     label_names:
       "1": Incident report or documentation explaining the cause of delay
       "2": Proof of booking
+      "3": Medical certificate or hospital documentation explaining the miss
     other_label: "False"
     model: qwen2.5:7b
     prompt: |
       Classify the missed-departure supporting document from the document text.
       Labels are numeric codes. Use this mapping:
 
-      1 = Incident report or documentation explaining the cause of delay
-      2 = Proof of booking
+      1 = Incident report or documentation explaining the cause of delay — non-medical
+      cause evidence such as a traffic/accident report or delay notice (not a medical
+      certificate)
+      2 = Proof of booking — boarding pass, ticket, or booking confirmation
+      3 = Medical certificate or hospital documentation explaining the miss — any
+      medical/hospital form, fitness-to-fly note, or clinical certificate used as the
+      reason for missing the departure (including certificates that declare the patient
+      healthy)
+
+      Prefer 3 over 1 whenever the document is a medical or hospital form, even if it
+      also explains a delay.
 
       Return JSON with keys "labels" (array of selected label codes as strings) and
       "probabilities" (object mapping each allowed label code to a float in [0, 1]).
@@ -272,6 +337,37 @@ analysis:
       as a label — only the numeric codes (or {other_label}).
   # Acceptable supporting-document codes for missing-documentation checks.
   # Keys/codes match coverage, cancellation_reason, and document stage labels above.
+  # Missed-departure: description phrases that require a medical supporting doc.
+  # Same maintenance tradeoff as checking.*_cues — see README.
+  medical_mention_cues:
+    - "medical"
+    - "hospital"
+    - "hospitalisation"
+    - "hospitalization"
+    - "doctor"
+    - "physician"
+    - "clinic"
+    - "illness"
+    - "diagnosis"
+    - "diagnosed"
+    - "sick"
+    - "surgery"
+    - "surgical"
+    - "médical"
+    - "medicale"
+    - "hôpital"
+    - "hopital"
+    - "médecin"
+    - "clinique"
+    - "médico"
+    - "medico"
+    - "hospitalización"
+    - "hospitalizacion"
+    - "enfermedad"
+    - "medizin"
+    - "arzt"
+    - "krankenhaus"
+    - "erkrankung"
   required_documents:
     # Cancellation reason code → acceptable cancellation_document codes
     cancellation_by_reason:
@@ -284,6 +380,12 @@ analysis:
     missed_departure:
       - "1"            # Incident / delay documentation
       - "2"            # Proof of booking
+      - "3"            # Medical / hospital documentation
+    # On missed-departure: only these document codes open medical gated checks.
+    # When the claim description mentions medical, only these codes are acceptable
+    # (booking/incident alone → checker_missing_documentation DENY; claim-2 shape).
+    missed_departure_medical_codes:
+      - "3"
     # Medical certificate + hospital admission must show has_signature in metadata
     signature_required_codes:
       - "1"
@@ -323,8 +425,6 @@ ocr_retry:
   on_missing_signature: true
   signature_model: tech4humans/yolov8s-signature-detector
   signature_weights: yolov8s.pt
-  # Accept YOLO max box conf; below this (or no boxes) → human_in_the_loop
-  signature_confidence: 0.25
   model: Maternion/LightOnOCR-2:1b
   prompt: |
     Transcribe all readable text from this document image into clean markdown

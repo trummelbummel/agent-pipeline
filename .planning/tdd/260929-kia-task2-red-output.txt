@@ -1,0 +1,144 @@
+FFFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+______________ test_checker_rule_set_matrix[cancel_medical_cert] _______________
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/compliance/workflows/claim_pipeline.py:545: in _run_checker_node
+    results = self._checker_results(
+src/compliance/workflows/claim_pipeline.py:931: in _checker_results
+    outcomes = self._checker_outcomes(
+src/compliance/workflows/claim_pipeline.py:1007: in _checker_outcomes
+    outcomes["incomplete"] = checker.check(
+src/compliance/llm/checker.py:221: in check
+    return self._boolean_check(self._prompt_for_mode(mode), claim, text, mode=mode)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/compliance/llm/checker.py:330: in _boolean_check
+    content = chat_content_with_retry(
+src/compliance/llm/chat.py:88: in chat_content_with_retry
+    response = chat_fn(**chat_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/unittest/mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/unittest/mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/unittest/mock.py:1200: in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+E   StopIteration
+E   During task with name 'run_checker' and id '5f9fbdec-1653-bca5-016e-63999547516f'
+
+The above exception was the direct cause of the following exception:
+tests/test_workflows/test_claim_pipeline.py:1323: in test_checker_rule_set_matrix
+    result_path = pipeline.analyze_claim(claim_dir)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/compliance/workflows/claim_pipeline.py:359: in analyze_claim
+    graph.invoke({"claim_id": claim_dir.name, "input_root": str(input_root)})
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+E   RuntimeError: generator raised StopIteration
+------------------------------ Captured log call -------------------------------
+WARNING  compliance.llm.checker:checker.py:505 LLM identity name JSON invalid
+________________ test_checker_rule_set_matrix[cancel_hospital] _________________
+.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py:207: in tick
+    run_with_retry(
+.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py:617: in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:707: in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py:447: in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/compliance/workflows/claim_pipeline.py:545: in _run_checker_node
+    results = self._checker_results(
+src/compliance/workflows/claim_pipeline.py:931: in _checker_results
+    outcomes = self._checker_outcomes(
+src/compliance/workflows/claim_pipeline.py:1007: in _checker_outcomes
+    outcomes["incomplete"] = checker.check(
+src/compliance/llm/checker.py:221: in check
+    return self._boolean_check(self._prompt_for_mode(mode), claim, text, mode=mode)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/compliance/llm/checker.py:330: in _boolean_check
+    content = chat_content_with_retry(
+src/compliance/llm/chat.py:88: in chat_content_with_retry
+    response = chat_fn(**chat_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/unittest/mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/unittest/mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.12.12-macos-aarch64-none/lib/python3.12/unittest/mock.py:1200: in _execute_mock_call
+    result = next(effect)
+             ^^^^^^^^^^^^
+E   StopIteration
+E   During task with name 'run_checker' and id '603b980f-edba-c41f-d484-ba87fbec4657'
+
+The above exception was the direct cause of the following exception:
+tests/test_workflows/test_claim_pipeline.py:1323: in test_checker_rule_set_matrix
+    result_path = pipeline.analyze_claim(claim_dir)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/compliance/workflows/claim_pipeline.py:359: in analyze_claim
+    graph.invoke({"claim_id": claim_dir.name, "input_root": str(input_root)})
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:3913: in invoke
+    for chunk in self.stream(
+.venv/lib/python3.12/site-packages/langgraph/pregel/main.py:2967: in stream
+    for _ in runner.tick(
+E   RuntimeError: generator raised StopIteration
+------------------------------ Captured log call -------------------------------
+WARNING  compliance.llm.checker:checker.py:505 LLM identity name JSON invalid
+_________________ test_checker_rule_set_matrix[cancel_police] __________________
+tests/test_workflows/test_claim_pipeline.py:1331: in test_checker_rule_set_matrix
+    assert chat_fn.call_count == len(chat_fn.side_effect)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: object of type 'list_iterator' has no len()
+__________________ test_checker_rule_set_matrix[cancel_jury] ___________________
+tests/test_workflows/test_claim_pipeline.py:1331: in test_checker_rule_set_matrix
+    assert chat_fn.call_count == len(chat_fn.side_effect)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: object of type 'list_iterator' has no len()
+________________ test_checker_rule_set_matrix[personal_effects] ________________
+tests/test_workflows/test_claim_pipeline.py:1331: in test_checker_rule_set_matrix
+    assert chat_fn.call_count == len(chat_fn.side_effect)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: object of type 'list_iterator' has no len()
+________________ test_checker_rule_set_matrix[missed_departure] ________________
+tests/test_workflows/test_claim_pipeline.py:1331: in test_checker_rule_set_matrix
+    assert chat_fn.call_count == len(chat_fn.side_effect)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: object of type 'list_iterator' has no len()
+_____________ test_suspicious_dating_skipped_on_non_medical_branch _____________
+tests/test_workflows/test_claim_pipeline.py:1372: in test_suspicious_dating_skipped_on_non_medical_branch
+    assert chat_fn.call_count == len(chat_fn.side_effect)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: object of type 'list_iterator' has no len()
+_________________ test_skipped_checks_have_no_recorded_result __________________
+tests/test_workflows/test_claim_pipeline.py:1401: in test_skipped_checks_have_no_recorded_result
+    assert medical_chat.call_count == len(medical_chat.side_effect)
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: object of type 'list_iterator' has no len()
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_claim_pipeline.py::test_checker_rule_set_matrix[cancel_medical_cert]
+FAILED tests/test_workflows/test_claim_pipeline.py::test_checker_rule_set_matrix[cancel_hospital]
+FAILED tests/test_workflows/test_claim_pipeline.py::test_checker_rule_set_matrix[cancel_police]
+FAILED tests/test_workflows/test_claim_pipeline.py::test_checker_rule_set_matrix[cancel_jury]
+FAILED tests/test_workflows/test_claim_pipeline.py::test_checker_rule_set_matrix[personal_effects]
+FAILED tests/test_workflows/test_claim_pipeline.py::test_checker_rule_set_matrix[missed_departure]
+FAILED tests/test_workflows/test_claim_pipeline.py::test_suspicious_dating_skipped_on_non_medical_branch
+FAILED tests/test_workflows/test_claim_pipeline.py::test_skipped_checks_have_no_recorded_result
+8 failed, 94 deselected in 0.60s

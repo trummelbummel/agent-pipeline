@@ -1,0 +1,7 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+E   ImportError: cannot import name 'ClaimRootContainmentError' from 'compliance.preprocessing.claim_batch' (/Users/theresa/Desktop/projects/compliance/src/compliance/preprocessing/claim_batch.py)
+/Users/theresa/Desktop/projects/compliance/tests/test_preprocessing/test_claim_batch.py:174: ImportError: cannot import name 'ClaimRootContainmentError' from 'compliance.preprocessing.claim_batch' (/Users/theresa/Desktop/projects/compliance/src/compliance/preprocessing/claim_batch.py)
+=========================== short test summary info ============================
+FAILED tests/test_preprocessing/test_claim_batch.py::test_validate_claim_root_rejects_symlink
+1 failed in 0.04s

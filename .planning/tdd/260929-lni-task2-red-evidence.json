@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -m pytest -q tests/test_evaluation/test_evaluator.py::test_policy_metric_credits_acceptable_decision --tb=line",
+  "exitCode": 1,
+  "output": "not ok 1 - test_policy_metric_credits_acceptable_decision\n# AttributeError: EvaluationResult has no attribute 'policy'\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_policy_metric_credits_acceptable_decision",
+  "targetFile": "tests/test_evaluation/test_evaluator.py",
+  "expected": "raw accuracy 0.0 and policy accuracy 1.0 for acceptable-decision credit; diverging matrix cells; shared n",
+  "actual": "EvaluationResult has no policy attribute \u2014 named policy MetricSet not implemented yet"
+}

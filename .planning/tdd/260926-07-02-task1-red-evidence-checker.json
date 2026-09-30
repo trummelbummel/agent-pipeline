@@ -1,0 +1,9 @@
+{
+  "command": "uv run pytest tests/test_llm/test_checker.py::test_checker_incomplete_true_when_required_medical_fields_missing -v --tb=short",
+  "exitCode": 1,
+  "output": "FAILED test_checker_incomplete_true_when_required_medical_fields_missing\nE   ValueError: Unsupported checker mode: 'incomplete'",
+  "targetTest": "test_checker_incomplete_true_when_required_medical_fields_missing",
+  "targetFile": "tests/test_llm/test_checker.py",
+  "expected": "check(..., mode='incomplete') returns True when LLM returns {\"result\": true}",
+  "actual": "ValueError: Unsupported checker mode: 'incomplete'"
+}

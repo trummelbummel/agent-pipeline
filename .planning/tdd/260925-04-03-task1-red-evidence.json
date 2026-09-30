@@ -5,5 +5,5 @@
   "targetTest": "test_routes_personal_effects",
   "targetFile": "tests/test_workflows/test_claim_pipeline.py",
   "expected": "Personal Effects coverage routes to personal_effects_document then Checker then persist; reason_labels empty; document_labels from PE stage; analysis_result written",
-  "actual": "FileNotFoundError: PE coverage still routes to END stub — no analysis_result.json written under results_dir"
+  "actual": "FileNotFoundError: PE coverage still routes to END stub \u2014 no analysis_result.json written under results_dir"
 }

@@ -1,0 +1,88 @@
+FFFFFFF                                                                  [100%]
+=================================== FAILURES ===================================
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...s', label='2')
+
+      Differing attributes:
+      ['branch', 'label']
+
+      Drill down into differing attribute branch:
+        branch: 'cancellation' != 'personal_effects'
+        - personal_effects...
+
+      ...Full output truncated (7 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:23: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...s', label='2')
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...label='False')
+
+      Differing attributes:
+      ['branch', 'label']
+
+      Drill down into differing attribute branch:
+        branch: 'cancellation' != 'abstention'
+        - abstention...
+
+      ...Full output truncated (7 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:37: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...label='False')
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...s', label='2')
+
+      Differing attributes:
+      ['branch', 'label']
+
+      Drill down into differing attribute branch:
+        branch: 'cancellation' != 'personal_effects'
+        - personal_effects...
+
+      ...Full output truncated (7 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:60: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...s', label='2')
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...e', label='3')
+
+      Differing attributes:
+      ['branch', 'label']
+
+      Drill down into differing attribute branch:
+        branch: 'cancellation' != 'missed_departure'
+        - missed_departure...
+
+      ...Full output truncated (7 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:80: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...e', label='3')
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...', label='99')
+
+      Differing attributes:
+      ['branch', 'label']
+
+      Drill down into differing attribute branch:
+        branch: 'cancellation' != 'abstention'
+        - abstention...
+
+      ...Full output truncated (7 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:91: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...', label='99')
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...e', label='3')
+
+      Differing attributes:
+      ['branch', 'label']
+
+      Drill down into differing attribute branch:
+        branch: 'cancellation' != 'missed_departure'
+        - missed_departure...
+
+      ...Full output truncated (7 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:113: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...e', label='3')
+E   AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...n', label='1')
+
+      Omitting 1 identical items, use -vv to show
+      Differing attributes:
+      ['label']
+
+      Drill down into differing attribute label:
+        label: '__stub__' != '1'...
+
+      ...Full output truncated (3 lines hidden), use '-vv' to show
+/Users/theresa/Desktop/projects/compliance/tests/test_policy/test_coverage.py:113: AssertionError: assert RoutedCoverag...el='__stub__') == RoutedCoverag...n', label='1')
+=========================== short test summary info ============================
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_selection_order_independent
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_positive_vs_abstention_by_probability
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_tie_breaks_by_config_order
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_missing_probability_counts_as_zero
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_unmapped_label_abstains
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_highest_probability_wins[labels0-probabilities0-missed_departure-3]
+FAILED tests/test_policy/test_coverage.py::test_route_coverage_highest_probability_wins[labels1-probabilities1-cancellation-1]
+7 failed in 0.03s

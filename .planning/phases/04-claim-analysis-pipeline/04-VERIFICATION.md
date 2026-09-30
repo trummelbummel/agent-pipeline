@@ -38,8 +38,8 @@ decision_coverage:
 
 **Phase Goal:** ClaimPipeline LangGraph over preprocessed claims — coverage/reason/document classifiers + Checker, local LLM from config.
 
-**Verified:** 2026-09-25T15:39:01Z  
-**Status:** passed  
+**Verified:** 2026-09-25T15:39:01Z
+**Status:** passed
 **Re-verification:** No — initial verification
 
 ## Goal Achievement
@@ -141,8 +141,8 @@ Skipped — no `*-CONTEXT.md` in the phase directory (requirements-only planning
 | `tests/test_workflows/test_claim_pipeline.py` | R010–R014, R016 | 14 | 0 | 0 | Behavioral / value | PASS |
 | `tests/test_config/test_settings.py` | R015 | analysis-focused | 0 | 0 | Value | PASS |
 
-**Disabled tests on requirements:** 0  
-**Circular patterns detected:** 0  
+**Disabled tests on requirements:** 0
+**Circular patterns detected:** 0
 **Insufficient assertions:** 0
 
 ### Anti-Patterns Found
@@ -163,5 +163,5 @@ None. Classification graph steps 1–5 are implemented with config-exact label r
 
 ## VERIFICATION PASSED
 
-_Verified: 2026-09-25T15:39:01Z_  
+_Verified: 2026-09-25T15:39:01Z_
 _Verifier: Claude (gsd-verifier)_

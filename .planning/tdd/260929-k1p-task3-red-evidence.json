@@ -1,0 +1,9 @@
+{
+  "command": "uv run python mismatch AppConfig positive labels",
+  "exitCode": 1,
+  "output": "not ok 1 - test_classification_and_coverage_vocabulary_must_match\n# mismatch accepted\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_classification_and_coverage_vocabulary_must_match",
+  "targetFile": "tests/test_config/test_settings.py",
+  "expected": "ValidationError naming both positive label sets",
+  "actual": "AppConfig accepted classification={1,2} vs coverage={1}"
+}

@@ -1,0 +1,18 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_________ test_analyze_claim_cancellation_path_writes_analysis_result __________
+tests/test_workflows/test_claim_pipeline.py:443: in test_analyze_claim_cancellation_path_writes_analysis_result
+    assert payload["checker_rule_set"] == "cancellation_medical"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'checker_rule_set'
+__________ test_non_medical_branch_cannot_deny_for_medical_semantics ___________
+tests/test_workflows/test_claim_pipeline.py:1113: in test_non_medical_branch_cannot_deny_for_medical_semantics
+    assert payload["decision"] == "APPROVE"
+E   AssertionError: assert 'UNCERTAIN' == 'APPROVE'
+E
+E     - APPROVE
+E     + UNCERTAIN
+=========================== short test summary info ============================
+FAILED tests/test_workflows/test_claim_pipeline.py::test_analyze_claim_cancellation_path_writes_analysis_result
+FAILED tests/test_workflows/test_claim_pipeline.py::test_non_medical_branch_cannot_deny_for_medical_semantics
+2 failed, 92 deselected in 0.37s

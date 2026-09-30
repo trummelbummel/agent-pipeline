@@ -1,0 +1,9 @@
+{
+  "command": "uv run python -m pytest -q tests/test_workflows/test_artifact_publication.py::test_interrupted_promote_leaves_no_valid_generation --tb=short",
+  "exitCode": 1,
+  "output": "not ok 1 - test_interrupted_promote_leaves_no_valid_generation\n# NotImplementedError from stub publish_claim_generation\n# tests 1\n# pass 0\n# fail 1\n",
+  "targetTest": "test_interrupted_promote_leaves_no_valid_generation",
+  "targetFile": "tests/test_workflows/test_artifact_publication.py",
+  "expected": "interrupted promote leaves prior generation valid; newer artifacts report run_id_mismatch",
+  "actual": "NotImplementedError from stub publish_claim_generation \u2014 publication not implemented yet"
+}

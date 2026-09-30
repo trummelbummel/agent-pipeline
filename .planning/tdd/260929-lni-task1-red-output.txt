@@ -1,0 +1,10 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_ground_truth_without_results_folder_is_counted_incorrect _________
+tests/test_evaluation/test_evaluator.py:437: in test_ground_truth_without_results_folder_is_counted_incorrect
+    assert result.population.n_ground_truth == 2
+           ^^^^^^^^^^^^^^^^^
+E   AttributeError: 'EvaluationResult' object has no attribute 'population'
+=========================== short test summary info ============================
+FAILED tests/test_evaluation/test_evaluator.py::test_ground_truth_without_results_folder_is_counted_incorrect
+1 failed in 0.24s
